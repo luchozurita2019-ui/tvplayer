@@ -1,44 +1,26 @@
 name: Build macOS Installer
-
 on:
   push:
     branches: [ main ]
   workflow_dispatch:
-
 jobs:
   build-macos:
     runs-on: macos-latest
     steps:
-      - name: Descargar el código fuente
+      - name: Descargar el código
         uses: actions/checkout@v4
-        with:
-          path: app_src
-
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
         with:
           channel: 'stable'
-
       - name: Habilitar soporte de escritorio para macOS
         run: flutter config --enable-macos-desktop
-
-      - name: Crear un proyecto Flutter oficial (genera macos/ correctamente)
-        run: flutter create --platforms=macos --org com.iptvplayer --project-name iptv_player flutter_app
-
-      - name: Insertar nuestro código dentro del proyecto generado
-        run: |
-          rm -rf flutter_app/lib
-          cp -r app_src/lib flutter_app/lib
-          cp app_src/pubspec.yaml flutter_app/pubspec.yaml
-
+      - name: Generar el proyecto nativo de macOS (carpeta macos/)
+        run: flutter create --platforms=macos .
       - name: Instalar dependencias
-        working-directory: flutter_app
         run: flutter pub get
-
       - name: Compilar la app (release)
-        working-directory: flutter_app
         run: flutter build macos --release
-
       - name: Empaquetar como .dmg instalable
         run: |
           brew install create-dmg
@@ -49,8 +31,7 @@ jobs:
             --icon-size 100 \
             --app-drop-link 450 200 \
             "dist/IPTV-Player-Installer.dmg" \
-            "flutter_app/build/macos/Build/Products/Release/iptv_player.app" || true
-
+            "build/macos/Build/Products/Release/iptv_player.app" || true
       - name: Subir el instalador como artefacto descargable
         uses: actions/upload-artifact@v4
         with:
