@@ -1,0 +1,40 @@
+name: iptv_player
+description: Reproductor de listas IPTV M3U rápido, fluido y multiplataforma.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.3.0 <4.0.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # --- Reproducción de video/audio ---
+  # media_kit usa libmpv/FFmpeg por debajo: decodificación nativa, GPU,
+  # muy superior en fluidez a un WebView o a video_player estándar.
+  # Soporta HLS/TS/M3U8 (streams IPTV en vivo) de forma nativa.
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5 # trae los binarios nativos para todas las plataformas
+
+  # --- Estado de la app ---
+  provider: ^6.1.2
+
+  # --- Red / descarga de listas M3U ---
+  http: ^1.2.2
+
+  # --- Persistencia local (listas, favoritos, última posición) ---
+  shared_preferences: ^2.3.2
+
+  # --- Utilidades ---
+  path_provider: ^2.1.4
+  cupertino_icons: ^1.0.8
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
