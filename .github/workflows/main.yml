@@ -1,4 +1,4 @@
-name: Build macOS Installer
+nname: Build macOS Installer
 on:
   push:
     branches: [ main ]
@@ -17,6 +17,9 @@ jobs:
         run: flutter config --enable-macos-desktop
       - name: Generar el proyecto nativo de macOS (carpeta macos/)
         run: flutter create --platforms=macos .
+      - name: Ajustar deployment target de macOS (media_kit requiere 10.15+)
+        run: |
+          sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj
       - name: Instalar dependencias
         run: flutter pub get
       - name: Compilar la app (release)
@@ -31,9 +34,10 @@ jobs:
             --icon-size 100 \
             --app-drop-link 450 200 \
             "dist/IPTV-Player-Installer.dmg" \
-            "build/macos/Build/Products/Release/iptv_player.app" || true
+            "build/macos/Build/Products/Release/iptv_player.app"
       - name: Subir el instalador como artefacto descargable
         uses: actions/upload-artifact@v4
         with:
           name: IPTV-Player-Installer
           path: dist/IPTV-Player-Installer.dmg
+          if-no-files-found: error
