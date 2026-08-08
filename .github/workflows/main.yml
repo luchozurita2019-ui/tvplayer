@@ -32,6 +32,18 @@ jobs:
       - name: Generar el proyecto nativo de macOS
         run: flutter create --platforms=macos .
 
+      - name: Habilitar conexiones salientes a Internet en macOS
+        run: |
+          for file in macos/Runner/DebugProfile.entitlements macos/Runner/Release.entitlements; do
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.network.client bool true" "$file" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :com.apple.security.network.client true" "$file"
+          done
+
+          echo "Debug/Profile entitlements:"
+          /usr/libexec/PlistBuddy -c "Print :com.apple.security.network.client" macos/Runner/DebugProfile.entitlements
+          echo "Release entitlements:"
+          /usr/libexec/PlistBuddy -c "Print :com.apple.security.network.client" macos/Runner/Release.entitlements
+
       - name: Ajustar deployment target de macOS
         run: |
           sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj || true
