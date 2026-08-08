@@ -33,7 +33,7 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _watchdogInterval = Duration(seconds: 2);
-  static const Duration _runtimeStatsInterval = Duration(seconds: 2);
+  static const Duration _runtimeStatsInterval = Duration(seconds: 1);
   static const String _fastProbeSize = '131072';
   static const String _normalProbeSize = '5000000';
 
@@ -77,7 +77,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _audioChannels;
   int? _audioSampleRate;
   double? _lastCacheSeconds;
+  double? _networkReadBytesPerSecond;
+  bool _coreIdle = false;
   int _softRecoveryCount = 0;
+  int _networkRecoveryCount = 0;
 
   Timer? _watchdogTimer;
   Timer? _runtimeStatsTimer;
@@ -104,20 +107,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
       Duration(seconds: _effectiveSettings.connectTimeoutSeconds);
 
   Duration get _underrunGrace {
-    final seconds = math.max(
-      3.0,
-      _effectiveSettings.recoveryBufferSeconds + 1.5,
+    // Un corte pequeño debe tener margen para recuperarse sin reconstruir
+    // el canal, pero no esperamos varios segundos con la imagen congelada.
+    final seconds = math.min(
+      2.5,
+      math.max(1.25, _effectiveSettings.recoveryBufferSeconds + 0.5),
     );
     return Duration(milliseconds: (seconds * 1000).round());
   }
 
-  double get _targetCacheSeconds => math.max(
-        1.0,
-        math.max(
-          _effectiveSettings.readaheadSeconds,
-          _effectiveSettings.recoveryBufferSeconds + 1.0,
-        ),
-      );
+  int get _forwardBufferMb {
+    // El modo automático puede conservar el zapping rápido sin limitar la
+    // reserva de red a solo 8 MB. El tamaño máximo no obliga a esperar antes
+    // de mostrar imagen: únicamente permite acumular más colchón en segundo
+    // plano cuando el servidor puede entregar datos por delante del vivo.
+    if (_effectiveSettings.profile == BufferProfile.auto) {
+      return math.max(16, _effectiveSettings.bufferMb);
+    }
+    return _effectiveSettings.bufferMb;
+  }
+
+  double get _targetCacheSeconds {
+    final floor = switch (_effectiveSettings.profile) {
+      BufferProfile.ultraFast => 5.0,
+      BufferProfile.balanced => 8.0,
+      BufferProfile.stable => 15.0,
+      BufferProfile.auto => _effectiveSettings.bufferMb >= 32 ? 12.0 : 8.0,
+      BufferProfile.custom => math.max(4.0, _effectiveSettings.readaheadSeconds),
+    };
+
+    return math.max(
+      floor,
+      math.max(
+        _effectiveSettings.readaheadSeconds * 2.0,
+        _effectiveSettings.recoveryBufferSeconds + 3.0,
+      ),
+    );
+  }
 
   @override
   void initState() {
@@ -273,6 +299,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty('cache-pause', 'no');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
+
+        // Mantener la lectura hacia delante de forma continua. Con la
+        // histéresis en 0 mpv no llena por bloques y luego deja de leer hasta
+        // que la caché cae: intenta aprovechar constantemente el ancho de
+        // banda disponible del servidor.
+        await platform.setProperty('demuxer-hysteresis-secs', '0');
+        await platform.setProperty('demuxer-hysteresis-bytes', '0');
+
+        // IPTV no necesita un back-buffer grande. Reservamos la memoria para
+        // datos futuros y aumentamos moderadamente el buffer de I/O entre la
+        // red y el demuxer (128 KiB es el valor habitual de mpv).
+        await platform.setProperty('demuxer-max-back-bytes', '1MiB');
+        await platform.setProperty('demuxer-donate-buffer', 'no');
+        await platform.setProperty('stream-buffer-size', '512KiB');
       }
     } catch (_) {
       // Una plataforma sin libmpv puede ignorar estas optimizaciones.
@@ -308,7 +348,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
         await platform.setProperty(
           'demuxer-max-bytes',
-          '${_effectiveSettings.bufferMb}MiB',
+          '${_forwardBufferMb}MiB',
         );
         await platform.setProperty(
           'demuxer-lavf-probesize',
@@ -328,7 +368,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           await platform.setProperty(
             'demuxer-lavf-o',
             'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-                'reconnect_delay_max=2,rw_timeout=8000000',
+                'reconnect_on_network_error=1,reconnect_on_http_error=5xx,'
+                'multiple_requests=1,reconnect_delay_max=1,'
+                'rw_timeout=3000000',
           );
         } else {
           await platform.setProperty('demuxer-lavf-o', '');
@@ -392,13 +434,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _softRecovering = true;
     if (mounted) setState(() => _errorMessage = null);
 
-    // Etapa 1: no descartamos datos. Simplemente reafirmamos Play y damos
-    // oportunidad a FFmpeg/mpv de continuar con la conexión existente.
+    // Etapa 1: FFmpeg ya dispone de reconexión HTTP interna. Damos un
+    // margen corto para que la misma conexión vuelva sin vaciar paquetes.
     try {
       await _player.play();
     } catch (_) {}
 
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    await Future<void>.delayed(const Duration(milliseconds: 700));
     if (!mounted || recoverySession != _sessionId) {
       _softRecovering = false;
       return;
@@ -413,8 +455,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    // Etapa 2: recién si sigue trabado descartamos paquetes viejos. Esto
-    // evita que drop-buffers provoque por sí mismo cortes en un canal sano.
+    // Si la caché está vacía no hay nada útil que descartar: hacerlo solo
+    // alarga el corte. En ese caso pasamos pronto a una nueva conexión.
+    final cacheEmpty = _lastCacheSeconds == null || _lastCacheSeconds! <= 0.15;
+    if (_isBuffering || cacheEmpty) {
+      _networkRecoveryCount++;
+      _softRecovering = false;
+      if (mounted) setState(() {});
+      _handleFailure('La red dejó de entregar datos', silent: true);
+      return;
+    }
+
+    // Solo para un bloqueo extraño con paquetes todavía en caché usamos
+    // drop-buffers como último intento antes de reconstruir la conexión.
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
@@ -423,7 +476,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       await _player.play();
     } catch (_) {}
 
-    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    await Future<void>.delayed(const Duration(milliseconds: 500));
     if (!mounted || recoverySession != _sessionId) {
       _softRecovering = false;
       return;
@@ -438,6 +491,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
+    _networkRecoveryCount++;
     _softRecovering = false;
     if (mounted) setState(() {});
     _handleFailure('El stream dejó de entregar datos', silent: true);
@@ -463,6 +517,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final audioBitrate = await _readDoubleProperty(platform, 'audio-bitrate');
       final cacheSeconds =
           await _readDoubleProperty(platform, 'demuxer-cache-duration');
+      final cacheSpeed = await _readDoubleProperty(platform, 'cache-speed');
+      final coreIdle = await _readStringProperty(platform, 'core-idle');
       final format = await _readStringProperty(platform, 'file-format');
 
       if (!mounted) return;
@@ -476,6 +532,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
         if (cacheSeconds != null && cacheSeconds >= 0) {
           _lastCacheSeconds = cacheSeconds;
+        }
+        if (cacheSpeed != null && cacheSpeed >= 0) {
+          _networkReadBytesPerSecond = cacheSpeed;
+        }
+        if (coreIdle != null) {
+          _coreIdle = coreIdle == 'yes' || coreIdle == 'true';
         }
         if (format != null && format.isNotEmpty && format != 'N/A') {
           _containerFormat = format;
@@ -662,7 +724,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioChannels = null;
     _audioSampleRate = null;
     _lastCacheSeconds = null;
+    _networkReadBytesPerSecond = null;
+    _coreIdle = false;
     _softRecoveryCount = 0;
+    _networkRecoveryCount = 0;
     _bufferingStartedAt = null;
   }
 
@@ -748,6 +813,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return '${(bitsPerSecond / 1000).toStringAsFixed(0)} kbps';
   }
 
+  String get _networkSpeedText {
+    final bytes = _networkReadBytesPerSecond;
+    if (bytes == null || bytes <= 0) return 'No disponible';
+    final mbps = bytes * 8 / 1000000;
+    return '${mbps.toStringAsFixed(2)} Mbps';
+  }
+
+  String get _networkHeadroomText {
+    final bytes = _networkReadBytesPerSecond;
+    final mediaBits = (_videoBitrate ?? 0) + (_audioBitrate ?? 0);
+    if (bytes == null || bytes <= 0 || mediaBits <= 0) return 'No disponible';
+    final ratio = (bytes * 8) / mediaBits;
+    return '${ratio.toStringAsFixed(2)}× del bitrate';
+  }
+
   String get _protocolText {
     final uri = Uri.tryParse(widget.playlist[_currentIndex].url);
     final scheme = uri?.scheme.toUpperCase();
@@ -807,8 +887,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 'Buffer en caché: ${_lastCacheSeconds == null ? 'No disponible' : '${_lastCacheSeconds!.toStringAsFixed(1)} s'}',
               ),
               Text('Objetivo de caché: ${_targetCacheSeconds.toStringAsFixed(1)} s'),
+              Text('Memoria de caché hacia delante: $_forwardBufferMb MB'),
+              Text('Velocidad de lectura de red: $_networkSpeedText'),
+              Text('Margen de red: $_networkHeadroomText'),
+              Text('Núcleo esperando datos: ${_coreIdle ? 'sí' : 'no'}'),
               const Text('Pausa automática por buffer: desactivada'),
               Text('Recuperaciones suaves: $_softRecoveryCount'),
+              Text('Reconexiones por falta de datos: $_networkRecoveryCount'),
             ],
           ),
         ),
@@ -847,8 +932,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
             Text('Servidor: ${stats.host}'),
             Text('Perfil elegido: $requestedProfile'),
             Text('Ajuste actual: $_tuningLabel'),
-            Text('Buffer efectivo: ${_effectiveSettings.bufferMb} MB'),
+            Text('Buffer configurado: ${_effectiveSettings.bufferMb} MB'),
+            Text('Buffer efectivo de red: $_forwardBufferMb MB'),
             Text('Caché objetivo: ${_targetCacheSeconds.toStringAsFixed(1)} s'),
+            Text('Lectura de red: $_networkSpeedText'),
+            Text('Margen red/bitrate: $_networkHeadroomText'),
             Text(
               'Lectura anticipada: ${_effectiveSettings.readaheadSeconds.toStringAsFixed(1)} s',
             ),
@@ -949,6 +1037,46 @@ class _PlayerScreenState extends State<PlayerScreen> {
               alignment: Alignment.center,
               children: [
                 Video(controller: _controller),
+                if (_hasEverPlayed && _errorMessage == null)
+                  Positioned(
+                    left: 18,
+                    bottom: 18,
+                    child: IgnorePointer(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 9,
+                          vertical: 5,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.58),
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 9,
+                              height: 9,
+                              decoration: const BoxDecoration(
+                                color: Colors.redAccent,
+                                shape: BoxShape.circle,
+                              ),
+                            ),
+                            const SizedBox(width: 6),
+                            const Text(
+                              'EN VIVO',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w700,
+                                fontSize: 12,
+                                letterSpacing: 0.4,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
                 if ((_isBuffering || _reconnecting || _softRecovering) &&
                     _errorMessage == null)
                   Column(
