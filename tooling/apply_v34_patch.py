@@ -1,0 +1,310 @@
+from pathlib import Path
+import re
+
+path = Path("lib/screens/player_screen.dart")
+s = path.read_text()
+
+s = s.replace("import 'dart:math' as math;\n\n", "")
+s = s.replace(
+    "import '../widgets/channel_tile.dart';\n",
+    "import '../widgets/channel_tile.dart';\nimport '../widgets/live_video_view.dart';\n",
+)
+
+for line in [
+    "  bool _softRecovering = false;\n",
+    "  int _softRecoveryCount = 0;\n",
+    "  int _networkRecoveryCount = 0;\n",
+    "  DateTime? _bufferingStartedAt;\n",
+]:
+    s = s.replace(line, "")
+
+s, n = re.subn(
+    r"  Duration get _underrunGrace \{.*?\n  @override\n  void initState\(\)",
+    "  @override\n  void initState()",
+    s,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit("No se pudo retirar el bloque de tuning agresivo")
+
+buffering_block = """    _bufferingSub = _player.stream.buffering.listen((buffering) {
+      if (!mounted) return;
+
+      if (!buffering) {
+        _connectTimeoutTimer?.cancel();
+        _retryTimer?.cancel();
+        _retryTimer = null;
+        _hasEverPlayed = true;
+        _retryCount = 0;
+        _lastProgressAt = DateTime.now();
+      }
+
+      setState(() {
+        _isBuffering = buffering;
+        if (!buffering) {
+          _reconnecting = false;
+        }
+      });
+
+      if (!buffering &&
+          (_startupStopwatch?.isRunning ?? false) &&
+          _startupSession == _sessionId) {
+        _startupStopwatch!.stop();
+        final elapsed = _startupStopwatch!.elapsedMilliseconds;
+        final url = _startupUrl;
+        if (mounted) setState(() => _lastStartupMs = elapsed);
+        if (url != null) {
+          unawaited(_metrics.recordStartup(url, elapsed));
+        }
+      }
+    });
+
+    _errorSub ="""
+s, n = re.subn(
+    r"    _bufferingSub = _player\.stream\.buffering\.listen\(\(buffering\) \{.*?\n    \}\);\n\n    _errorSub =",
+    buffering_block,
+    s,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit("No se pudo reemplazar listener de buffering")
+
+s = s.replace("      if (_opening || _softRecovering) return;", "      if (_opening) return;")
+s = s.replace("          !_softRecovering &&\n", "")
+
+stable_base = """  Future<void> _configureNativeBaseOptions() async {
+    try {
+      final platform = _player.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty('keep-open', 'yes');
+        await platform.setProperty('cache-pause', 'yes');
+        await platform.setProperty('cache-pause-initial', 'no');
+        await platform.setProperty('demuxer-thread', 'yes');
+      }
+    } catch (_) {
+      // Optimización nativa opcional.
+    }
+  }
+
+"""
+s, n = re.subn(
+    r"  Future<void> _configureNativeBaseOptions\(\) async \{.*?\n  Future<bool> _prepareChannelTuning",
+    stable_base + "  Future<bool> _prepareChannelTuning",
+    s,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit("No se pudo restaurar configuración base")
+
+stable_tuning = """  Future<bool> _prepareChannelTuning(
+    int session, {
+    required bool forceNormalProbe,
+  }) async {
+    final channel = widget.playlist[_currentIndex];
+    final tuning = await _metrics.tuningFor(channel.url, widget.settings);
+    if (!mounted || session != _sessionId) return false;
+
+    _effectiveSettings = tuning.settings;
+    _tuningLabel = tuning.label;
+    _useFastProbe = tuning.useFastProbe;
+    _currentOpenUsesFastProbe = _useFastProbe && !forceNormalProbe;
+
+    try {
+      final platform = _player.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty(
+          'cache-pause-wait',
+          _effectiveSettings.recoveryBufferSeconds.toStringAsFixed(2),
+        );
+        await platform.setProperty(
+          'demuxer-readahead-secs',
+          _effectiveSettings.readaheadSeconds.toStringAsFixed(2),
+        );
+        await platform.setProperty(
+          'demuxer-max-bytes',
+          '${_effectiveSettings.bufferMb}MiB',
+        );
+        await platform.setProperty(
+          'demuxer-lavf-probesize',
+          _currentOpenUsesFastProbe ? _fastProbeSize : _normalProbeSize,
+        );
+        await platform.setProperty(
+          'demuxer-lavf-probescore',
+          _currentOpenUsesFastProbe ? '15' : '26',
+        );
+      }
+    } catch (_) {
+      // Estas propiedades son una optimización, no un requisito.
+    }
+
+    return mounted && session == _sessionId;
+  }
+
+"""
+s, n = re.subn(
+    r"  Future<bool> _prepareChannelTuning\(.*?\n  void _checkStall\(\)",
+    stable_tuning + "  void _checkStall()",
+    s,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit("No se pudo restaurar tuning estable")
+
+stable_stall = """  void _checkStall() {
+    if (!mounted || _opening || _reconnecting || _errorMessage != null) {
+      return;
+    }
+    if (!_isPlaying || !_hasEverPlayed) return;
+
+    final silentFor = DateTime.now().difference(_lastProgressAt);
+    if (silentFor > _stallThreshold) {
+      final url = widget.playlist[_currentIndex].url;
+      unawaited(_metrics.recordStall(url));
+      _handleFailure('El stream dejó de responder', silent: true);
+    }
+  }
+
+"""
+s, n = re.subn(
+    r"  void _checkStall\(\) \{.*?\n  Future<void> _refreshRuntimeStats",
+    stable_stall + "  Future<void> _refreshRuntimeStats",
+    s,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit("No se pudo restaurar watchdog estable")
+
+s = s.replace("        _softRecovering) {", ") {")
+
+stable_failure = """  void _handleFailure(String message, {bool silent = false}) {
+    if (!mounted || _opening) return;
+
+    _connectTimeoutTimer?.cancel();
+    _retryTimer?.cancel();
+
+    final failedSession = _sessionId;
+    final url = widget.playlist[_currentIndex].url;
+    unawaited(_metrics.recordFailure(url));
+
+    if (_retryCount < _maxAutoRetries) {
+      final seconds = 1 << _retryCount;
+      _retryCount++;
+
+      setState(() {
+        _reconnecting = true;
+        _errorMessage = null;
+      });
+
+      _retryTimer = Timer(Duration(seconds: seconds), () {
+        if (!mounted || failedSession != _sessionId) return;
+        unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
+      });
+    } else {
+      setState(() {
+        _reconnecting = false;
+        _errorMessage = silent
+            ? 'Este canal no responde tras varios intentos.\\nProbá con otro canal o volvé a intentar más tarde.'
+            : message;
+      });
+    }
+  }
+
+"""
+s, n = re.subn(
+    r"  void _handleFailure\(String message, \{bool silent = false\}\) \{.*?\n  void _startNormalProbeFallback",
+    stable_failure + "  void _startNormalProbeFallback",
+    s,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit("No se pudo restaurar reintentos estables")
+
+for line in [
+    "    _bufferingStartedAt = null;\n",
+    "        _softRecovering = false;\n",
+    "    _softRecoveryCount = 0;\n",
+    "    _networkRecoveryCount = 0;\n",
+]:
+    s = s.replace(line, "")
+
+pattern = (
+    r"              Text\('Objetivo de caché: .*?"
+    r"              Text\('Reconexiones por falta de datos: .*?\),\n"
+)
+replacement = """              Text('Buffer configurado: ${_effectiveSettings.bufferMb} MB'),
+              Text(
+                'Lectura anticipada configurada: ${_effectiveSettings.readaheadSeconds.toStringAsFixed(1)} s',
+              ),
+              Text('Velocidad de lectura de red: $_networkSpeedText'),
+              Text('Margen de red: $_networkHeadroomText'),
+              Text('Núcleo esperando datos: ${_coreIdle ? 'sí' : 'no'}'),
+              const Text(
+                'Motor de red: modo estable, sin reconexiones forzadas adicionales',
+              ),
+"""
+s, n = re.subn(pattern, replacement, s, count=1, flags=re.S)
+if n != 1:
+    raise SystemExit("No se pudo actualizar panel técnico")
+
+s = s.replace(
+    "            Text('Buffer efectivo de red: $_forwardBufferMb MB'),\n"
+    "            Text('Caché objetivo: ${_targetCacheSeconds.toStringAsFixed(1)} s'),\n",
+    "",
+)
+s = s.replace("            Text('Recuperaciones suaves: $_softRecoveryCount'),\n", "")
+
+s = s.replace(
+    "                Video(controller: _controller),\n",
+    """                LiveVideoView(
+                  key: ValueKey(channel.uniqueKey),
+                  player: _player,
+                  controller: _controller,
+                  canPrevious: _currentIndex > 0,
+                  canNext: _currentIndex < widget.playlist.length - 1,
+                  onPrevious: _previous,
+                  onNext: _next,
+                ),
+""",
+)
+
+s, n = re.subn(
+    r"                if \(_hasEverPlayed && _errorMessage == null\)\n"
+    r"                  Positioned\(.*?"
+    r"(?=                if \(\(_isBuffering)",
+    "",
+    s,
+    count=1,
+    flags=re.S,
+)
+if n != 1:
+    raise SystemExit("No se pudo retirar overlay EN VIVO viejo")
+
+marker = "\n      bottomNavigationBar: BottomAppBar("
+if marker in s:
+    start = s.index(marker)
+    end_marker = "\n    );\n  }\n}"
+    end = s.index(end_marker, start)
+    s = s[:start] + s[end:]
+
+for token in [
+    "demuxer-hysteresis-secs",
+    "stream-buffer-size",
+    "reconnect_on_network_error",
+    "command(const ['drop-buffers'])",
+    "_softRecovering",
+    "_targetCacheSeconds",
+    "_forwardBufferMb",
+]:
+    if token in s:
+        raise SystemExit(f"Patch incompleto: todavía existe {token}")
+
+if "LiveVideoView(" not in s:
+    raise SystemExit("No se integró LiveVideoView")
+
+path.write_text(s)
