@@ -1,36 +1,28 @@
 import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
+
 import '../models/channel.dart';
+import '../models/playback_settings.dart';
 import '../widgets/channel_tile.dart';
 
-/// User-Agent por defecto cuando el canal no trae uno propio en el M3U.
-/// Muchos servidores IPTV bloquean o cuelgan la conexión ante clientes
-/// "desconocidos"; imitar un reproductor ampliamente aceptado (VLC)
-/// evita ese bloqueo silencioso en la mayoría de los proveedores.
 const String _defaultUserAgent =
     'VLC/3.0.20 LibVLC/3.0.20 (iptv_player; +https://github.com)';
 
-/// Pantalla de reproducción, estilo TiviMate:
-/// - Motor nativo media_kit (libmpv/FFmpeg) para arranque rápido.
-/// - Timeout de CONEXIÓN real: si un canal no empieza a entregar datos
-///   en un tiempo razonable, se corta y reintenta — nunca se queda
-///   "cargando" indefinidamente (antes podía quedar así minutos).
-/// - Watchdog de reproducción: detecta cuelgues silenciosos ya en curso.
-/// - Reconexión automática con backoff exponencial.
-/// - Panel de canales deslizable sin salir del video, para cambiar de
-///   canal sin perder el stream actual de vista.
 class PlayerScreen extends StatefulWidget {
   final Channel channel;
   final List<Channel> playlist;
   final int initialIndex;
+  final PlaybackSettings settings;
 
   const PlayerScreen({
     super.key,
     required this.channel,
     required this.playlist,
     required this.initialIndex,
+    required this.settings,
   });
 
   @override
@@ -38,31 +30,29 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  static const int _maxAutoRetries = 5;
-  static const Duration _watchdogInterval = Duration(seconds: 6);
-  static const Duration _stallThreshold = Duration(seconds: 10);
-  // Si al abrir un canal no hay señal de vida (ni buffering-false, ni
-  // datos) en este tiempo, lo tratamos como fallo y reintentamos.
-  // Esto es lo que evita el cuelgue de "23 minutos cargando".
-  static const Duration _connectTimeout = Duration(seconds: 15);
+  static const Duration _watchdogInterval = Duration(seconds: 3);
 
   late final Player _player;
   late final VideoController _controller;
   late int _currentIndex;
 
   bool _isBuffering = true;
-  String? _errorMessage;
-  int _retryCount = 0;
+  bool _isPlaying = false;
+  bool _hasEverPlayed = false;
   bool _reconnecting = false;
   bool _showChannelList = false;
+  bool _opening = false;
+  String? _errorMessage;
   String _channelListQuery = '';
+  int _retryCount = 0;
+  int _sessionId = 0;
+  int? _lastStartupMs;
 
   Timer? _watchdogTimer;
   Timer? _connectTimeoutTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
-  bool _isPlaying = false;
-  bool _hasEverPlayed = false;
+  Stopwatch? _startupStopwatch;
 
   StreamSubscription? _bufferingSub;
   StreamSubscription? _errorSub;
@@ -70,30 +60,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _playingSub;
   StreamSubscription? _completedSub;
 
+  int get _maxAutoRetries => widget.settings.maxRetries;
+  Duration get _stallThreshold =>
+      Duration(seconds: widget.settings.stallThresholdSeconds);
+  Duration get _connectTimeout =>
+      Duration(seconds: widget.settings.connectTimeoutSeconds);
+
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
 
     _player = Player(
-      configuration: const PlayerConfiguration(
-        bufferSize: 8 * 1024 * 1024, // 8MB: prioriza arranque rápido
+      configuration: PlayerConfiguration(
+        bufferSize: widget.settings.bufferBytes,
       ),
     );
     _controller = VideoController(_player);
-    _configureNativeLiveStreamOptions();
 
     _completedSub = _player.stream.completed.listen((completed) {
-      // BUG COMÚN EN STREAMS EN VIVO: el motor a veces calcula mal la
-      // duración de un flujo IPTV (que en realidad es infinito) y, al
-      // llegar a esa duración falsa, se PAUSA SOLO pensando que el
-      // archivo terminó (se ve como "00:40 / 00:39" en la barra: la
-      // posición ya pasó la duración detectada). demuxer-lavf-o=live=1
-      // debería evitarlo, pero por si igual ocurre, reconectamos en
-      // vez de dejar al usuario con la pantalla pausada.
-      if (completed && mounted && !_reconnecting && _errorMessage == null) {
-        _handleFailure('El canal se pausó solo (duración mal detectada)',
-            silent: true);
+      if (completed &&
+          mounted &&
+          !_opening &&
+          !_reconnecting &&
+          _errorMessage == null) {
+        _handleFailure(
+          'El canal se pausó solo o el stream terminó inesperadamente',
+          silent: true,
+        );
       }
     });
 
@@ -101,15 +95,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (!mounted) return;
       setState(() => _isBuffering = buffering);
       if (!buffering) {
-        // Llegaron datos reales: cancelamos el timeout de conexión
-        // y reseteamos el contador de reintentos.
         _connectTimeoutTimer?.cancel();
         _hasEverPlayed = true;
         _retryCount = 0;
+        if (_startupStopwatch?.isRunning ?? false) {
+          _startupStopwatch!.stop();
+          final elapsed = _startupStopwatch!.elapsedMilliseconds;
+          setState(() => _lastStartupMs = elapsed);
+        }
       }
     });
 
     _errorSub = _player.stream.error.listen((error) {
+      if (_opening) return;
       _handleFailure('Error de reproducción: $error');
     });
 
@@ -125,36 +123,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _watchdogTimer = Timer.periodic(_watchdogInterval, (_) => _checkStall());
-
-    _playCurrent();
+    unawaited(_initializeAndPlay());
   }
 
-  /// Le indica al motor nativo (mpv/FFmpeg) que esto es un flujo EN VIVO,
-  /// no un archivo con duración fija. Sin esto, algunos streams IPTV
-  /// (sobre todo MPEG-TS crudo por HTTP) hacen que mpv calcule una
-  /// duración incorrecta a partir de los primeros segundos, y al llegar
-  /// ahí se pausa solo pensando que el archivo terminó — exactamente el
-  /// síntoma de "el canal se pausa cada tantos minutos y hay que darle
-  /// Play de nuevo".
+  Future<void> _initializeAndPlay() async {
+    await _configureNativeLiveStreamOptions();
+    if (!mounted) return;
+    await _playCurrent();
+  }
+
   Future<void> _configureNativeLiveStreamOptions() async {
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
-        await platform.setProperty('demuxer-lavf-o', 'live=1');
-        // Red de seguridad extra: si igual llega a "fin de archivo",
-        // que mantenga el último frame en vez de cerrar el stream,
-        // dándole tiempo a nuestro listener de completed a reconectar.
         await platform.setProperty('keep-open', 'yes');
+        await platform.setProperty('cache-pause', 'yes');
+        await platform.setProperty('cache-pause-initial', 'no');
+        await platform.setProperty(
+          'cache-pause-wait',
+          widget.settings.recoveryBufferSeconds.toStringAsFixed(2),
+        );
+        await platform.setProperty(
+          'demuxer-readahead-secs',
+          widget.settings.readaheadSeconds.toStringAsFixed(2),
+        );
       }
     } catch (_) {
-      // Plataformas sin backend nativo (ej. web) no soportan esto;
-      // no es crítico, el resto de las protecciones siguen activas.
+      // El backend web no expone propiedades nativas de mpv.
     }
   }
 
   void _checkStall() {
-    if (!mounted || _reconnecting || _errorMessage != null) return;
-    if (!_isPlaying) return; // ya cubierto por el connectTimeout
+    if (!mounted || _opening || _reconnecting || _errorMessage != null) {
+      return;
+    }
+    if (!_isPlaying) return;
 
     final silentFor = DateTime.now().difference(_lastProgressAt);
     if (silentFor > _stallThreshold) {
@@ -163,18 +166,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _handleFailure(String message, {bool silent = false}) {
-    if (!mounted) return;
+    if (!mounted || _opening) return;
     _connectTimeoutTimer?.cancel();
+    final failedSession = _sessionId;
 
     if (_retryCount < _maxAutoRetries) {
       setState(() {
         _reconnecting = true;
         _errorMessage = null;
       });
-      final seconds = 1 << _retryCount; // 1s, 2s, 4s, 8s, 16s
+
+      final seconds = 1 << _retryCount;
       _retryCount++;
       Future.delayed(Duration(seconds: seconds), () {
-        if (mounted) _playCurrent(isRetry: true);
+        if (!mounted || failedSession != _sessionId) return;
+        unawaited(_playCurrent(isRetry: true));
       });
     } else {
       setState(() {
@@ -186,33 +192,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _playCurrent({bool isRetry = false}) {
+  Future<void> _playCurrent({bool isRetry = false}) async {
+    final session = ++_sessionId;
+    _opening = true;
+    _connectTimeoutTimer?.cancel();
+
     if (!isRetry) _retryCount = 0;
     _hasEverPlayed = false;
-    setState(() {
-      _errorMessage = null;
-      _isBuffering = true;
-      _reconnecting = false;
-    });
+    _startupStopwatch = Stopwatch()..start();
+
+    if (mounted) {
+      setState(() {
+        _errorMessage = null;
+        _isBuffering = true;
+        _reconnecting = isRetry;
+        _lastStartupMs = null;
+      });
+    }
+
     _lastKnownPosition = Duration.zero;
     _lastProgressAt = DateTime.now();
 
-    final channel = widget.playlist[_currentIndex];
-    final headers = <String, String>{
-      'User-Agent': channel.httpUserAgent ?? _defaultUserAgent,
-      if (channel.httpReferrer != null) 'Referer': channel.httpReferrer!,
-    };
+    try {
+      await _player.stop();
+      if (!mounted || session != _sessionId) return;
 
-    _player.open(Media(channel.url, httpHeaders: headers));
+      final channel = widget.playlist[_currentIndex];
+      final headers = <String, String>{
+        'User-Agent': channel.httpUserAgent ?? _defaultUserAgent,
+        if (channel.httpReferrer != null) 'Referer': channel.httpReferrer!,
+      };
 
-    // Arranca el reloj de conexión: si no hay datos en _connectTimeout,
-    // se trata como fallo (esto es lo que antes faltaba y permitía
-    // que un canal quedara "cargando" indefinidamente).
-    _connectTimeoutTimer?.cancel();
-    _connectTimeoutTimer = Timer(_connectTimeout, () {
-      if (!mounted || _hasEverPlayed) return;
-      _handleFailure('El canal tardó demasiado en responder', silent: true);
-    });
+      await _player.open(Media(channel.url, httpHeaders: headers));
+      if (!mounted || session != _sessionId) return;
+
+      _opening = false;
+      _connectTimeoutTimer = Timer(_connectTimeout, () {
+        if (!mounted || session != _sessionId || _hasEverPlayed) return;
+        _handleFailure('El canal tardó demasiado en responder', silent: true);
+      });
+    } catch (e) {
+      if (!mounted || session != _sessionId) return;
+      _opening = false;
+      _handleFailure('No se pudo abrir el canal: $e');
+    }
   }
 
   void _switchToChannel(int index) {
@@ -224,25 +247,63 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _currentIndex = index;
       _showChannelList = false;
     });
-    _playCurrent();
+    unawaited(_playCurrent());
   }
 
   void _next() {
     if (_currentIndex < widget.playlist.length - 1) {
       setState(() => _currentIndex++);
-      _playCurrent();
+      unawaited(_playCurrent());
     }
   }
 
   void _previous() {
     if (_currentIndex > 0) {
       setState(() => _currentIndex--);
-      _playCurrent();
+      unawaited(_playCurrent());
     }
+  }
+
+  void _showPerformanceInfo() {
+    final profile = switch (widget.settings.profile) {
+      BufferProfile.ultraFast => 'Ultra rápido',
+      BufferProfile.balanced => 'Equilibrado',
+      BufferProfile.stable => 'Estable',
+      BufferProfile.custom => 'Personalizado',
+    };
+
+    showDialog(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Rendimiento del canal'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Perfil: $profile'),
+            Text('Buffer: ${widget.settings.bufferMb} MB'),
+            Text(
+              'Lectura anticipada: ${widget.settings.readaheadSeconds.toStringAsFixed(1)} s',
+            ),
+            Text(
+              'Arranque: ${_lastStartupMs == null ? 'midiendo…' : '${_lastStartupMs} ms'}',
+            ),
+            Text('Reintentos usados: $_retryCount / $_maxAutoRetries'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
   void dispose() {
+    _sessionId++;
     _watchdogTimer?.cancel();
     _connectTimeoutTimer?.cancel();
     _bufferingSub?.cancel();
@@ -250,19 +311,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _positionSub?.cancel();
     _playingSub?.cancel();
     _completedSub?.cancel();
-    _player.dispose();
+    unawaited(_player.dispose());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     final channel = widget.playlist[_currentIndex];
-
-    final filteredChannels = _channelListQuery.trim().isEmpty
+    final query = _channelListQuery.toLowerCase();
+    final filteredChannels = query.trim().isEmpty
         ? widget.playlist
         : widget.playlist
-            .where((c) =>
-                c.name.toLowerCase().contains(_channelListQuery.toLowerCase()))
+            .where((c) => c.name.toLowerCase().contains(query))
             .toList();
 
     return Scaffold(
@@ -272,6 +332,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
         foregroundColor: Colors.white,
         title: Text(channel.name, overflow: TextOverflow.ellipsis),
         actions: [
+          if (_lastStartupMs != null)
+            TextButton.icon(
+              onPressed: _showPerformanceInfo,
+              icon: const Icon(Icons.speed, color: Colors.white70),
+              label: Text(
+                '${_lastStartupMs} ms',
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ),
           IconButton(
             icon: Icon(_showChannelList ? Icons.close : Icons.list),
             tooltip: 'Lista de canales',
@@ -308,8 +377,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(Icons.error_outline,
-                            color: Colors.redAccent, size: 48),
+                        const Icon(
+                          Icons.error_outline,
+                          color: Colors.redAccent,
+                          size: 48,
+                        ),
                         const SizedBox(height: 12),
                         Text(
                           _errorMessage!,
@@ -321,7 +393,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           mainAxisSize: MainAxisSize.min,
                           children: [
                             ElevatedButton(
-                              onPressed: () => _playCurrent(),
+                              onPressed: () => unawaited(_playCurrent()),
                               child: const Text('Reintentar'),
                             ),
                             const SizedBox(width: 12),
@@ -329,7 +401,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
                               onPressed: () =>
                                   setState(() => _showChannelList = true),
                               style: OutlinedButton.styleFrom(
-                                  foregroundColor: Colors.white),
+                                foregroundColor: Colors.white,
+                              ),
                               child: const Text('Ver otros canales'),
                             ),
                           ],
@@ -340,11 +413,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
               ],
             ),
           ),
-
-          // Panel deslizable de canales, estilo TiviMate: se abre sobre
-          // el video sin cortar la reproducción de fondo.
           AnimatedPositioned(
-            duration: const Duration(milliseconds: 250),
+            duration: const Duration(milliseconds: 180),
             curve: Curves.easeOut,
             top: 0,
             bottom: 0,
