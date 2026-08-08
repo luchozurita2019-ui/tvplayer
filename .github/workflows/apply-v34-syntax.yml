@@ -1,0 +1,37 @@
+name: Apply V3 syntax cleanup
+
+on:
+  push:
+    branches:
+      - performance-engine-v3-network-fix-pro
+    paths:
+      - '.github/workflows/apply-v34-syntax.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: performance-engine-v3-network-fix-pro
+          fetch-depth: 0
+
+      - name: Apply cleanup
+        run: python3 tooling/fix_v34_syntax.py
+
+      - name: Remove temporary helpers
+        run: |
+          rm .github/workflows/apply-v34-syntax.yml
+          rm tooling/fix_v34_syntax.py
+
+      - name: Commit cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: clean V3 player syntax after stability patch"
+          git push origin HEAD:performance-engine-v3-network-fix-pro
