@@ -1,0 +1,36 @@
+name: Apply V3.5 live stream fix
+
+on:
+  push:
+    branches:
+      - performance-engine-v3-network-fix-v35
+    paths:
+      - '.github/workflows/apply-v35-live-fix.yml'
+      - 'tooling/apply_v35_patch.py'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: performance-engine-v3-network-fix-v35
+          fetch-depth: 0
+
+      - name: Apply V3.5 patch
+        run: python3 tooling/apply_v35_patch.py
+
+      - name: Remove temporary helpers
+        run: rm tooling/apply_v35_patch.py .github/workflows/apply-v35-live-fix.yml
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/player_screen.dart lib/screens/home_screen.dart tooling/apply_v35_patch.py .github/workflows/apply-v35-live-fix.yml
+          git commit -m "fix: handle live EOF transparently and brand TV FULL blue"
+          git push origin HEAD:performance-engine-v3-network-fix-v35
