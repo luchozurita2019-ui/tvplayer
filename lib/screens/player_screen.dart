@@ -309,8 +309,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         !mounted ||
         !_hasEverPlayed ||
         _opening ||
-        _reconnecting ||
-) {
+        _reconnecting) {
       return;
     }
 
@@ -405,8 +404,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       setState(() {
         _reconnecting = false;
         _errorMessage = silent
-            ? 'Este canal no responde tras varios intentos.
-Probá con otro canal o volvé a intentar más tarde.'
+            ? 'Este canal no responde tras varios intentos.\nProbá con otro canal o volvé a intentar más tarde.'
             : message;
       });
     }
@@ -852,8 +850,8 @@ Probá con otro canal o volvé a intentar más tarde.'
                       const SizedBox(height: 12),
                       Text(
                         _normalProbeFallbackUsed && _retryCount == 0
-                                ? 'Probando modo compatible…'
-                                : _reconnecting
+                            ? 'Probando modo compatible…'
+                            : _reconnecting
                                     ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
                                     : _hasEverPlayed
                                         ? 'Recibiendo datos…'
