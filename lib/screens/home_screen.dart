@@ -45,8 +45,11 @@ class _HomeScreenState extends State<HomeScreen> {
                 const Icon(Icons.live_tv),
                 const SizedBox(width: 10),
                 Text(
-                  _sectionTitle,
-                  style: const TextStyle(fontWeight: FontWeight.w700),
+                  'TV FULL · $_sectionTitle',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    letterSpacing: 0.3,
+                  ),
                 ),
               ],
             ),

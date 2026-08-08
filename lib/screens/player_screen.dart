@@ -77,6 +77,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   double? _lastCacheSeconds;
   double? _networkReadBytesPerSecond;
   bool _coreIdle = false;
+  bool _pausedForCache = false;
+  bool _eofReached = false;
+  int _seamlessEofRecoveries = 0;
 
   Timer? _watchdogTimer;
   Timer? _runtimeStatsTimer;
@@ -115,13 +118,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _controller = VideoController(_player);
 
     _completedSub = _player.stream.completed.listen((completed) {
-      if (completed &&
-          mounted &&
-          !_opening &&
-          !_reconnecting &&
-          _errorMessage == null) {
-        _handleFailure('El stream terminó inesperadamente', silent: true);
+      if (!completed ||
+          !mounted ||
+          _opening ||
+          _reconnecting ||
+          _errorMessage != null) {
+        return;
       }
+
+      final channel = widget.playlist[_currentIndex];
+      final uri = Uri.tryParse(channel.url);
+      final isHttpLive = uri != null &&
+          (uri.scheme == 'http' || uri.scheme == 'https');
+
+      // Algunos proveedores cierran deliberadamente el socket/segmento cada
+      // pocos segundos (en las pruebas reales, cerca de 30 s). Para un canal
+      // HTTP en vivo, un EOF no significa que el programa terminó. FFmpeg
+      // intenta reconectar primero; si aun así mpv publica completed, hacemos
+      // un reemplazo inmediato del Media sin esperar el backoff normal.
+      if (_hasEverPlayed && isHttpLive) {
+        _seamlessEofRecoveries++;
+        _retryTimer?.cancel();
+        scheduleMicrotask(() {
+          if (!mounted || _opening || _reconnecting) return;
+          unawaited(
+            _playCurrent(
+              isRetry: true,
+              forceNormalProbe: true,
+              skipStop: true,
+            ),
+          );
+        });
+        return;
+      }
+
+      _handleFailure('El stream terminó inesperadamente', silent: true);
     });
 
     _bufferingSub = _player.stream.buffering.listen((buffering) {
@@ -236,8 +267,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
-        await platform.setProperty('keep-open', 'yes');
-        await platform.setProperty('cache-pause', 'yes');
+        // keep-open=yes convierte un EOF en una pausa del Player. En IPTV
+        // algunos servidores terminan la conexión periódicamente aunque la
+        // señal continúe. No queremos que mpv transforme ese EOF en Pause.
+        await platform.setProperty('keep-open', 'no');
+
+        // No dejamos que mpv cambie el estado global a Pause cuando el cache
+        // se vacía. El frame puede quedar quieto mientras llegan paquetes,
+        // pero el motor sigue en reproducción y FFmpeg puede reconectar abajo.
+        await platform.setProperty('cache-pause', 'no');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
       }
@@ -282,6 +320,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
           'demuxer-lavf-probescore',
           _currentOpenUsesFastProbe ? '15' : '26',
         );
+
+
+        final uri = Uri.tryParse(channel.url);
+        if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+          // FFmpeg documenta reconnect_at_eof específicamente para streams
+          // live/endless. Lo usamos sin rw_timeout ni cambios agresivos de
+          // cache: el objetivo es que un cierre del socket no llegue a mpv
+          // como una pausa visible cada ~30 segundos.
+          await platform.setProperty('demuxer-lavf-propagate-opts', 'yes');
+          await platform.setProperty(
+            'demuxer-lavf-o',
+            'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
+                'reconnect_on_network_error=1,reconnect_on_http_error=5xx,'
+                'reconnect_delay_max=1',
+          );
+        } else {
+          await platform.setProperty('demuxer-lavf-o', '');
+        }
       }
     } catch (_) {
       // Estas propiedades son una optimización, no un requisito.
@@ -325,6 +381,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
           await _readDoubleProperty(platform, 'demuxer-cache-duration');
       final cacheSpeed = await _readDoubleProperty(platform, 'cache-speed');
       final coreIdle = await _readStringProperty(platform, 'core-idle');
+      final pausedForCache =
+          await _readStringProperty(platform, 'paused-for-cache');
+      final eofReached = await _readStringProperty(platform, 'eof-reached');
       final format = await _readStringProperty(platform, 'file-format');
 
       if (!mounted) return;
@@ -344,6 +403,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         }
         if (coreIdle != null) {
           _coreIdle = coreIdle == 'yes' || coreIdle == 'true';
+        }
+        if (pausedForCache != null) {
+          _pausedForCache =
+              pausedForCache == 'yes' || pausedForCache == 'true';
+        }
+        if (eofReached != null) {
+          _eofReached = eofReached == 'yes' || eofReached == 'true';
         }
         if (format != null && format.isNotEmpty && format != 'N/A') {
           _containerFormat = format;
@@ -431,6 +497,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Future<void> _playCurrent({
     bool isRetry = false,
     bool forceNormalProbe = false,
+    bool skipStop = false,
   }) async {
     final session = ++_sessionId;
     _opening = true;
@@ -468,8 +535,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!prepared) return;
 
     try {
-      await _player.stop();
-      if (!mounted || session != _sessionId) return;
+      // En recuperación de EOF reemplazamos el Media directamente. Evitar un
+      // stop explícito reduce el hueco visible entre una conexión y la siguiente.
+      if (!skipStop) {
+        await _player.stop();
+        if (!mounted || session != _sessionId) return;
+      }
 
       final channel = widget.playlist[_currentIndex];
       final headers = <String, String>{
@@ -526,6 +597,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _lastCacheSeconds = null;
     _networkReadBytesPerSecond = null;
     _coreIdle = false;
+    _pausedForCache = false;
+    _eofReached = false;
+    _seamlessEofRecoveries = 0;
   }
 
   void _switchToChannel(int index) {
@@ -690,8 +764,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
               Text('Velocidad de lectura de red: $_networkSpeedText'),
               Text('Margen de red: $_networkHeadroomText'),
               Text('Núcleo esperando datos: ${_coreIdle ? 'sí' : 'no'}'),
+              Text('Pausado por caché (mpv): ${_pausedForCache ? 'sí' : 'no'}'),
+              Text('EOF detectado por mpv: ${_eofReached ? 'sí' : 'no'}'),
+              Text('Recuperaciones transparentes de EOF: $_seamlessEofRecoveries'),
               const Text(
-                'Motor de red: modo estable, sin reconexiones forzadas adicionales',
+                'Motor de red: reconexión HTTP/EOF transparente para señal en vivo',
               ),
             ],
           ),
@@ -752,6 +829,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             if (stats.fastProbeFallbacks > 0)
               Text('Fallbacks de detección: ${stats.fastProbeFallbacks}'),
             Text('Resolución actual: $_resolutionText'),
+            Text('Pausa de caché mpv: ${_pausedForCache ? 'sí' : 'no'}'),
+            Text('EOF detectado: ${_eofReached ? 'sí' : 'no'}'),
+            Text('Recuperaciones EOF: $_seamlessEofRecoveries'),
           ],
         ),
         actions: [
@@ -796,9 +876,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return Scaffold(
       backgroundColor: Colors.black,
       appBar: AppBar(
-        backgroundColor: Colors.black,
+        backgroundColor: const Color(0xFF071D38),
         foregroundColor: Colors.white,
-        title: Text(channel.name, overflow: TextOverflow.ellipsis),
+        title: Row(
+          children: [
+            const Text(
+              'TV FULL',
+              style: TextStyle(
+                color: Color(0xFF58A6FF),
+                fontWeight: FontWeight.w800,
+                letterSpacing: 0.6,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Text(channel.name, overflow: TextOverflow.ellipsis),
+            ),
+          ],
+        ),
         actions: [
           if (_videoWidth != null && _videoHeight != null)
             TextButton.icon(
@@ -912,7 +1007,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             right: _showChannelList ? 0 : -340,
             width: 340,
             child: Material(
-              color: Colors.black.withValues(alpha: 0.92),
+              color: const Color(0xFF071D38).withValues(alpha: 0.96),
               child: Column(
                 children: [
                   Padding(
@@ -944,7 +1039,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         final isCurrent = realIndex == _currentIndex;
                         return Container(
                           color: isCurrent
-                              ? Colors.white.withValues(alpha: 0.08)
+                              ? const Color(0xFF1677FF).withValues(alpha: 0.18)
                               : Colors.transparent,
                           child: ChannelTile(
                             channel: c,
