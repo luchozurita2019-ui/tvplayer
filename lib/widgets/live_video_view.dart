@@ -6,9 +6,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 /// Controles de reproducción para TV en vivo.
 ///
-/// Esta capa es deliberadamente pasiva: observa posición, buffer, playing y
-/// buffering para dibujar el estado EN VIVO/ATRASADO, pero no modifica cache,
-/// red, demuxer, reconexiones ni ninguna propiedad del Player.
+/// Esta capa es deliberadamente pasiva: observa el estado del Player y el
+/// avance real de la posición, pero nunca toca cache, red ni reconexiones.
 class LiveVideoView extends StatefulWidget {
   final Player player;
   final VideoController controller;
@@ -33,23 +32,15 @@ class LiveVideoView extends StatefulWidget {
 
 class _LiveVideoViewState extends State<LiveVideoView> {
   StreamSubscription<Duration>? _positionSub;
-  StreamSubscription<Duration>? _bufferSub;
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<bool>? _bufferingSub;
+  Timer? _statusTimer;
 
   Duration _position = Duration.zero;
-  Duration _bufferPosition = Duration.zero;
   bool _playing = false;
   bool _buffering = true;
   bool _hasStarted = false;
-
-  // El nivel normal de buffer depende mucho del proveedor y del perfil.
-  // Tomamos varias muestras estables al comenzar el canal y usamos ese nivel
-  // como referencia. Así no confundimos un buffer sano (p.ej. 6-8 s) con un
-  // atraso real. El rojo se apaga solo cuando el reproductor se aleja de su
-  // comportamiento normal o entra en buffering/pausa.
-  final List<double> _baselineSamples = <double>[];
-  double? _baselineAheadSeconds;
+  DateTime _lastProgressAt = DateTime.now();
 
   @override
   void initState() {
@@ -57,64 +48,41 @@ class _LiveVideoViewState extends State<LiveVideoView> {
 
     _positionSub = widget.player.stream.position.listen((value) {
       if (!mounted) return;
-      _position = value;
-      _recalculate();
-    });
-
-    _bufferSub = widget.player.stream.buffer.listen((value) {
-      if (!mounted) return;
-      _bufferPosition = value;
-      _recalculate();
+      if (value != _position) {
+        _position = value;
+        _lastProgressAt = DateTime.now();
+      }
+      setState(() {});
     });
 
     _playingSub = widget.player.stream.playing.listen((value) {
       if (!mounted) return;
       _playing = value;
-      if (value) _hasStarted = true;
-      _recalculate();
+      if (value) {
+        _hasStarted = true;
+        _lastProgressAt = DateTime.now();
+      }
+      setState(() {});
     });
 
     _bufferingSub = widget.player.stream.buffering.listen((value) {
       if (!mounted) return;
       _buffering = value;
-      _recalculate();
+      if (!value && _playing) _lastProgressAt = DateTime.now();
+      setState(() {});
     });
-  }
 
-  double get _bufferAheadSeconds {
-    final delta = _bufferPosition - _position;
-    if (delta.isNegative) return 0;
-    return delta.inMilliseconds / 1000.0;
-  }
-
-  void _recalculate() {
-    final ahead = _bufferAheadSeconds;
-
-    if (_playing && !_buffering && ahead.isFinite && ahead >= 0 && ahead < 45) {
-      if (_baselineAheadSeconds == null) {
-        _baselineSamples.add(ahead);
-        if (_baselineSamples.length >= 6) {
-          final sorted = List<double>.from(_baselineSamples)..sort();
-          _baselineAheadSeconds = sorted[sorted.length ~/ 2];
-        }
-      }
-    }
-
-    setState(() {});
+    // El timer hace que el LED se apague aunque mpv deje de emitir eventos
+    // mientras la imagen está congelada.
+    _statusTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+      if (mounted) setState(() {});
+    });
   }
 
   bool get _isLive {
     if (!_hasStarted || !_playing || _buffering) return false;
-
-    final baseline = _baselineAheadSeconds;
-    if (baseline == null) {
-      // Durante los primeros segundos no penalizamos al canal mientras está
-      // reproduciendo sin buffering.
-      return true;
-    }
-
-    final tolerance = baseline < 2.0 ? 1.5 : (baseline * 0.35).clamp(1.5, 3.0);
-    return _bufferAheadSeconds <= baseline + tolerance;
+    return DateTime.now().difference(_lastProgressAt) <
+        const Duration(milliseconds: 2500);
   }
 
   String get _statusLabel {
@@ -145,9 +113,9 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   @override
   void dispose() {
     _positionSub?.cancel();
-    _bufferSub?.cancel();
     _playingSub?.cancel();
     _bufferingSub?.cancel();
+    _statusTimer?.cancel();
     super.dispose();
   }
 
@@ -205,27 +173,38 @@ class _LiveControlIndicator extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    const liveRed = Color(0xFFFF2D2D);
+
     return Padding(
-      padding: const EdgeInsets.only(left: 10),
+      padding: const EdgeInsets.only(left: 12),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: 8,
-            height: 8,
+            width: 11,
+            height: 11,
             decoration: BoxDecoration(
-              color: active ? Colors.redAccent : Colors.white38,
+              color: active ? liveRed : Colors.white30,
               shape: BoxShape.circle,
+              boxShadow: active
+                  ? const [
+                      BoxShadow(
+                        color: Color(0x99FF2D2D),
+                        blurRadius: 9,
+                        spreadRadius: 2,
+                      ),
+                    ]
+                  : null,
             ),
           ),
-          const SizedBox(width: 6),
+          const SizedBox(width: 7),
           Text(
             label,
             style: TextStyle(
-              color: active ? Colors.white : Colors.white60,
+              color: active ? liveRed : Colors.white54,
               fontSize: 12,
-              fontWeight: FontWeight.w700,
-              letterSpacing: 0.3,
+              fontWeight: FontWeight.w800,
+              letterSpacing: 0.35,
             ),
           ),
         ],
