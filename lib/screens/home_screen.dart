@@ -4,8 +4,10 @@ import 'package:provider/provider.dart';
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
 import '../models/playlist.dart';
+import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
-import 'channel_list_screen.dart';
+import 'add_source_screen.dart';
+import 'source_content_screen.dart';
 import 'playback_settings_screen.dart';
 import 'player_screen.dart';
 
@@ -128,7 +130,9 @@ class _HomeScreenState extends State<HomeScreen> {
                 ),
           floatingActionButton: _section == 0
               ? FloatingActionButton.extended(
-                  onPressed: () => _showAddPlaylistDialog(context),
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute(builder: (_) => const AddSourceScreen()),
+                  ),
                   icon: const Icon(Icons.add),
                   label: const Text('Agregar lista'),
                 )
@@ -139,9 +143,9 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String get _sectionTitle => switch (_section) {
-        0 => 'TVPlayer · Listas',
-        1 => 'TVPlayer · Favoritos',
-        _ => 'TVPlayer · Rendimiento',
+        0 => 'Servicios',
+        1 => 'Favoritos',
+        _ => 'Rendimiento',
       };
 
   Widget _sectionBody(IptvProvider provider) {
@@ -164,79 +168,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
-  void _showAddPlaylistDialog(BuildContext context) {
-    final nameController = TextEditingController();
-    final urlController = TextEditingController();
 
-    showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        title: const Text('Agregar lista M3U'),
-        content: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 520),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              TextField(
-                controller: nameController,
-                decoration: const InputDecoration(
-                  labelText: 'Nombre de la lista',
-                  prefixIcon: Icon(Icons.label_outline),
-                ),
-              ),
-              const SizedBox(height: 12),
-              TextField(
-                controller: urlController,
-                decoration: const InputDecoration(
-                  labelText: 'URL de la lista M3U',
-                  hintText: 'https://servidor/lista.m3u',
-                  prefixIcon: Icon(Icons.link),
-                ),
-                keyboardType: TextInputType.url,
-              ),
-            ],
-          ),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(dialogContext),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton.icon(
-            onPressed: () async {
-              final url = urlController.text.trim();
-              final uri = Uri.tryParse(url);
-              if (uri == null ||
-                  !(uri.scheme == 'http' || uri.scheme == 'https') ||
-                  uri.host.isEmpty) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Ingresá una URL http/https válida.'),
-                  ),
-                );
-                return;
-              }
-
-              Navigator.pop(dialogContext);
-              await context.read<IptvProvider>().addPlaylistFromUrl(
-                    nameController.text.trim(),
-                    url,
-                  );
-              if (!context.mounted) return;
-              final error = context.read<IptvProvider>().error;
-              if (error != null) {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(content: Text(error)),
-                );
-              }
-            },
-            icon: const Icon(Icons.add),
-            label: const Text('Agregar'),
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _PlaylistsView extends StatelessWidget {
@@ -253,7 +185,7 @@ class _PlaylistsView extends StatelessWidget {
       return const _EmptyState(
         icon: Icons.playlist_add,
         title: 'Todavía no hay listas',
-        message: 'Agregá una lista M3U para comenzar a mirar televisión.',
+        message: 'Agregá un servicio M3U/M3U8, Xtream Codes o Portal Stalker para comenzar.',
       );
     }
 
@@ -299,7 +231,7 @@ class _PlaylistCard extends StatelessWidget {
       child: InkWell(
         onTap: () => Navigator.of(context).push(
           MaterialPageRoute(
-            builder: (_) => ChannelListScreen(playlist: playlist),
+            builder: (_) => SourceContentScreen(playlist: playlist),
           ),
         ),
         child: Padding(
@@ -334,7 +266,14 @@ class _PlaylistCard extends StatelessWidget {
                           ),
                     ),
                     const SizedBox(height: 5),
-                    Text('${playlist.channels.length} canales'),
+                    Text(
+                      playlist.sourceType.label,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                    Text('${playlist.channels.length} elementos'),
                     if (playlist.groups.isNotEmpty)
                       Text(
                         '${playlist.groups.length} categorías',

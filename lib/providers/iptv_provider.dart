@@ -3,10 +3,12 @@ import 'package:flutter/foundation.dart';
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
 import '../models/playlist.dart';
+import '../models/playlist_source_type.dart';
 import '../services/m3u_fetcher.dart';
 import '../services/m3u_parser.dart';
 import '../services/playback_settings_service.dart';
 import '../services/storage_service.dart';
+import '../services/xtream_service.dart';
 
 class IptvProvider extends ChangeNotifier {
   final StorageService _storage = StorageService();
@@ -55,6 +57,9 @@ class IptvProvider extends ChangeNotifier {
     try {
       final content = await M3uFetcher.fetch(url);
       final channels = await compute(parseM3uInBackground, content);
+      if (channels.isEmpty) {
+        throw Exception('La lista M3U no contiene canales reproducibles.');
+      }
       final playlist = Playlist(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         name: name.trim().isEmpty ? 'Lista sin nombre' : name.trim(),
@@ -62,7 +67,53 @@ class IptvProvider extends ChangeNotifier {
         isRemote: true,
         channels: channels,
         lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.m3u,
       );
+      _playlists = [..._playlists, playlist];
+      await _storage.savePlaylists(_playlists);
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> addXtreamSource({
+    required String name,
+    required String serverUrl,
+    required String username,
+    required String password,
+  }) async {
+    _setLoading(true);
+    try {
+      final connection = await XtreamService.connect(
+        serverUrl: serverUrl,
+        username: username,
+        password: password,
+      );
+
+      // Xtream puede exponer todo el catálogo como M3U Plus. Reutilizar el
+      // parser actual conserva logos, group-title, tvg-id y headers sin crear
+      // dos pipelines distintos para el mismo contenido.
+      final content = await M3uFetcher.fetch(connection.playlistUrl);
+      final channels = await compute(parseM3uInBackground, content);
+      if (channels.isEmpty) {
+        throw Exception(
+          'Xtream autenticó correctamente, pero no devolvió contenido reproducible.',
+        );
+      }
+
+      final playlist = Playlist(
+        id: DateTime.now().millisecondsSinceEpoch.toString(),
+        name: name.trim().isEmpty ? 'Xtream Codes' : name.trim(),
+        source: connection.playlistUrl,
+        isRemote: true,
+        channels: channels,
+        lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.xtream,
+      );
+
       _playlists = [..._playlists, playlist];
       await _storage.savePlaylists(_playlists);
       _error = null;
@@ -85,6 +136,7 @@ class IptvProvider extends ChangeNotifier {
         isRemote: false,
         channels: channels,
         lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.m3u,
       );
       _playlists = [..._playlists, playlist];
       await _storage.savePlaylists(_playlists);
