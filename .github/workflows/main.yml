@@ -1,41 +1,68 @@
-nname: Build macOS Installer
+name: Build macOS Installer
+
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   workflow_dispatch:
+
 jobs:
   build-macos:
     runs-on: macos-latest
+
     steps:
       - name: Descargar el código
         uses: actions/checkout@v4
+
       - name: Instalar Flutter
         uses: subosito/flutter-action@v2
         with:
-          channel: 'stable'
+          channel: stable
+
       - name: Habilitar soporte de escritorio para macOS
         run: flutter config --enable-macos-desktop
-      - name: Generar el proyecto nativo de macOS (carpeta macos/)
+
+      - name: Generar el proyecto nativo de macOS
         run: flutter create --platforms=macos .
-      - name: Ajustar deployment target de macOS (media_kit requiere 10.15+)
+
+      - name: Ajustar deployment target de macOS
         run: |
-          sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj
+          sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj || true
+
       - name: Instalar dependencias
         run: flutter pub get
-      - name: Compilar la app (release)
+
+      - name: Compilar la app
         run: flutter build macos --release
-      - name: Empaquetar como .dmg instalable
+
+      - name: Mostrar aplicación generada
         run: |
-          brew install create-dmg
+          find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" -print
+
+      - name: Instalar create-dmg
+        run: brew install create-dmg
+
+      - name: Empaquetar como DMG
+        run: |
           mkdir -p dist
+
+          APP_PATH=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
+
+          echo "Aplicación encontrada: $APP_PATH"
+
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: No se encontró ninguna aplicación .app"
+            exit 1
+          fi
+
           create-dmg \
             --volname "IPTV Player" \
             --window-size 600 400 \
             --icon-size 100 \
             --app-drop-link 450 200 \
             "dist/IPTV-Player-Installer.dmg" \
-            "build/macos/Build/Products/Release/iptv_player.app"
-      - name: Subir el instalador como artefacto descargable
+            "$APP_PATH"
+
+      - name: Subir instalador
         uses: actions/upload-artifact@v4
         with:
           name: IPTV-Player-Installer
