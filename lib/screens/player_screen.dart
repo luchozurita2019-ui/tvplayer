@@ -6,6 +6,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
+import '../services/playback_metrics_service.dart';
 import '../widgets/channel_tile.dart';
 
 const String _defaultUserAgent =
@@ -31,10 +32,15 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _watchdogInterval = Duration(seconds: 3);
+  static const String _fastProbeSize = '131072'; // 128 KiB
+  static const String _normalProbeSize = '5000000';
+
+  final PlaybackMetricsService _metrics = PlaybackMetricsService.instance;
 
   late final Player _player;
   late final VideoController _controller;
   late int _currentIndex;
+  late PlaybackSettings _effectiveSettings;
 
   bool _isBuffering = true;
   bool _isPlaying = false;
@@ -42,11 +48,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _reconnecting = false;
   bool _showChannelList = false;
   bool _opening = false;
+  bool _useFastProbe = false;
+  bool _currentOpenUsesFastProbe = false;
+  bool _normalProbeFallbackUsed = false;
   String? _errorMessage;
   String _channelListQuery = '';
+  String _tuningLabel = 'Equilibrado';
   int _retryCount = 0;
   int _sessionId = 0;
+  int _startupSession = 0;
   int? _lastStartupMs;
+  String? _startupUrl;
 
   Timer? _watchdogTimer;
   Timer? _connectTimeoutTimer;
@@ -60,16 +72,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _playingSub;
   StreamSubscription? _completedSub;
 
-  int get _maxAutoRetries => widget.settings.maxRetries;
+  int get _maxAutoRetries => _effectiveSettings.maxRetries;
   Duration get _stallThreshold =>
-      Duration(seconds: widget.settings.stallThresholdSeconds);
+      Duration(seconds: _effectiveSettings.stallThresholdSeconds);
   Duration get _connectTimeout =>
-      Duration(seconds: widget.settings.connectTimeoutSeconds);
+      Duration(seconds: _effectiveSettings.connectTimeoutSeconds);
 
   @override
   void initState() {
     super.initState();
     _currentIndex = widget.initialIndex;
+    _effectiveSettings = widget.settings;
 
     _player = Player(
       configuration: PlayerConfiguration(
@@ -98,10 +111,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _connectTimeoutTimer?.cancel();
         _hasEverPlayed = true;
         _retryCount = 0;
-        if (_startupStopwatch?.isRunning ?? false) {
+
+        if ((_startupStopwatch?.isRunning ?? false) &&
+            _startupSession == _sessionId) {
           _startupStopwatch!.stop();
           final elapsed = _startupStopwatch!.elapsedMilliseconds;
+          final url = _startupUrl;
           setState(() => _lastStartupMs = elapsed);
+          if (url != null) {
+            unawaited(_metrics.recordStartup(url, elapsed));
+          }
         }
       }
     });
@@ -127,30 +146,71 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _initializeAndPlay() async {
-    await _configureNativeLiveStreamOptions();
+    await _configureNativeBaseOptions();
     if (!mounted) return;
     await _playCurrent();
   }
 
-  Future<void> _configureNativeLiveStreamOptions() async {
+  Future<void> _configureNativeBaseOptions() async {
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
         await platform.setProperty('keep-open', 'yes');
         await platform.setProperty('cache-pause', 'yes');
         await platform.setProperty('cache-pause-initial', 'no');
-        await platform.setProperty(
-          'cache-pause-wait',
-          widget.settings.recoveryBufferSeconds.toStringAsFixed(2),
-        );
-        await platform.setProperty(
-          'demuxer-readahead-secs',
-          widget.settings.readaheadSeconds.toStringAsFixed(2),
-        );
+        await platform.setProperty('demuxer-thread', 'yes');
       }
     } catch (_) {
       // El backend web no expone propiedades nativas de mpv.
     }
+  }
+
+  Future<bool> _prepareChannelTuning(
+    int session, {
+    required bool forceNormalProbe,
+  }) async {
+    final channel = widget.playlist[_currentIndex];
+    final tuning = await _metrics.tuningFor(channel.url, widget.settings);
+    if (!mounted || session != _sessionId) return false;
+
+    _effectiveSettings = tuning.settings;
+    _tuningLabel = tuning.label;
+    _useFastProbe = tuning.useFastProbe;
+    _currentOpenUsesFastProbe = _useFastProbe && !forceNormalProbe;
+
+    try {
+      final platform = _player.platform;
+      if (platform is NativePlayer) {
+        await platform.setProperty(
+          'cache-pause-wait',
+          _effectiveSettings.recoveryBufferSeconds.toStringAsFixed(2),
+        );
+        await platform.setProperty(
+          'demuxer-readahead-secs',
+          _effectiveSettings.readaheadSeconds.toStringAsFixed(2),
+        );
+        await platform.setProperty(
+          'demuxer-max-bytes',
+          '${_effectiveSettings.bufferMb}MiB',
+        );
+
+        // Fast Probe: menos datos para identificar el stream. Si un canal
+        // raro no abre con estos valores, se hace un segundo intento
+        // automático con valores conservadores sin gastar un reintento.
+        await platform.setProperty(
+          'demuxer-lavf-probesize',
+          _currentOpenUsesFastProbe ? _fastProbeSize : _normalProbeSize,
+        );
+        await platform.setProperty(
+          'demuxer-lavf-probescore',
+          _currentOpenUsesFastProbe ? '15' : '26',
+        );
+      }
+    } catch (_) {
+      // No es crítico si una plataforma no soporta estas propiedades.
+    }
+
+    return mounted && session == _sessionId;
   }
 
   void _checkStall() {
@@ -161,6 +221,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final silentFor = DateTime.now().difference(_lastProgressAt);
     if (silentFor > _stallThreshold) {
+      final url = widget.playlist[_currentIndex].url;
+      unawaited(_metrics.recordStall(url));
       _handleFailure('El stream dejó de responder', silent: true);
     }
   }
@@ -169,6 +231,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted || _opening) return;
     _connectTimeoutTimer?.cancel();
     final failedSession = _sessionId;
+    final url = widget.playlist[_currentIndex].url;
+    unawaited(_metrics.recordFailure(url));
 
     if (_retryCount < _maxAutoRetries) {
       setState(() {
@@ -180,7 +244,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _retryCount++;
       Future.delayed(Duration(seconds: seconds), () {
         if (!mounted || failedSession != _sessionId) return;
-        unawaited(_playCurrent(isRetry: true));
+        unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
       });
     } else {
       setState(() {
@@ -192,14 +256,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> _playCurrent({bool isRetry = false}) async {
+  void _startNormalProbeFallback(int session, String reason) {
+    if (!mounted || session != _sessionId || _normalProbeFallbackUsed) return;
+    _normalProbeFallbackUsed = true;
+    final url = widget.playlist[_currentIndex].url;
+    unawaited(_metrics.recordFastProbeFallback(url));
+
+    setState(() {
+      _reconnecting = true;
+      _errorMessage = null;
+    });
+
+    // El fallback es inmediato: no consume un reintento ni espera backoff.
+    scheduleMicrotask(() {
+      if (!mounted || session != _sessionId) return;
+      unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
+    });
+  }
+
+  Future<void> _playCurrent({
+    bool isRetry = false,
+    bool forceNormalProbe = false,
+  }) async {
     final session = ++_sessionId;
     _opening = true;
     _connectTimeoutTimer?.cancel();
 
-    if (!isRetry) _retryCount = 0;
+    if (!isRetry) {
+      _retryCount = 0;
+      _normalProbeFallbackUsed = false;
+    }
+
     _hasEverPlayed = false;
     _startupStopwatch = Stopwatch()..start();
+    _startupSession = session;
+    _startupUrl = widget.playlist[_currentIndex].url;
 
     if (mounted) {
       setState(() {
@@ -213,6 +304,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _lastKnownPosition = Duration.zero;
     _lastProgressAt = DateTime.now();
 
+    final prepared = await _prepareChannelTuning(
+      session,
+      forceNormalProbe: forceNormalProbe,
+    );
+    if (!prepared) return;
+
     try {
       await _player.stop();
       if (!mounted || session != _sessionId) return;
@@ -223,17 +320,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (channel.httpReferrer != null) 'Referer': channel.httpReferrer!,
       };
 
-      await _player.open(Media(channel.url, httpHeaders: headers));
+      await _player
+          .open(Media(channel.url, httpHeaders: headers))
+          .timeout(_connectTimeout);
       if (!mounted || session != _sessionId) return;
 
       _opening = false;
       _connectTimeoutTimer = Timer(_connectTimeout, () {
         if (!mounted || session != _sessionId || _hasEverPlayed) return;
+        if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
+          _startNormalProbeFallback(session, 'sin datos');
+          return;
+        }
         _handleFailure('El canal tardó demasiado en responder', silent: true);
       });
+    } on TimeoutException {
+      if (!mounted || session != _sessionId) return;
+      _opening = false;
+      unawaited(_player.stop());
+      if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
+        _startNormalProbeFallback(session, 'timeout de apertura');
+        return;
+      }
+      _handleFailure('El canal tardó demasiado en abrir', silent: true);
     } catch (e) {
       if (!mounted || session != _sessionId) return;
       _opening = false;
+      if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
+        _startNormalProbeFallback(session, 'error de detección');
+        return;
+      }
       _handleFailure('No se pudo abrir el canal: $e');
     }
   }
@@ -264,15 +380,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _showPerformanceInfo() {
-    final profile = switch (widget.settings.profile) {
+  Future<void> _showPerformanceInfo() async {
+    final channel = widget.playlist[_currentIndex];
+    final stats = await _metrics.statsForUrl(channel.url);
+    if (!mounted) return;
+
+    final requestedProfile = switch (widget.settings.profile) {
+      BufferProfile.auto => 'Automático',
       BufferProfile.ultraFast => 'Ultra rápido',
       BufferProfile.balanced => 'Equilibrado',
       BufferProfile.stable => 'Estable',
       BufferProfile.custom => 'Personalizado',
     };
+    final average = stats.averageStartupMs;
 
-    showDialog(
+    await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('Rendimiento del canal'),
@@ -280,15 +402,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Perfil: $profile'),
-            Text('Buffer: ${widget.settings.bufferMb} MB'),
+            Text('Servidor: ${stats.host}'),
+            Text('Perfil elegido: $requestedProfile'),
+            Text('Ajuste actual: $_tuningLabel'),
+            Text('Buffer efectivo: ${_effectiveSettings.bufferMb} MB'),
             Text(
-              'Lectura anticipada: ${widget.settings.readaheadSeconds.toStringAsFixed(1)} s',
+              'Lectura anticipada: ${_effectiveSettings.readaheadSeconds.toStringAsFixed(1)} s',
             ),
             Text(
-              'Arranque: ${_lastStartupMs == null ? 'midiendo…' : '${_lastStartupMs} ms'}',
+              'Buffer de recuperación: ${_effectiveSettings.recoveryBufferSeconds.toStringAsFixed(1)} s',
             ),
-            Text('Reintentos usados: $_retryCount / $_maxAutoRetries'),
+            Text(
+              'Arranque actual: ${_lastStartupMs == null ? 'midiendo…' : '$_lastStartupMs ms'}',
+            ),
+            Text(
+              'Promedio servidor: ${average == null ? 'sin muestras' : '${average.round()} ms'}',
+            ),
+            Text('Muestras: ${stats.startupCount}'),
+            Text('Fallos: ${stats.failures} · Cortes: ${stats.stalls}'),
+            Text('Fast Probe: ${_currentOpenUsesFastProbe ? 'activo' : 'normal'}'),
+            if (stats.fastProbeFallbacks > 0)
+              Text('Fallbacks de detección: ${stats.fastProbeFallbacks}'),
           ],
         ),
         actions: [
@@ -364,7 +498,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       if (_reconnecting) ...[
                         const SizedBox(height: 12),
                         Text(
-                          'Reconectando (intento $_retryCount de $_maxAutoRetries)...',
+                          _normalProbeFallbackUsed && _retryCount == 0
+                              ? 'Probando modo compatible…'
+                              : 'Reconectando (intento $_retryCount de $_maxAutoRetries)…',
                           style: const TextStyle(color: Colors.white70),
                         ),
                       ],
@@ -421,7 +557,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             right: _showChannelList ? 0 : -340,
             width: 340,
             child: Material(
-              color: Colors.black.withOpacity(0.92),
+              color: Colors.black.withValues(alpha: 0.92),
               child: Column(
                 children: [
                   Padding(
@@ -453,7 +589,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                         final isCurrent = realIndex == _currentIndex;
                         return Container(
                           color: isCurrent
-                              ? Colors.white.withOpacity(0.08)
+                              ? Colors.white.withValues(alpha: 0.08)
                               : Colors.transparent,
                           child: ChannelTile(
                             channel: c,
