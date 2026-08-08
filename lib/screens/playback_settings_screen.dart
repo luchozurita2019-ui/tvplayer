@@ -3,6 +3,7 @@ import 'package:provider/provider.dart';
 
 import '../models/playback_settings.dart';
 import '../providers/iptv_provider.dart';
+import '../services/playback_metrics_service.dart';
 
 class PlaybackSettingsScreen extends StatefulWidget {
   const PlaybackSettingsScreen({super.key});
@@ -24,6 +25,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
   void _applyPreset(BufferProfile profile) {
     setState(() {
       _draft = switch (profile) {
+        BufferProfile.auto => PlaybackSettings.auto,
         BufferProfile.ultraFast => PlaybackSettings.ultraFast,
         BufferProfile.balanced => PlaybackSettings.balanced,
         BufferProfile.stable => PlaybackSettings.stable,
@@ -34,6 +36,63 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
 
   void _makeCustom(PlaybackSettings settings) {
     setState(() => _draft = settings.copyWith(profile: BufferProfile.custom));
+  }
+
+  Future<void> _showLearnedStats() async {
+    final stats = await PlaybackMetricsService.instance.allStats();
+    if (!mounted) return;
+
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Rendimiento aprendido'),
+        content: SizedBox(
+          width: 520,
+          child: stats.isEmpty
+              ? const Text(
+                  'Todavía no hay suficientes mediciones. Usá algunos canales y el modo automático empezará a aprender cómo responde cada servidor.',
+                )
+              : ListView.separated(
+                  shrinkWrap: true,
+                  itemCount: stats.take(10).length,
+                  separatorBuilder: (_, __) => const Divider(),
+                  itemBuilder: (context, index) {
+                    final item = stats[index];
+                    final average = item.averageStartupMs;
+                    return ListTile(
+                      contentPadding: EdgeInsets.zero,
+                      title: Text(
+                        item.host,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      subtitle: Text(
+                        'Arranques: ${item.startupCount} · Fallos: ${item.failures} · Cortes: ${item.stalls} · Fallbacks: ${item.fastProbeFallbacks}',
+                      ),
+                      trailing: Text(
+                        average == null ? '—' : '${average.round()} ms',
+                        style: Theme.of(context).textTheme.titleMedium,
+                      ),
+                    );
+                  },
+                ),
+        ),
+        actions: [
+          if (stats.isNotEmpty)
+            TextButton(
+              onPressed: () async {
+                await PlaybackMetricsService.instance.clear();
+                if (dialogContext.mounted) Navigator.pop(dialogContext);
+              },
+              child: const Text('Borrar aprendizaje'),
+            ),
+          FilledButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   @override
@@ -55,38 +114,81 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         padding: const EdgeInsets.all(16),
         children: [
           const Text(
-            'Elegí un perfil rápido o ajustá manualmente cómo se comporta el buffer y la reconexión.',
+            'Elegí un perfil o dejá que TVPlayer aprenda automáticamente cómo responde cada servidor.',
           ),
           const SizedBox(height: 16),
-          SegmentedButton<BufferProfile>(
-            segments: const [
-              ButtonSegment(
-                value: BufferProfile.ultraFast,
-                label: Text('Ultra rápido'),
-                icon: Icon(Icons.bolt),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _ProfileChip(
+                label: 'Automático',
+                icon: Icons.auto_awesome,
+                selected: _draft.profile == BufferProfile.auto,
+                onTap: () => _applyPreset(BufferProfile.auto),
               ),
-              ButtonSegment(
-                value: BufferProfile.balanced,
-                label: Text('Equilibrado'),
-                icon: Icon(Icons.tune),
+              _ProfileChip(
+                label: 'Ultra rápido',
+                icon: Icons.bolt,
+                selected: _draft.profile == BufferProfile.ultraFast,
+                onTap: () => _applyPreset(BufferProfile.ultraFast),
               ),
-              ButtonSegment(
-                value: BufferProfile.stable,
-                label: Text('Estable'),
-                icon: Icon(Icons.shield_outlined),
+              _ProfileChip(
+                label: 'Equilibrado',
+                icon: Icons.tune,
+                selected: _draft.profile == BufferProfile.balanced,
+                onTap: () => _applyPreset(BufferProfile.balanced),
               ),
-              ButtonSegment(
-                value: BufferProfile.custom,
-                label: Text('Personalizado'),
-                icon: Icon(Icons.settings),
+              _ProfileChip(
+                label: 'Estable',
+                icon: Icons.shield_outlined,
+                selected: _draft.profile == BufferProfile.stable,
+                onTap: () => _applyPreset(BufferProfile.stable),
+              ),
+              _ProfileChip(
+                label: 'Personalizado',
+                icon: Icons.settings,
+                selected: _draft.profile == BufferProfile.custom,
+                onTap: () => _applyPreset(BufferProfile.custom),
               ),
             ],
-            selected: {_draft.profile},
-            onSelectionChanged: (selection) => _applyPreset(selection.first),
-            multiSelectionEnabled: false,
-            showSelectedIcon: false,
           ),
-          const SizedBox(height: 24),
+          if (_draft.profile == BufferProfile.auto) ...[
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.psychology_alt_outlined),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Buffer adaptativo',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'TVPlayer mide arranque, fallos y cortes por servidor. Con esas muestras puede usar una configuración rápida en servidores buenos y reforzar el buffer cuando detecta inestabilidad.',
+                    ),
+                    const SizedBox(height: 12),
+                    OutlinedButton.icon(
+                      onPressed: _showLearnedStats,
+                      icon: const Icon(Icons.query_stats),
+                      label: const Text('Ver diagnóstico aprendido'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          const SizedBox(height: 16),
           _SliderTile(
             title: 'Memoria de buffer',
             subtitle: '${_draft.bufferMb} MB',
@@ -158,12 +260,36 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             child: Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Ultra rápido prioriza el zapping. Estable usa más margen para redes irregulares. Si un proveedor limita conexiones o responde lento, un buffer mayor puede evitar cortes, pero no acelera el servidor.',
+                'Ultra rápido prioriza el zapping. Estable usa más margen para redes irregulares. Automático aprende por servidor. Si movés cualquier control manual, el perfil cambia a Personalizado.',
               ),
             ),
           ),
         ],
       ),
+    );
+  }
+}
+
+class _ProfileChip extends StatelessWidget {
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _ProfileChip({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ChoiceChip(
+      avatar: Icon(icon, size: 18),
+      label: Text(label),
+      selected: selected,
+      onSelected: (_) => onTap(),
     );
   }
 }
