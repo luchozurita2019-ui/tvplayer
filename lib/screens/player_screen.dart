@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
@@ -31,7 +32,7 @@ class PlayerScreen extends StatefulWidget {
 }
 
 class _PlayerScreenState extends State<PlayerScreen> {
-  static const Duration _watchdogInterval = Duration(seconds: 3);
+  static const Duration _watchdogInterval = Duration(seconds: 2);
   static const Duration _runtimeStatsInterval = Duration(seconds: 2);
   static const String _fastProbeSize = '131072';
   static const String _normalProbeSize = '5000000';
@@ -84,6 +85,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _retryTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
+  DateTime? _bufferingStartedAt;
   Stopwatch? _startupStopwatch;
 
   StreamSubscription? _bufferingSub;
@@ -100,6 +102,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
       Duration(seconds: _effectiveSettings.stallThresholdSeconds);
   Duration get _connectTimeout =>
       Duration(seconds: _effectiveSettings.connectTimeoutSeconds);
+
+  Duration get _underrunGrace {
+    final seconds = math.max(
+      3.0,
+      _effectiveSettings.recoveryBufferSeconds + 1.5,
+    );
+    return Duration(milliseconds: (seconds * 1000).round());
+  }
+
+  double get _targetCacheSeconds => math.max(
+        1.0,
+        math.max(
+          _effectiveSettings.readaheadSeconds,
+          _effectiveSettings.recoveryBufferSeconds + 1.0,
+        ),
+      );
 
   @override
   void initState() {
@@ -121,30 +139,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
           !_reconnecting &&
           !_softRecovering &&
           _errorMessage == null) {
-        _handleFailure(
-          'El stream terminó inesperadamente',
-          silent: true,
-        );
+        _handleFailure('El stream terminó inesperadamente', silent: true);
       }
     });
 
     _bufferingSub = _player.stream.buffering.listen((buffering) {
       if (!mounted) return;
 
-      if (!buffering) {
+      final now = DateTime.now();
+      if (buffering) {
+        if (_hasEverPlayed) {
+          _bufferingStartedAt ??= now;
+        }
+      } else {
+        _bufferingStartedAt = null;
         _connectTimeoutTimer?.cancel();
         _retryTimer?.cancel();
         _retryTimer = null;
         _hasEverPlayed = true;
         _retryCount = 0;
-        _lastProgressAt = DateTime.now();
+        _lastProgressAt = now;
       }
 
       setState(() {
         _isBuffering = buffering;
         if (!buffering) {
-          // Si volvieron los datos, cualquier estado visual de reconexión
-          // debe desaparecer. Esto evita "Reconectando (intento 0...)".
           _reconnecting = false;
         }
       });
@@ -243,7 +262,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final platform = _player.platform;
       if (platform is NativePlayer) {
         await platform.setProperty('keep-open', 'yes');
-        await platform.setProperty('cache-pause', 'yes');
+        await platform.setProperty('cache', 'yes');
+
+        // IMPORTANTE PARA IPTV EN VIVO:
+        // cache-pause=yes hace que mpv PAUSE automáticamente cuando el
+        // buffer llega a cero y vuelva a dar Play al rellenarse. En canales
+        // irregulares eso se percibía como pausas periódicas. Dejamos que el
+        // stream continúe en estado live y nuestra capa de recuperación solo
+        // interviene si el underrun dura de verdad.
+        await platform.setProperty('cache-pause', 'no');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
       }
@@ -268,9 +295,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
+        // En streams de red mpv usa cache-secs por encima de
+        // demuxer-readahead-secs. Configuramos ambos para que el perfil de
+        // buffer realmente se aplique a IPTV y no quede solo como un valor UI.
         await platform.setProperty(
-          'cache-pause-wait',
-          _effectiveSettings.recoveryBufferSeconds.toStringAsFixed(2),
+          'cache-secs',
+          _targetCacheSeconds.toStringAsFixed(2),
         );
         await platform.setProperty(
           'demuxer-readahead-secs',
@@ -288,6 +318,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
           'demuxer-lavf-probescore',
           _currentOpenUsesFastProbe ? '15' : '26',
         );
+
+        final uri = Uri.tryParse(channel.url);
+        if (uri != null && (uri.scheme == 'http' || uri.scheme == 'https')) {
+          // Dejamos que FFmpeg intente mantener/reabrir la conexión HTTP
+          // antes de reconstruir por completo el Player. reconnect_at_eof
+          // es especialmente útil para streams IPTV/endless cuyos servidores
+          // cierran el socket periódicamente.
+          await platform.setProperty(
+            'demuxer-lavf-o',
+            'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
+                'reconnect_delay_max=2,rw_timeout=8000000',
+          );
+        } else {
+          await platform.setProperty('demuxer-lavf-o', '');
+        }
       }
     } catch (_) {
       // Estas propiedades son una optimización, no un requisito.
@@ -306,25 +351,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
-    final silentFor = DateTime.now().difference(_lastProgressAt);
-    if (silentFor <= _stallThreshold) return;
+    final now = DateTime.now();
 
-    // En algunos directos MPEG-TS la posición puede quedarse quieta o
-    // reiniciarse aunque sigan llegando frames. Por eso ya no usamos la
-    // posición como única prueba de que el canal está muerto.
-    final cacheDepleted =
-        _lastCacheSeconds != null && _lastCacheSeconds! <= 0.25;
-    final realStallSignal = _isBuffering || cacheDepleted;
-
-    if (!realStallSignal) {
-      // Hay datos en caché y mpv no está en buffering: no tocar la señal.
-      _lastProgressAt = DateTime.now();
+    // Caso 1: underrun real. No reaccionamos al primer evento de buffering;
+    // damos unos segundos para que la propia conexión recupere paquetes.
+    if (_isBuffering && _bufferingStartedAt != null) {
+      final bufferingFor = now.difference(_bufferingStartedAt!);
+      if (bufferingFor >= _underrunGrace) {
+        final url = widget.playlist[_currentIndex].url;
+        unawaited(_metrics.recordStall(url));
+        unawaited(_trySoftRecovery());
+      }
       return;
     }
 
-    final url = widget.playlist[_currentIndex].url;
-    unawaited(_metrics.recordStall(url));
-    unawaited(_trySoftRecovery());
+    // Caso 2: algunos MPEG-TS no informan buffering correctamente. Solo
+    // intervenimos si no hubo progreso durante bastante tiempo Y la caché
+    // está efectivamente vacía.
+    final silentFor = now.difference(_lastProgressAt);
+    final cacheDepleted =
+        _lastCacheSeconds != null && _lastCacheSeconds! <= 0.10;
+
+    if (silentFor > _stallThreshold && cacheDepleted) {
+      final url = widget.playlist[_currentIndex].url;
+      unawaited(_metrics.recordStall(url));
+      unawaited(_trySoftRecovery());
+    }
+  }
+
+  bool _streamLooksRecovered() {
+    final recentProgress = DateTime.now().difference(_lastProgressAt) <
+        const Duration(milliseconds: 2200);
+    return !_isBuffering && (_isPlaying || recentProgress);
   }
 
   Future<void> _trySoftRecovery() async {
@@ -334,37 +392,55 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _softRecovering = true;
     if (mounted) setState(() => _errorMessage = null);
 
+    // Etapa 1: no descartamos datos. Simplemente reafirmamos Play y damos
+    // oportunidad a FFmpeg/mpv de continuar con la conexión existente.
     try {
-      final platform = _player.platform;
-      if (platform is NativePlayer) {
-        // Solo se usa cuando hay una señal real de underrun/stall.
-        await platform.command(const ['drop-buffers']);
-      }
       await _player.play();
-    } catch (_) {
-      // Si falla la recuperación suave, debajo queda la reapertura normal.
-    }
+    } catch (_) {}
 
-    await Future<void>.delayed(const Duration(milliseconds: 1600));
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
     if (!mounted || recoverySession != _sessionId) {
       _softRecovering = false;
       return;
     }
 
-    final recentProgress = DateTime.now().difference(_lastProgressAt) <
-        const Duration(milliseconds: 2400);
-    final recovered = !_isBuffering && (_isPlaying || recentProgress);
-
-    _softRecovering = false;
-    if (recovered) {
+    if (_streamLooksRecovered()) {
       _softRecoveryCount++;
+      _bufferingStartedAt = null;
       _lastProgressAt = DateTime.now();
+      _softRecovering = false;
       if (mounted) setState(() {});
       return;
     }
 
+    // Etapa 2: recién si sigue trabado descartamos paquetes viejos. Esto
+    // evita que drop-buffers provoque por sí mismo cortes en un canal sano.
+    try {
+      final platform = _player.platform;
+      if (platform is NativePlayer) {
+        await platform.command(const ['drop-buffers']);
+      }
+      await _player.play();
+    } catch (_) {}
+
+    await Future<void>.delayed(const Duration(milliseconds: 1200));
+    if (!mounted || recoverySession != _sessionId) {
+      _softRecovering = false;
+      return;
+    }
+
+    if (_streamLooksRecovered()) {
+      _softRecoveryCount++;
+      _bufferingStartedAt = null;
+      _lastProgressAt = DateTime.now();
+      _softRecovering = false;
+      if (mounted) setState(() {});
+      return;
+    }
+
+    _softRecovering = false;
     if (mounted) setState(() {});
-    _handleFailure('El stream dejó de responder', silent: true);
+    _handleFailure('El stream dejó de entregar datos', silent: true);
   }
 
   Future<void> _refreshRuntimeStats() async {
@@ -399,7 +475,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _audioBitrate = audioBitrate;
         }
         if (cacheSeconds != null && cacheSeconds >= 0) {
-          // Esto representa caché disponible, NO atraso respecto del vivo.
           _lastCacheSeconds = cacheSeconds;
         }
         if (format != null && format.isNotEmpty && format != 'N/A') {
@@ -445,7 +520,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     unawaited(_metrics.recordFailure(url));
 
     if (_retryCount < _maxAutoRetries) {
-      final seconds = 1 << _retryCount;
+      // El primer reintento es casi inmediato. Los siguientes sí usan
+      // backoff para no martillar un servidor realmente caído.
+      final delay = _retryCount == 0
+          ? const Duration(milliseconds: 250)
+          : Duration(seconds: 1 << (_retryCount - 1));
       _retryCount++;
 
       setState(() {
@@ -453,7 +532,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _errorMessage = null;
       });
 
-      _retryTimer = Timer(Duration(seconds: seconds), () {
+      _retryTimer = Timer(delay, () {
         if (!mounted || failedSession != _sessionId) return;
         unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
       });
@@ -494,6 +573,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _retryTimer = null;
+    _bufferingStartedAt = null;
 
     if (!isRetry) {
       _retryCount = 0;
@@ -583,6 +663,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioSampleRate = null;
     _lastCacheSeconds = null;
     _softRecoveryCount = 0;
+    _bufferingStartedAt = null;
   }
 
   void _switchToChannel(int index) {
@@ -725,6 +806,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
               Text(
                 'Buffer en caché: ${_lastCacheSeconds == null ? 'No disponible' : '${_lastCacheSeconds!.toStringAsFixed(1)} s'}',
               ),
+              Text('Objetivo de caché: ${_targetCacheSeconds.toStringAsFixed(1)} s'),
+              const Text('Pausa automática por buffer: desactivada'),
               Text('Recuperaciones suaves: $_softRecoveryCount'),
             ],
           ),
@@ -765,11 +848,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
             Text('Perfil elegido: $requestedProfile'),
             Text('Ajuste actual: $_tuningLabel'),
             Text('Buffer efectivo: ${_effectiveSettings.bufferMb} MB'),
+            Text('Caché objetivo: ${_targetCacheSeconds.toStringAsFixed(1)} s'),
             Text(
               'Lectura anticipada: ${_effectiveSettings.readaheadSeconds.toStringAsFixed(1)} s',
             ),
             Text(
-              'Buffer de recuperación: ${_effectiveSettings.recoveryBufferSeconds.toStringAsFixed(1)} s',
+              'Margen de recuperación: ${_effectiveSettings.recoveryBufferSeconds.toStringAsFixed(1)} s',
             ),
             Text(
               'Arranque actual: ${_lastStartupMs == null ? 'midiendo…' : '$_lastStartupMs ms'}',
@@ -879,7 +963,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                                 ? 'Probando modo compatible…'
                                 : _reconnecting
                                     ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
-                                    : 'Cargando…',
+                                    : _hasEverPlayed
+                                        ? 'Recibiendo datos…'
+                                        : 'Cargando…',
                         style: const TextStyle(color: Colors.white70),
                         textAlign: TextAlign.center,
                       ),
