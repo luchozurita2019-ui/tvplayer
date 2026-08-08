@@ -205,7 +205,7 @@ class _SliderTile extends StatelessWidget {
               ],
             ),
             Slider(
-              value: value.clamp(min, max),
+              value: value.clamp(min, max).toDouble(),
               min: min,
               max: max,
               divisions: divisions,
