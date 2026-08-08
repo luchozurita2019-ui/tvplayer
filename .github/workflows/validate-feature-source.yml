@@ -11,7 +11,7 @@ jobs:
     runs-on: macos-latest
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
@@ -46,3 +46,31 @@ jobs:
 
       - name: Build macOS
         run: flutter build macos --release
+
+      - name: Install create-dmg
+        run: brew install create-dmg
+
+      - name: Package DMG
+        run: |
+          mkdir -p dist
+          APP_PATH=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
+          echo "Aplicación encontrada: $APP_PATH"
+          if [ -z "$APP_PATH" ]; then
+            echo "ERROR: No se encontró ninguna aplicación .app"
+            exit 1
+          fi
+
+          create-dmg \
+            --volname "TV FULL" \
+            --window-size 600 400 \
+            --icon-size 100 \
+            --app-drop-link 450 200 \
+            "dist/TV-FULL-Installer.dmg" \
+            "$APP_PATH"
+
+      - name: Upload installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-Installer
+          path: dist/TV-FULL-Installer.dmg
+          if-no-files-found: error
