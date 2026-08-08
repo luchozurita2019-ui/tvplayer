@@ -1,4 +1,5 @@
 enum BufferProfile {
+  auto,
   ultraFast,
   balanced,
   stable,
@@ -23,6 +24,19 @@ class PlaybackSettings {
     required this.maxRetries,
     required this.stallThresholdSeconds,
   });
+
+  /// Punto de partida del modo automático. El motor puede modificar
+  /// temporalmente estos valores por servidor sin alterar la preferencia
+  /// guardada del usuario.
+  static const auto = PlaybackSettings(
+    profile: BufferProfile.auto,
+    bufferMb: 16,
+    readaheadSeconds: 1.5,
+    recoveryBufferSeconds: 1.0,
+    connectTimeoutSeconds: 7,
+    maxRetries: 4,
+    stallThresholdSeconds: 8,
+  );
 
   static const balanced = PlaybackSettings(
     profile: BufferProfile.balanced,
@@ -96,23 +110,24 @@ class PlaybackSettings {
       orElse: () => BufferProfile.balanced,
     );
 
+    final defaults = profile == BufferProfile.auto ? auto : balanced;
     return PlaybackSettings(
       profile: profile,
-      bufferMb: (json['bufferMb'] as num?)?.toInt() ?? balanced.bufferMb,
+      bufferMb: (json['bufferMb'] as num?)?.toInt() ?? defaults.bufferMb,
       readaheadSeconds:
           (json['readaheadSeconds'] as num?)?.toDouble() ??
-              balanced.readaheadSeconds,
+              defaults.readaheadSeconds,
       recoveryBufferSeconds:
           (json['recoveryBufferSeconds'] as num?)?.toDouble() ??
-              balanced.recoveryBufferSeconds,
+              defaults.recoveryBufferSeconds,
       connectTimeoutSeconds:
           (json['connectTimeoutSeconds'] as num?)?.toInt() ??
-              balanced.connectTimeoutSeconds,
+              defaults.connectTimeoutSeconds,
       maxRetries:
-          (json['maxRetries'] as num?)?.toInt() ?? balanced.maxRetries,
+          (json['maxRetries'] as num?)?.toInt() ?? defaults.maxRetries,
       stallThresholdSeconds:
           (json['stallThresholdSeconds'] as num?)?.toInt() ??
-              balanced.stallThresholdSeconds,
+              defaults.stallThresholdSeconds,
     );
   }
 }
