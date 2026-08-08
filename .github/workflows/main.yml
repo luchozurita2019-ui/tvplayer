@@ -3,6 +3,8 @@ name: Build macOS Installer
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -30,6 +32,9 @@ jobs:
 
       - name: Instalar dependencias
         run: flutter pub get
+
+      - name: Analizar código Dart
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Compilar la app
         run: flutter build macos --release
