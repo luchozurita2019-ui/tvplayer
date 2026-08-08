@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
@@ -34,8 +33,7 @@ class PlayerScreen extends StatefulWidget {
 class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _watchdogInterval = Duration(seconds: 3);
   static const Duration _runtimeStatsInterval = Duration(seconds: 2);
-  static const Duration _catchUpCooldown = Duration(seconds: 20);
-  static const String _fastProbeSize = '131072'; // 128 KiB
+  static const String _fastProbeSize = '131072';
   static const String _normalProbeSize = '5000000';
 
   final PlaybackMetricsService _metrics = PlaybackMetricsService.instance;
@@ -55,7 +53,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _currentOpenUsesFastProbe = false;
   bool _normalProbeFallbackUsed = false;
   bool _softRecovering = false;
-  bool _catchingUp = false;
   bool _runtimeStatsBusy = false;
 
   String? _errorMessage;
@@ -80,14 +77,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int? _audioSampleRate;
   double? _lastCacheSeconds;
   int _softRecoveryCount = 0;
-  int _catchUpCount = 0;
 
   Timer? _watchdogTimer;
   Timer? _runtimeStatsTimer;
   Timer? _connectTimeoutTimer;
+  Timer? _retryTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
-  DateTime _lastCatchUpAt = DateTime.fromMillisecondsSinceEpoch(0);
   Stopwatch? _startupStopwatch;
 
   StreamSubscription? _bufferingSub;
@@ -104,13 +100,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       Duration(seconds: _effectiveSettings.stallThresholdSeconds);
   Duration get _connectTimeout =>
       Duration(seconds: _effectiveSettings.connectTimeoutSeconds);
-
-  double get _catchUpThresholdSeconds => math.max(
-        10.0,
-        _effectiveSettings.readaheadSeconds +
-            _effectiveSettings.recoveryBufferSeconds +
-            6.0,
-      );
 
   @override
   void initState() {
@@ -133,7 +122,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           !_softRecovering &&
           _errorMessage == null) {
         _handleFailure(
-          'El canal se pausó solo o el stream terminó inesperadamente',
+          'El stream terminó inesperadamente',
           silent: true,
         );
       }
@@ -141,21 +130,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _bufferingSub = _player.stream.buffering.listen((buffering) {
       if (!mounted) return;
-      setState(() => _isBuffering = buffering);
+
       if (!buffering) {
         _connectTimeoutTimer?.cancel();
+        _retryTimer?.cancel();
+        _retryTimer = null;
         _hasEverPlayed = true;
         _retryCount = 0;
+        _lastProgressAt = DateTime.now();
+      }
 
-        if ((_startupStopwatch?.isRunning ?? false) &&
-            _startupSession == _sessionId) {
-          _startupStopwatch!.stop();
-          final elapsed = _startupStopwatch!.elapsedMilliseconds;
-          final url = _startupUrl;
-          setState(() => _lastStartupMs = elapsed);
-          if (url != null) {
-            unawaited(_metrics.recordStartup(url, elapsed));
-          }
+      setState(() {
+        _isBuffering = buffering;
+        if (!buffering) {
+          // Si volvieron los datos, cualquier estado visual de reconexión
+          // debe desaparecer. Esto evita "Reconectando (intento 0...)".
+          _reconnecting = false;
+        }
+      });
+
+      if (!buffering &&
+          (_startupStopwatch?.isRunning ?? false) &&
+          _startupSession == _sessionId) {
+        _startupStopwatch!.stop();
+        final elapsed = _startupStopwatch!.elapsedMilliseconds;
+        final url = _startupUrl;
+        if (mounted) setState(() => _lastStartupMs = elapsed);
+        if (url != null) {
+          unawaited(_metrics.recordStartup(url, elapsed));
         }
       }
     });
@@ -167,6 +169,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _playingSub = _player.stream.playing.listen((playing) {
       _isPlaying = playing;
+      if (playing) _lastProgressAt = DateTime.now();
     });
 
     _positionSub = _player.stream.position.listen((position) {
@@ -221,8 +224,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _watchdogTimer = Timer.periodic(_watchdogInterval, (_) => _checkStall());
-    _runtimeStatsTimer =
-        Timer.periodic(_runtimeStatsInterval, (_) => unawaited(_refreshRuntimeStats()));
+    _runtimeStatsTimer = Timer.periodic(
+      _runtimeStatsInterval,
+      (_) => unawaited(_refreshRuntimeStats()),
+    );
+
     unawaited(_initializeAndPlay());
   }
 
@@ -242,7 +248,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty('demuxer-thread', 'yes');
       }
     } catch (_) {
-      // El backend web no expone propiedades nativas de mpv.
+      // Una plataforma sin libmpv puede ignorar estas optimizaciones.
     }
   }
 
@@ -284,7 +290,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
       }
     } catch (_) {
-      // No es crítico si una plataforma no soporta estas propiedades.
+      // Estas propiedades son una optimización, no un requisito.
     }
 
     return mounted && session == _sessionId;
@@ -295,18 +301,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _opening ||
         _reconnecting ||
         _softRecovering ||
-        _catchingUp ||
-        _errorMessage != null) {
+        _errorMessage != null ||
+        !_hasEverPlayed) {
       return;
     }
-    if (!_isPlaying) return;
 
     final silentFor = DateTime.now().difference(_lastProgressAt);
-    if (silentFor > _stallThreshold) {
-      final url = widget.playlist[_currentIndex].url;
-      unawaited(_metrics.recordStall(url));
-      unawaited(_trySoftRecovery());
+    if (silentFor <= _stallThreshold) return;
+
+    // En algunos directos MPEG-TS la posición puede quedarse quieta o
+    // reiniciarse aunque sigan llegando frames. Por eso ya no usamos la
+    // posición como única prueba de que el canal está muerto.
+    final cacheDepleted =
+        _lastCacheSeconds != null && _lastCacheSeconds! <= 0.25;
+    final realStallSignal = _isBuffering || cacheDepleted;
+
+    if (!realStallSignal) {
+      // Hay datos en caché y mpv no está en buffering: no tocar la señal.
+      _lastProgressAt = DateTime.now();
+      return;
     }
+
+    final url = widget.playlist[_currentIndex].url;
+    unawaited(_metrics.recordStall(url));
+    unawaited(_trySoftRecovery());
   }
 
   Future<void> _trySoftRecovery() async {
@@ -314,40 +332,38 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final recoverySession = _sessionId;
     _softRecovering = true;
-    setState(() {
-      _reconnecting = true;
-      _errorMessage = null;
-    });
+    if (mounted) setState(() => _errorMessage = null);
 
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
+        // Solo se usa cuando hay una señal real de underrun/stall.
         await platform.command(const ['drop-buffers']);
       }
       await _player.play();
     } catch (_) {
-      // Si el backend no admite drop-buffers, el fallback de reapertura
-      // de abajo sigue funcionando.
+      // Si falla la recuperación suave, debajo queda la reapertura normal.
     }
 
-    await Future<void>.delayed(const Duration(milliseconds: 1800));
+    await Future<void>.delayed(const Duration(milliseconds: 1600));
     if (!mounted || recoverySession != _sessionId) {
       _softRecovering = false;
       return;
     }
 
-    final recovered = _isPlaying &&
-        DateTime.now().difference(_lastProgressAt) <
-            const Duration(milliseconds: 2200);
+    final recentProgress = DateTime.now().difference(_lastProgressAt) <
+        const Duration(milliseconds: 2400);
+    final recovered = !_isBuffering && (_isPlaying || recentProgress);
 
     _softRecovering = false;
     if (recovered) {
       _softRecoveryCount++;
-      setState(() => _reconnecting = false);
+      _lastProgressAt = DateTime.now();
+      if (mounted) setState(() {});
       return;
     }
 
-    setState(() => _reconnecting = false);
+    if (mounted) setState(() {});
     _handleFailure('El stream dejó de responder', silent: true);
   }
 
@@ -383,20 +399,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _audioBitrate = audioBitrate;
         }
         if (cacheSeconds != null && cacheSeconds >= 0) {
+          // Esto representa caché disponible, NO atraso respecto del vivo.
           _lastCacheSeconds = cacheSeconds;
         }
         if (format != null && format.isNotEmpty && format != 'N/A') {
           _containerFormat = format;
         }
       });
-
-      if (cacheSeconds != null &&
-          _isPlaying &&
-          !_isBuffering &&
-          cacheSeconds > _catchUpThresholdSeconds &&
-          DateTime.now().difference(_lastCatchUpAt) > _catchUpCooldown) {
-        await _catchUpToLive(platform);
-      }
     } finally {
       _runtimeStatsBusy = false;
     }
@@ -425,45 +434,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  Future<void> _catchUpToLive(NativePlayer platform) async {
-    if (!mounted || _catchingUp || _softRecovering || _opening) return;
-
-    _catchingUp = true;
-    _lastCatchUpAt = DateTime.now();
-    setState(() {});
-
-    try {
-      await platform.command(const ['drop-buffers']);
-      await _player.play();
-      _catchUpCount++;
-      _lastProgressAt = DateTime.now();
-    } catch (_) {
-      // Esta optimización es opcional: un backend sin el comando sigue
-      // reproduciendo normalmente y no dispara una reconexión por sí solo.
-    }
-
-    await Future<void>.delayed(const Duration(milliseconds: 650));
-    if (!mounted) return;
-    _catchingUp = false;
-    setState(() {});
-  }
-
   void _handleFailure(String message, {bool silent = false}) {
     if (!mounted || _opening || _softRecovering) return;
+
     _connectTimeoutTimer?.cancel();
+    _retryTimer?.cancel();
+
     final failedSession = _sessionId;
     final url = widget.playlist[_currentIndex].url;
     unawaited(_metrics.recordFailure(url));
 
     if (_retryCount < _maxAutoRetries) {
+      final seconds = 1 << _retryCount;
+      _retryCount++;
+
       setState(() {
         _reconnecting = true;
         _errorMessage = null;
       });
 
-      final seconds = 1 << _retryCount;
-      _retryCount++;
-      Future.delayed(Duration(seconds: seconds), () {
+      _retryTimer = Timer(Duration(seconds: seconds), () {
         if (!mounted || failedSession != _sessionId) return;
         unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
       });
@@ -477,8 +467,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  void _startNormalProbeFallback(int session, String reason) {
+  void _startNormalProbeFallback(int session) {
     if (!mounted || session != _sessionId || _normalProbeFallbackUsed) return;
+
     _normalProbeFallbackUsed = true;
     final url = widget.playlist[_currentIndex].url;
     unawaited(_metrics.recordFastProbeFallback(url));
@@ -501,6 +492,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final session = ++_sessionId;
     _opening = true;
     _connectTimeoutTimer?.cancel();
+    _retryTimer?.cancel();
+    _retryTimer = null;
 
     if (!isRetry) {
       _retryCount = 0;
@@ -519,7 +512,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _isBuffering = true;
         _reconnecting = isRetry;
         _softRecovering = false;
-        _catchingUp = false;
         _lastStartupMs = null;
       });
     }
@@ -552,7 +544,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _connectTimeoutTimer = Timer(_connectTimeout, () {
         if (!mounted || session != _sessionId || _hasEverPlayed) return;
         if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
-          _startNormalProbeFallback(session, 'sin datos');
+          _startNormalProbeFallback(session);
           return;
         }
         _handleFailure('El canal tardó demasiado en responder', silent: true);
@@ -562,7 +554,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _opening = false;
       unawaited(_player.stop());
       if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
-        _startNormalProbeFallback(session, 'timeout de apertura');
+        _startNormalProbeFallback(session);
         return;
       }
       _handleFailure('El canal tardó demasiado en abrir', silent: true);
@@ -570,7 +562,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (!mounted || session != _sessionId) return;
       _opening = false;
       if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
-        _startNormalProbeFallback(session, 'error de detección');
+        _startNormalProbeFallback(session);
         return;
       }
       _handleFailure('No se pudo abrir el canal: $e');
@@ -591,8 +583,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioSampleRate = null;
     _lastCacheSeconds = null;
     _softRecoveryCount = 0;
-    _catchUpCount = 0;
-    _lastCatchUpAt = DateTime.fromMillisecondsSinceEpoch(0);
   }
 
   void _switchToChannel(int index) {
@@ -733,10 +723,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               const SizedBox(height: 10),
               Text('Transporte / contenedor: $_protocolText'),
               Text(
-                'Buffer adelantado: ${_lastCacheSeconds == null ? 'No disponible' : '${_lastCacheSeconds!.toStringAsFixed(1)} s'}',
+                'Buffer en caché: ${_lastCacheSeconds == null ? 'No disponible' : '${_lastCacheSeconds!.toStringAsFixed(1)} s'}',
               ),
               Text('Recuperaciones suaves: $_softRecoveryCount'),
-              Text('Ajustes automáticos al vivo: $_catchUpCount'),
             ],
           ),
         ),
@@ -795,7 +784,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
               Text('Fallbacks de detección: ${stats.fastProbeFallbacks}'),
             Text('Resolución actual: $_resolutionText'),
             Text('Recuperaciones suaves: $_softRecoveryCount'),
-            Text('Catch-up al vivo: $_catchUpCount'),
           ],
         ),
         actions: [
@@ -814,6 +802,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _watchdogTimer?.cancel();
     _runtimeStatsTimer?.cancel();
     _connectTimeoutTimer?.cancel();
+    _retryTimer?.cancel();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
     _positionSub?.cancel();
@@ -876,10 +865,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
               alignment: Alignment.center,
               children: [
                 Video(controller: _controller),
-                if ((_isBuffering ||
-                        _reconnecting ||
-                        _softRecovering ||
-                        _catchingUp) &&
+                if ((_isBuffering || _reconnecting || _softRecovering) &&
                     _errorMessage == null)
                   Column(
                     mainAxisSize: MainAxisSize.min,
@@ -887,15 +873,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
                       const CircularProgressIndicator(color: Colors.white),
                       const SizedBox(height: 12),
                       Text(
-                        _catchingUp
-                            ? 'Volviendo al punto en vivo…'
-                            : _softRecovering
-                                ? 'Recuperando la señal sin reiniciar el canal…'
-                                : _normalProbeFallbackUsed && _retryCount == 0
-                                    ? 'Probando modo compatible…'
-                                    : _reconnecting
-                                        ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
-                                        : 'Cargando…',
+                        _softRecovering
+                            ? 'Recuperando la señal…'
+                            : _normalProbeFallbackUsed && _retryCount == 0
+                                ? 'Probando modo compatible…'
+                                : _reconnecting
+                                    ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
+                                    : 'Cargando…',
                         style: const TextStyle(color: Colors.white70),
                         textAlign: TextAlign.center,
                       ),
