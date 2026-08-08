@@ -20,6 +20,9 @@ jobs:
           ref: performance-engine-v3-network-fix-pro
           fetch-depth: 0
 
+      - name: Refine patch helper
+        run: python3 tooling/fix_patch_helper.py
+
       - name: Apply patch
         run: python3 tooling/apply_v34_patch.py
 
@@ -27,6 +30,7 @@ jobs:
         run: |
           rm .github/workflows/apply-v34-pro.yml
           rm tooling/apply_v34_patch.py
+          rm tooling/fix_patch_helper.py
 
       - name: Commit changes
         run: |
