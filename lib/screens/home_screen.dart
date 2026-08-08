@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
-import '../providers/iptv_provider.dart';
+
 import '../models/playlist.dart';
+import '../providers/iptv_provider.dart';
 import 'channel_list_screen.dart';
+import 'playback_settings_screen.dart';
 import 'player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -20,10 +22,15 @@ class _HomeScreenState extends State<HomeScreen>
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
-    // Carga inicial de listas y favoritos guardados en disco.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       context.read<IptvProvider>().init();
     });
+  }
+
+  @override
+  void dispose() {
+    _tabController.dispose();
+    super.dispose();
   }
 
   @override
@@ -33,6 +40,17 @@ class _HomeScreenState extends State<HomeScreen>
     return Scaffold(
       appBar: AppBar(
         title: const Text('IPTV Player'),
+        actions: [
+          IconButton(
+            tooltip: 'Rendimiento',
+            icon: const Icon(Icons.speed),
+            onPressed: () => Navigator.of(context).push(
+              MaterialPageRoute(
+                builder: (_) => const PlaybackSettingsScreen(),
+              ),
+            ),
+          ),
+        ],
         bottom: TabBar(
           controller: _tabController,
           tabs: const [
@@ -45,7 +63,7 @@ class _HomeScreenState extends State<HomeScreen>
         controller: _tabController,
         children: [
           _PlaylistsTab(playlists: provider.playlists, loading: provider.loading),
-          _FavoritesTab(),
+          const _FavoritesTab(),
         ],
       ),
       floatingActionButton: FloatingActionButton.extended(
@@ -88,7 +106,16 @@ class _HomeScreenState extends State<HomeScreen>
           FilledButton(
             onPressed: () async {
               final url = urlController.text.trim();
-              if (url.isEmpty) return;
+              final uri = Uri.tryParse(url);
+              if (uri == null ||
+                  !(uri.scheme == 'http' || uri.scheme == 'https') ||
+                  uri.host.isEmpty) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(content: Text('Ingresá una URL http/https válida.')),
+                );
+                return;
+              }
+
               Navigator.pop(dialogContext);
               await context
                   .read<IptvProvider>()
@@ -152,9 +179,12 @@ class _PlaylistsTab extends StatelessWidget {
 }
 
 class _FavoritesTab extends StatelessWidget {
+  const _FavoritesTab();
+
   @override
   Widget build(BuildContext context) {
-    final favorites = context.watch<IptvProvider>().favorites;
+    final provider = context.watch<IptvProvider>();
+    final favorites = provider.favorites;
 
     if (favorites.isEmpty) {
       return const Center(
@@ -175,6 +205,7 @@ class _FavoritesTab extends StatelessWidget {
               channel: channel,
               playlist: favorites,
               initialIndex: index,
+              settings: provider.playbackSettings,
             ),
           )),
         );
