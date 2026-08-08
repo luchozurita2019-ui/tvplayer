@@ -20,6 +20,12 @@ jobs:
         with:
           channel: stable
 
+      - name: Instalar dependencias para análisis
+        run: flutter pub get
+
+      - name: Analizar código Dart
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
       - name: Habilitar soporte de escritorio para macOS
         run: flutter config --enable-macos-desktop
 
@@ -32,9 +38,6 @@ jobs:
 
       - name: Instalar dependencias
         run: flutter pub get
-
-      - name: Analizar código Dart
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
       - name: Compilar la app
         run: flutter build macos --release
