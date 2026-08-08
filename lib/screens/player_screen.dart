@@ -8,6 +8,7 @@ import '../models/channel.dart';
 import '../models/playback_settings.dart';
 import '../services/playback_metrics_service.dart';
 import '../widgets/channel_tile.dart';
+import '../widgets/stable_video_view.dart';
 
 const String _defaultUserAgent =
     'VLC/3.0.20 LibVLC/3.0.20 (iptv_player; +https://github.com)';
@@ -489,7 +490,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
             child: Stack(
               alignment: Alignment.center,
               children: [
-                Video(controller: _controller),
+                StableVideoView(player: _player, controller: _controller),
                 if ((_isBuffering || _reconnecting) && _errorMessage == null)
                   Column(
                     mainAxisSize: MainAxisSize.min,
