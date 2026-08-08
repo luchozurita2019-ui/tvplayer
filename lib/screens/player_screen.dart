@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
@@ -32,6 +33,8 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _watchdogInterval = Duration(seconds: 3);
+  static const Duration _runtimeStatsInterval = Duration(seconds: 2);
+  static const Duration _catchUpCooldown = Duration(seconds: 20);
   static const String _fastProbeSize = '131072'; // 128 KiB
   static const String _normalProbeSize = '5000000';
 
@@ -51,6 +54,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _useFastProbe = false;
   bool _currentOpenUsesFastProbe = false;
   bool _normalProbeFallbackUsed = false;
+  bool _softRecovering = false;
+  bool _catchingUp = false;
+  bool _runtimeStatsBusy = false;
+
   String? _errorMessage;
   String _channelListQuery = '';
   String _tuningLabel = 'Equilibrado';
@@ -60,10 +67,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int? _lastStartupMs;
   String? _startupUrl;
 
+  int? _videoWidth;
+  int? _videoHeight;
+  double? _videoFps;
+  double? _videoBitrate;
+  double? _audioBitrate;
+  String? _videoCodec;
+  String? _audioCodec;
+  String? _pixelFormat;
+  String? _containerFormat;
+  String? _audioChannels;
+  int? _audioSampleRate;
+  double? _lastCacheSeconds;
+  int _softRecoveryCount = 0;
+  int _catchUpCount = 0;
+
   Timer? _watchdogTimer;
+  Timer? _runtimeStatsTimer;
   Timer? _connectTimeoutTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
+  DateTime _lastCatchUpAt = DateTime.fromMillisecondsSinceEpoch(0);
   Stopwatch? _startupStopwatch;
 
   StreamSubscription? _bufferingSub;
@@ -71,12 +95,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _positionSub;
   StreamSubscription? _playingSub;
   StreamSubscription? _completedSub;
+  StreamSubscription? _videoParamsSub;
+  StreamSubscription? _trackSub;
+  StreamSubscription? _audioBitrateSub;
 
   int get _maxAutoRetries => _effectiveSettings.maxRetries;
   Duration get _stallThreshold =>
       Duration(seconds: _effectiveSettings.stallThresholdSeconds);
   Duration get _connectTimeout =>
       Duration(seconds: _effectiveSettings.connectTimeoutSeconds);
+
+  double get _catchUpThresholdSeconds => math.max(
+        10.0,
+        _effectiveSettings.readaheadSeconds +
+            _effectiveSettings.recoveryBufferSeconds +
+            6.0,
+      );
 
   @override
   void initState() {
@@ -96,6 +130,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           mounted &&
           !_opening &&
           !_reconnecting &&
+          !_softRecovering &&
           _errorMessage == null) {
         _handleFailure(
           'El canal se pausó solo o el stream terminó inesperadamente',
@@ -126,7 +161,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _errorSub = _player.stream.error.listen((error) {
-      if (_opening) return;
+      if (_opening || _softRecovering) return;
       _handleFailure('Error de reproducción: $error');
     });
 
@@ -141,7 +176,53 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
     });
 
+    _videoParamsSub = _player.stream.videoParams.listen((params) {
+      if (!mounted) return;
+      final width = params.w ?? params.dw;
+      final height = params.h ?? params.dh;
+      final pixelFormat = params.pixelformat;
+      if (width == _videoWidth &&
+          height == _videoHeight &&
+          pixelFormat == _pixelFormat) {
+        return;
+      }
+      setState(() {
+        _videoWidth = width;
+        _videoHeight = height;
+        _pixelFormat = pixelFormat;
+      });
+    });
+
+    _trackSub = _player.stream.track.listen((track) {
+      if (!mounted) return;
+      final video = track.video;
+      final audio = track.audio;
+      setState(() {
+        _videoCodec = video.codec;
+        _videoFps = video.fps ?? _videoFps;
+        if (video.bitrate != null && video.bitrate! > 0) {
+          _videoBitrate = video.bitrate!.toDouble();
+        }
+        if (_videoWidth == null && video.w != null) _videoWidth = video.w;
+        if (_videoHeight == null && video.h != null) _videoHeight = video.h;
+
+        _audioCodec = audio.codec;
+        _audioChannels = audio.channels;
+        _audioSampleRate = audio.samplerate;
+        if (audio.bitrate != null && audio.bitrate! > 0) {
+          _audioBitrate = audio.bitrate!.toDouble();
+        }
+      });
+    });
+
+    _audioBitrateSub = _player.stream.audioBitrate.listen((bitrate) {
+      if (!mounted || bitrate == null || bitrate <= 0) return;
+      setState(() => _audioBitrate = bitrate);
+    });
+
     _watchdogTimer = Timer.periodic(_watchdogInterval, (_) => _checkStall());
+    _runtimeStatsTimer =
+        Timer.periodic(_runtimeStatsInterval, (_) => unawaited(_refreshRuntimeStats()));
     unawaited(_initializeAndPlay());
   }
 
@@ -193,10 +274,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           'demuxer-max-bytes',
           '${_effectiveSettings.bufferMb}MiB',
         );
-
-        // Fast Probe: menos datos para identificar el stream. Si un canal
-        // raro no abre con estos valores, se hace un segundo intento
-        // automático con valores conservadores sin gastar un reintento.
         await platform.setProperty(
           'demuxer-lavf-probesize',
           _currentOpenUsesFastProbe ? _fastProbeSize : _normalProbeSize,
@@ -214,7 +291,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   void _checkStall() {
-    if (!mounted || _opening || _reconnecting || _errorMessage != null) {
+    if (!mounted ||
+        _opening ||
+        _reconnecting ||
+        _softRecovering ||
+        _catchingUp ||
+        _errorMessage != null) {
       return;
     }
     if (!_isPlaying) return;
@@ -223,12 +305,151 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (silentFor > _stallThreshold) {
       final url = widget.playlist[_currentIndex].url;
       unawaited(_metrics.recordStall(url));
-      _handleFailure('El stream dejó de responder', silent: true);
+      unawaited(_trySoftRecovery());
     }
   }
 
+  Future<void> _trySoftRecovery() async {
+    if (!mounted || _softRecovering || _opening || _reconnecting) return;
+
+    final recoverySession = _sessionId;
+    _softRecovering = true;
+    setState(() {
+      _reconnecting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      final platform = _player.platform;
+      if (platform is NativePlayer) {
+        await platform.command(const ['drop-buffers']);
+      }
+      await _player.play();
+    } catch (_) {
+      // Si el backend no admite drop-buffers, el fallback de reapertura
+      // de abajo sigue funcionando.
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 1800));
+    if (!mounted || recoverySession != _sessionId) {
+      _softRecovering = false;
+      return;
+    }
+
+    final recovered = _isPlaying &&
+        DateTime.now().difference(_lastProgressAt) <
+            const Duration(milliseconds: 2200);
+
+    _softRecovering = false;
+    if (recovered) {
+      _softRecoveryCount++;
+      setState(() => _reconnecting = false);
+      return;
+    }
+
+    setState(() => _reconnecting = false);
+    _handleFailure('El stream dejó de responder', silent: true);
+  }
+
+  Future<void> _refreshRuntimeStats() async {
+    if (_runtimeStatsBusy ||
+        !mounted ||
+        !_hasEverPlayed ||
+        _opening ||
+        _reconnecting ||
+        _softRecovering) {
+      return;
+    }
+
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+
+    _runtimeStatsBusy = true;
+    try {
+      final fps = await _readDoubleProperty(platform, 'estimated-vf-fps');
+      final videoBitrate = await _readDoubleProperty(platform, 'video-bitrate');
+      final audioBitrate = await _readDoubleProperty(platform, 'audio-bitrate');
+      final cacheSeconds =
+          await _readDoubleProperty(platform, 'demuxer-cache-duration');
+      final format = await _readStringProperty(platform, 'file-format');
+
+      if (!mounted) return;
+      setState(() {
+        if (fps != null && fps > 0) _videoFps = fps;
+        if (videoBitrate != null && videoBitrate > 0) {
+          _videoBitrate = videoBitrate;
+        }
+        if (audioBitrate != null && audioBitrate > 0) {
+          _audioBitrate = audioBitrate;
+        }
+        if (cacheSeconds != null && cacheSeconds >= 0) {
+          _lastCacheSeconds = cacheSeconds;
+        }
+        if (format != null && format.isNotEmpty && format != 'N/A') {
+          _containerFormat = format;
+        }
+      });
+
+      if (cacheSeconds != null &&
+          _isPlaying &&
+          !_isBuffering &&
+          cacheSeconds > _catchUpThresholdSeconds &&
+          DateTime.now().difference(_lastCatchUpAt) > _catchUpCooldown) {
+        await _catchUpToLive(platform);
+      }
+    } finally {
+      _runtimeStatsBusy = false;
+    }
+  }
+
+  Future<double?> _readDoubleProperty(
+    NativePlayer platform,
+    String property,
+  ) async {
+    try {
+      final value = await platform.getProperty(property);
+      return double.tryParse(value.trim());
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<String?> _readStringProperty(
+    NativePlayer platform,
+    String property,
+  ) async {
+    try {
+      return (await platform.getProperty(property)).trim();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> _catchUpToLive(NativePlayer platform) async {
+    if (!mounted || _catchingUp || _softRecovering || _opening) return;
+
+    _catchingUp = true;
+    _lastCatchUpAt = DateTime.now();
+    setState(() {});
+
+    try {
+      await platform.command(const ['drop-buffers']);
+      await _player.play();
+      _catchUpCount++;
+      _lastProgressAt = DateTime.now();
+    } catch (_) {
+      // Esta optimización es opcional: un backend sin el comando sigue
+      // reproduciendo normalmente y no dispara una reconexión por sí solo.
+    }
+
+    await Future<void>.delayed(const Duration(milliseconds: 650));
+    if (!mounted) return;
+    _catchingUp = false;
+    setState(() {});
+  }
+
   void _handleFailure(String message, {bool silent = false}) {
-    if (!mounted || _opening) return;
+    if (!mounted || _opening || _softRecovering) return;
     _connectTimeoutTimer?.cancel();
     final failedSession = _sessionId;
     final url = widget.playlist[_currentIndex].url;
@@ -267,7 +488,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _errorMessage = null;
     });
 
-    // El fallback es inmediato: no consume un reintento ni espera backoff.
     scheduleMicrotask(() {
       if (!mounted || session != _sessionId) return;
       unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
@@ -285,6 +505,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!isRetry) {
       _retryCount = 0;
       _normalProbeFallbackUsed = false;
+      _resetStreamInfo();
     }
 
     _hasEverPlayed = false;
@@ -297,6 +518,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _errorMessage = null;
         _isBuffering = true;
         _reconnecting = isRetry;
+        _softRecovering = false;
+        _catchingUp = false;
         _lastStartupMs = null;
       });
     }
@@ -354,6 +577,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  void _resetStreamInfo() {
+    _videoWidth = null;
+    _videoHeight = null;
+    _videoFps = null;
+    _videoBitrate = null;
+    _audioBitrate = null;
+    _videoCodec = null;
+    _audioCodec = null;
+    _pixelFormat = null;
+    _containerFormat = null;
+    _audioChannels = null;
+    _audioSampleRate = null;
+    _lastCacheSeconds = null;
+    _softRecoveryCount = 0;
+    _catchUpCount = 0;
+    _lastCatchUpAt = DateTime.fromMillisecondsSinceEpoch(0);
+  }
+
   void _switchToChannel(int index) {
     if (index == _currentIndex) {
       setState(() => _showChannelList = false);
@@ -378,6 +619,135 @@ class _PlayerScreenState extends State<PlayerScreen> {
       setState(() => _currentIndex--);
       unawaited(_playCurrent());
     }
+  }
+
+  String get _resolutionText {
+    if (_videoWidth == null || _videoHeight == null) return 'Detectando…';
+    return '${_videoWidth}×$_videoHeight';
+  }
+
+  String get _qualityLabel {
+    final w = _videoWidth ?? 0;
+    final h = _videoHeight ?? 0;
+    if (w >= 7680 || h >= 4320) return '8K';
+    if (w >= 3840 || h >= 2160) return '4K / UHD';
+    if (w >= 2560 || h >= 1440) return 'QHD';
+    if (w >= 1920 || h >= 1080) return 'Full HD';
+    if (w >= 1280 || h >= 720) return 'HD';
+    if (w > 0 && h > 0) return 'SD';
+    return 'Desconocida';
+  }
+
+  String get _compactResolutionLabel {
+    if (_videoWidth == null || _videoHeight == null) return '';
+    final fps = _videoFps;
+    if (fps == null || fps <= 0) return _resolutionText;
+    return '$_resolutionText · ${fps.toStringAsFixed(fps >= 10 ? 0 : 1)} fps';
+  }
+
+  String? _advertisedQuality(String name) {
+    final value = name.toUpperCase();
+    if (RegExp(r'\b(8K|4320P?)\b').hasMatch(value)) return '8K';
+    if (RegExp(r'\b(4K|UHD|2160P?)\b').hasMatch(value)) return '4K / UHD';
+    if (RegExp(r'\b(FHD|FULL[ -]?HD|1080P?)\b').hasMatch(value)) {
+      return 'Full HD';
+    }
+    if (RegExp(r'\b(HD|720P?)\b').hasMatch(value)) return 'HD';
+    if (RegExp(r'\bSD\b').hasMatch(value)) return 'SD';
+    return null;
+  }
+
+  int _qualityRank(String quality) {
+    return switch (quality) {
+      '8K' => 5,
+      '4K / UHD' => 4,
+      'QHD' => 3,
+      'Full HD' => 2,
+      'HD' => 1,
+      'SD' => 0,
+      _ => -1,
+    };
+  }
+
+  String _formatBitrate(double? bitsPerSecond) {
+    if (bitsPerSecond == null || bitsPerSecond <= 0) return 'No disponible';
+    if (bitsPerSecond >= 1000000) {
+      return '${(bitsPerSecond / 1000000).toStringAsFixed(2)} Mbps';
+    }
+    return '${(bitsPerSecond / 1000).toStringAsFixed(0)} kbps';
+  }
+
+  String get _protocolText {
+    final uri = Uri.tryParse(widget.playlist[_currentIndex].url);
+    final scheme = uri?.scheme.toUpperCase();
+    if (_containerFormat != null && _containerFormat!.isNotEmpty) {
+      return '${scheme == null || scheme.isEmpty ? 'STREAM' : scheme} · $_containerFormat';
+    }
+    return scheme == null || scheme.isEmpty ? 'Desconocido' : scheme;
+  }
+
+  Future<void> _showStreamInfo() async {
+    await _refreshRuntimeStats();
+    if (!mounted) return;
+
+    final channel = widget.playlist[_currentIndex];
+    final advertised = _advertisedQuality(channel.name);
+    final actual = _qualityLabel;
+    final belowAdvertised = advertised != null &&
+        _qualityRank(actual) >= 0 &&
+        _qualityRank(actual) < _qualityRank(advertised);
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Información real del stream'),
+        content: SingleChildScrollView(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Resolución real: $_resolutionText'),
+              Text('Calidad detectada: $actual'),
+              if (advertised != null) Text('Calidad anunciada: $advertised'),
+              if (belowAdvertised)
+                const Padding(
+                  padding: EdgeInsets.only(top: 6),
+                  child: Text(
+                    '⚠ La señal recibida está por debajo de la calidad anunciada en el nombre del canal.',
+                  ),
+                ),
+              const SizedBox(height: 10),
+              Text(
+                'FPS reales: ${_videoFps == null ? 'No disponible' : _videoFps!.toStringAsFixed(2)}',
+              ),
+              Text('Codec de video: ${_videoCodec ?? 'No disponible'}'),
+              Text('Bitrate de video: ${_formatBitrate(_videoBitrate)}'),
+              Text('Formato de píxel: ${_pixelFormat ?? 'No disponible'}'),
+              const SizedBox(height: 10),
+              Text('Codec de audio: ${_audioCodec ?? 'No disponible'}'),
+              Text('Bitrate de audio: ${_formatBitrate(_audioBitrate)}'),
+              Text('Canales de audio: ${_audioChannels ?? 'No disponible'}'),
+              Text(
+                'Muestreo de audio: ${_audioSampleRate == null ? 'No disponible' : '${_audioSampleRate} Hz'}',
+              ),
+              const SizedBox(height: 10),
+              Text('Transporte / contenedor: $_protocolText'),
+              Text(
+                'Buffer adelantado: ${_lastCacheSeconds == null ? 'No disponible' : '${_lastCacheSeconds!.toStringAsFixed(1)} s'}',
+              ),
+              Text('Recuperaciones suaves: $_softRecoveryCount'),
+              Text('Ajustes automáticos al vivo: $_catchUpCount'),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _showPerformanceInfo() async {
@@ -423,6 +793,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
             Text('Fast Probe: ${_currentOpenUsesFastProbe ? 'activo' : 'normal'}'),
             if (stats.fastProbeFallbacks > 0)
               Text('Fallbacks de detección: ${stats.fastProbeFallbacks}'),
+            Text('Resolución actual: $_resolutionText'),
+            Text('Recuperaciones suaves: $_softRecoveryCount'),
+            Text('Catch-up al vivo: $_catchUpCount'),
           ],
         ),
         actions: [
@@ -439,12 +812,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _sessionId++;
     _watchdogTimer?.cancel();
+    _runtimeStatsTimer?.cancel();
     _connectTimeoutTimer?.cancel();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
     _positionSub?.cancel();
     _playingSub?.cancel();
     _completedSub?.cancel();
+    _videoParamsSub?.cancel();
+    _trackSub?.cancel();
+    _audioBitrateSub?.cancel();
     unawaited(_player.dispose());
     super.dispose();
   }
@@ -466,12 +843,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
         foregroundColor: Colors.white,
         title: Text(channel.name, overflow: TextOverflow.ellipsis),
         actions: [
+          if (_videoWidth != null && _videoHeight != null)
+            TextButton.icon(
+              onPressed: _showStreamInfo,
+              icon: const Icon(Icons.high_quality, color: Colors.white70),
+              label: Text(
+                _compactResolutionLabel,
+                style: const TextStyle(color: Colors.white70),
+              ),
+            ),
           if (_lastStartupMs != null)
             TextButton.icon(
               onPressed: _showPerformanceInfo,
               icon: const Icon(Icons.speed, color: Colors.white70),
               label: Text(
-                '${_lastStartupMs} ms',
+                '$_lastStartupMs ms',
                 style: const TextStyle(color: Colors.white70),
               ),
             ),
@@ -490,20 +876,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
               alignment: Alignment.center,
               children: [
                 Video(controller: _controller),
-                if ((_isBuffering || _reconnecting) && _errorMessage == null)
+                if ((_isBuffering ||
+                        _reconnecting ||
+                        _softRecovering ||
+                        _catchingUp) &&
+                    _errorMessage == null)
                   Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
                       const CircularProgressIndicator(color: Colors.white),
-                      if (_reconnecting) ...[
-                        const SizedBox(height: 12),
-                        Text(
-                          _normalProbeFallbackUsed && _retryCount == 0
-                              ? 'Probando modo compatible…'
-                              : 'Reconectando (intento $_retryCount de $_maxAutoRetries)…',
-                          style: const TextStyle(color: Colors.white70),
-                        ),
-                      ],
+                      const SizedBox(height: 12),
+                      Text(
+                        _catchingUp
+                            ? 'Volviendo al punto en vivo…'
+                            : _softRecovering
+                                ? 'Recuperando la señal sin reiniciar el canal…'
+                                : _normalProbeFallbackUsed && _retryCount == 0
+                                    ? 'Probando modo compatible…'
+                                    : _reconnecting
+                                        ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
+                                        : 'Cargando…',
+                        style: const TextStyle(color: Colors.white70),
+                        textAlign: TextAlign.center,
+                      ),
                     ],
                   ),
                 if (_errorMessage != null)
