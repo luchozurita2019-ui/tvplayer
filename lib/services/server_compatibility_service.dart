@@ -170,10 +170,13 @@ class ServerCompatibilityService {
     switch (mode) {
       case ServerCompatibilityMode.direct:
         profile.directFailures++;
+        break;
       case ServerCompatibilityMode.compatible:
         profile.compatibleFailures++;
+        break;
       case ServerCompatibilityMode.liveRecovery:
         profile.liveRecoveryFailures++;
+        break;
     }
     profile.lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
     await _save();
