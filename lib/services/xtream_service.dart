@@ -48,7 +48,10 @@ class XtreamService {
     final response = await _client.get(
       authUri,
       headers: const {
-        'User-Agent': 'TV FULL/1.0',
+        'User-Agent':
+            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) '
+                'Chrome/96.0.4664.18 Safari/537.36',
         'Accept': 'application/json,text/plain,*/*',
       },
     ).timeout(timeout);

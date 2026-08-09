@@ -11,6 +11,10 @@ import '../widgets/channel_tile.dart';
 import '../widgets/live_video_view.dart';
 
 const String _defaultUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/96.0.4664.18 Safari/537.36';
+const String _legacyVlcUserAgent =
     'VLC/3.0.20 LibVLC/3.0.20 (iptv_player; +https://github.com)';
 
 class PlayerScreen extends StatefulWidget {
@@ -39,7 +43,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   static const String _fastProbeSize = '131072';
   static const String _normalProbeSize = '5000000';
   static const int _hlsSegmentRetryCount = 5;
-  static const Duration _liveTransientErrorGrace = Duration(seconds: 6);
+  static const Duration _liveTransientErrorGrace = Duration(seconds: 15);
 
   final PlaybackMetricsService _metrics = PlaybackMetricsService.instance;
   final ServerCompatibilityService _compatibility =
@@ -146,6 +150,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           !mounted ||
           _opening ||
           _reconnecting ||
+          _isBuffering ||
           _errorMessage != null) {
         return;
       }
@@ -284,7 +289,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         // No dejamos que mpv cambie el estado global a Pause cuando el cache
         // se vacía. El frame puede quedar quieto mientras llegan paquetes,
         // pero el motor sigue en reproducción y FFmpeg puede reconectar abajo.
-        await platform.setProperty('cache-pause', 'no');
+        await platform.setProperty('cache-pause', 'yes');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
 
@@ -336,7 +341,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final modeNeedsNormalProbe =
         _compatibilityMode == ServerCompatibilityMode.compatible ||
             _compatibilityMode == ServerCompatibilityMode.advanced;
-    _currentOpenUsesFastProbe = _useFastProbe &&
+    _currentOpenUsesFastProbe = !widget.isLiveContent &&
+        _useFastProbe &&
         !forceNormalProbe &&
         !_compatibilityPrefersNormalProbe &&
         !modeNeedsNormalProbe;
@@ -372,7 +378,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
         // Compatibilidad por servidor. Limpiamos SIEMPRE las opciones de la
         // apertura anterior para que un proveedor no herede ajustes de otro.
-        await platform.setProperty('demuxer-lavf-propagate-opts', 'no');
+        await platform.setProperty('demuxer-lavf-propagate-opts', 'yes');
         await platform.setProperty('demuxer-lavf-o', '');
         await platform.setProperty('stream-lavf-o', '');
         final disableMime =
@@ -383,49 +389,28 @@ class _PlayerScreenState extends State<PlayerScreen> {
           disableMime ? 'no' : 'yes',
         );
 
-        final recoveryMode =
-            _compatibilityMode == ServerCompatibilityMode.liveRecovery ||
-                _compatibilityMode == ServerCompatibilityMode.advanced;
-        final isAdvanced =
-            _compatibilityMode == ServerCompatibilityMode.advanced;
-        final isLiveHttp = widget.isLiveContent && _isHttpUrl(channel.url);
         final isLiveHls = widget.isLiveContent && _looksLikeHls(channel.url);
 
-        // Hallazgo confirmado en HotPlayer Mac: seg_max_retry=5. Hacemos que
-        // FFmpeg reintente el segmento HLS antes de considerar caído el canal.
-        // live_start_index=-1 mantiene una reapertura pegada al borde en vivo.
+        // HotPlayer Mac contiene seg_max_retry=5: dejamos que FFmpeg
+        // recupere un segmento HLS antes de reconstruir toda la reproducción.
+        // En modos de compatibilidad también aceptamos extensiones HLS atípicas,
+        // algo frecuente en paneles/proxies IPTV. Direct conserva el filtro
+        // estándar de FFmpeg.
         if (isLiveHls) {
-          await platform.setProperty(
-            'demuxer-lavf-o',
-            'seg_max_retry=$_hlsSegmentRetryCount,live_start_index=-1',
-          );
+          final relaxedHlsExtensions =
+              _compatibilityMode != ServerCompatibilityMode.direct;
+          final hlsOptions = <String>[
+            'seg_max_retry=$_hlsSegmentRetryCount',
+            if (relaxedHlsExtensions) 'allowed_extensions=ALL',
+          ].join(',');
+          await platform.setProperty('demuxer-lavf-o', hlsOptions);
         }
 
-        // En live HTTP la recuperación de transporte trabaja desde la primera
-        // apertura, no sólo después de que Flutter reinicie el Media. Esto evita
-        // muchos cortes visibles y repeticiones de escenas.
-        if (isLiveHttp) {
-          final reconnectOptions = <String>[
-            'reconnect=1',
-            'reconnect_streamed=1',
-            'reconnect_on_network_error=1',
-            'reconnect_at_eof=1',
-            if (recoveryMode) 'reconnect_on_http_error=5xx',
-            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
-          ].join(',');
-          await platform.setProperty('stream-lavf-o', reconnectOptions);
-        } else if (recoveryMode) {
-          // VOD puede reconectar errores de red, pero nunca reabrimos por EOF:
-          // el final de una película o episodio es un final real.
-          final reconnectOptions = <String>[
-            'reconnect=1',
-            'reconnect_streamed=1',
-            'reconnect_on_network_error=1',
-            'reconnect_on_http_error=5xx',
-            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
-          ].join(',');
-          await platform.setProperty('stream-lavf-o', reconnectOptions);
-        }
+        // V3.8 vuelve a una base más cercana a HotPlayer: no inyectamos una
+        // batería global de reconnect_* en stream-lavf-o. Esos flags no aparecen
+        // en el binario analizado y en ciertos servidores cambian el tratamiento
+        // de EOF/HTTP de forma contraproducente. El fallback de TV FULL queda a
+        // nivel de sesión sólo si mpv realmente no logra recuperar.
       }
     } catch (_) {
       // Estas propiedades son una optimización, no un requisito.
@@ -447,16 +432,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // no debe convertirse en stop/open del Media.
     final liveGrace = widget.isLiveContent
         ? Duration(
-            seconds: _stallThreshold.inSeconds < 15
-                ? 15
+            seconds: _stallThreshold.inSeconds < 30
+                ? 30
                 : _stallThreshold.inSeconds,
           )
         : _stallThreshold;
     final bufferingGrace = widget.isLiveContent
         ? Duration(
-            seconds: _stallThreshold.inSeconds + 8 < 20
-                ? 20
-                : _stallThreshold.inSeconds + 8,
+            seconds: _stallThreshold.inSeconds + 20 < 45
+                ? 45
+                : _stallThreshold.inSeconds + 20,
           )
         : Duration(
             seconds: _stallThreshold.inSeconds < 8
@@ -473,10 +458,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
-  bool _isHttpUrl(String url) {
-    final uri = Uri.tryParse(url);
-    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
-  }
 
   bool _looksLikeHls(String url) {
     final value = url.toLowerCase();
@@ -774,6 +755,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           session != _sessionId ||
           _opening ||
           _reconnecting ||
+          _isBuffering ||
           _errorMessage != null) {
         return;
       }
@@ -925,7 +907,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
 
       final channel = widget.playlist[_currentIndex];
-      final headers = channel.resolvedHttpHeaders(_defaultUserAgent);
+      final fallbackUserAgent =
+          _compatibilityMode == ServerCompatibilityMode.compatible ||
+                  _compatibilityMode == ServerCompatibilityMode.advanced
+              ? _legacyVlcUserAgent
+              : _defaultUserAgent;
+      final headers = channel.resolvedHttpHeaders(fallbackUserAgent);
 
       await _player
           .open(Media(channel.url, httpHeaders: headers))

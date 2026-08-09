@@ -12,6 +12,10 @@ import 'package:http/http.dart' as http;
 /// - Cliente HTTP reutilizado (keep-alive) en vez de crear uno nuevo
 ///   por request, más rápido en descargas sucesivas.
 class M3uFetcher {
+  static const String _browserUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+      'AppleWebKit/537.36 (KHTML, like Gecko) '
+      'Chrome/96.0.4664.18 Safari/537.36';
   static final http.Client _client = http.Client();
 
   static Future<String> fetch(
@@ -23,10 +27,15 @@ class M3uFetcher {
 
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
       try {
-        final response =
-            await _client.get(Uri.parse(url)).timeout(timeout);
+        final response = await _client.get(
+          Uri.parse(url),
+          headers: const {
+            'User-Agent': _browserUserAgent,
+            'Accept': 'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
+          },
+        ).timeout(timeout);
 
-        if (response.statusCode == 200) {
+        if (response.statusCode >= 200 && response.statusCode < 300) {
           return response.body;
         }
 
