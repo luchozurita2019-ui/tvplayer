@@ -6,6 +6,8 @@ on:
       - performance-engine-v38-hotplayer-baseline
     paths:
       - tooling/apply_v38_hotplayer_baseline.py
+      - tooling/apply_v38_hotplayer_followup.py
+      - .github/workflows/apply-v38-hotplayer-baseline.yml
 
 permissions:
   contents: write
@@ -21,11 +23,14 @@ jobs:
           fetch-depth: 0
 
       - name: Apply V3.8 baseline patch
-        run: python3 tooling/apply_v38_hotplayer_baseline.py
+        run: |
+          python3 tooling/apply_v38_hotplayer_baseline.py
+          python3 tooling/apply_v38_hotplayer_followup.py
 
       - name: Remove one-shot helpers
         run: |
           rm tooling/apply_v38_hotplayer_baseline.py
+          rm tooling/apply_v38_hotplayer_followup.py
           rm .github/workflows/apply-v38-hotplayer-baseline.yml
 
       - name: Commit engine changes
