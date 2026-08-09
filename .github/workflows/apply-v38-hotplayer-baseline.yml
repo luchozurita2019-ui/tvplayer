@@ -27,16 +27,13 @@ jobs:
           python3 tooling/apply_v38_hotplayer_baseline.py
           python3 tooling/apply_v38_hotplayer_followup.py
 
-      - name: Remove one-shot helpers
-        run: |
-          rm tooling/apply_v38_hotplayer_baseline.py
-          rm tooling/apply_v38_hotplayer_followup.py
-          rm .github/workflows/apply-v38-hotplayer-baseline.yml
+      - name: Keep workflow files untouched in bot commit
+        run: git restore .github/workflows/validate-feature-source.yml
 
       - name: Commit engine changes
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add lib/screens/player_screen.dart lib/services/m3u_fetcher.dart lib/services/xtream_service.dart
           git commit -m "perf: align live playback with HotPlayer baseline"
           git push origin HEAD:performance-engine-v38-hotplayer-baseline
