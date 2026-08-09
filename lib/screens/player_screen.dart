@@ -18,6 +18,7 @@ class PlayerScreen extends StatefulWidget {
   final List<Channel> playlist;
   final int initialIndex;
   final PlaybackSettings settings;
+  final bool isLiveContent;
 
   const PlayerScreen({
     super.key,
@@ -25,6 +26,7 @@ class PlayerScreen extends StatefulWidget {
     required this.playlist,
     required this.initialIndex,
     required this.settings,
+    this.isLiveContent = true,
   });
 
   @override
@@ -273,6 +275,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty('cache-pause', 'no');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
+
+        // En TV en vivo no necesitamos conservar paquetes ya reproducidos.
+        // Un back-buffer grande puede volver a mostrar escenas viejas después
+        // de un corte/reapertura. Películas y series mantienen su cache normal.
+        if (widget.isLiveContent) {
+          await platform.setProperty('demuxer-max-back-bytes', '0');
+        }
       }
     } catch (_) {
       // Optimización nativa opcional.
@@ -340,16 +349,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
             _compatibilityMode == ServerCompatibilityMode.liveRecovery ||
                 _compatibilityMode == ServerCompatibilityMode.advanced;
         if (recoveryMode) {
-          final reconnectOptions =
-              _compatibilityMode == ServerCompatibilityMode.advanced
+          final isAdvanced =
+              _compatibilityMode == ServerCompatibilityMode.advanced;
+
+          // reconnect_at_eof es sólo para señales live/endless. En VOD puede
+          // convertir el final normal de una película en una reapertura.
+          final reconnectOptions = widget.isLiveContent
+              ? (isAdvanced
                   ? 'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
                       'reconnect_on_network_error=1,'
                       'reconnect_on_http_error=408,429,5xx,'
                       'reconnect_delay_max=2'
                   : 'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
                       'reconnect_on_network_error=1,reconnect_on_http_error=5xx,'
-                      'reconnect_delay_max=1';
+                      'reconnect_delay_max=1')
+              : (isAdvanced
+                  ? 'reconnect=1,reconnect_streamed=1,'
+                      'reconnect_on_network_error=1,'
+                      'reconnect_on_http_error=408,429,5xx,'
+                      'reconnect_delay_max=2'
+                  : 'reconnect=1,reconnect_streamed=1,'
+                      'reconnect_on_network_error=1,reconnect_on_http_error=5xx,'
+                      'reconnect_delay_max=1');
           await platform.setProperty('stream-lavf-o', reconnectOptions);
+
+          // Si sabemos que es HLS en vivo, al reabrir empezamos en el último
+          // segmento disponible en vez de varios segmentos atrás. Esto reduce
+          // la repetición de escenas después de un corte.
+          if (widget.isLiveContent && _looksLikeHls(channel.url)) {
+            await platform.setProperty(
+              'demuxer-lavf-o',
+              'live_start_index=-1',
+            );
+          }
         }
       }
     } catch (_) {
@@ -366,11 +398,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!_isPlaying || !_hasEverPlayed) return;
 
     final silentFor = DateTime.now().difference(_lastProgressAt);
-    if (silentFor > _stallThreshold) {
+
+    // Mientras mpv está oficialmente en buffering le damos un margen extra
+    // para que la reconexión nativa actúe antes de reiniciar el Media. Reiniciar
+    // demasiado pronto era una causa de volver a segmentos HLS ya vistos.
+    final bufferingGrace = Duration(
+      seconds: _stallThreshold.inSeconds < 8
+          ? 12
+          : _stallThreshold.inSeconds + 4,
+    );
+    final effectiveStallThreshold =
+        _isBuffering ? bufferingGrace : _stallThreshold;
+
+    if (silentFor > effectiveStallThreshold) {
       final url = widget.playlist[_currentIndex].url;
       unawaited(_metrics.recordStall(url));
       _handleFailure('El stream dejó de responder', silent: true);
     }
+  }
+
+  bool _looksLikeHls(String url) {
+    final value = url.toLowerCase();
+    final format = _containerFormat?.toLowerCase() ?? '';
+    return value.contains('.m3u8') ||
+        format.contains('hls') ||
+        format.contains('applehttp');
   }
 
   Future<void> _refreshRuntimeStats() async {
@@ -457,6 +509,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _handleCompletedStream() async {
+    // Películas y series tienen un final real. No debemos interpretarlo como
+    // una caída de señal y volver a abrir el archivo desde el principio.
+    if (!widget.isLiveContent) {
+      _connectTimeoutTimer?.cancel();
+      _retryTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _isBuffering = false;
+          _reconnecting = false;
+          _engineDiagnostic = 'Reproducción finalizada correctamente';
+        });
+      }
+      return;
+    }
+
     final channel = widget.playlist[_currentIndex];
     final uri = Uri.tryParse(channel.url);
     final isHttpLive =
@@ -491,7 +558,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _playCurrent(
             isRetry: true,
             forceNormalProbe: true,
-            skipStop: true,
           ),
         );
       });
@@ -564,9 +630,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
           '$reason · señal inestable en ${previous.label}; probando ${target.label}';
     });
 
+    final resumePosition =
+        widget.isLiveContent ? null : _lastKnownPosition;
     scheduleMicrotask(() {
       if (!mounted) return;
-      unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
+      unawaited(
+        _playCurrent(
+          isRetry: true,
+          forceNormalProbe: true,
+          resumePosition: resumePosition,
+        ),
+      );
     });
     return true;
   }
@@ -652,9 +726,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _errorMessage = null;
       });
 
+      final resumePosition =
+          widget.isLiveContent ? null : _lastKnownPosition;
       _retryTimer = Timer(Duration(seconds: seconds), () {
         if (!mounted || failedSession != _sessionId) return;
-        unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
+        unawaited(
+          _playCurrent(
+            isRetry: true,
+            forceNormalProbe: true,
+            resumePosition: resumePosition,
+          ),
+        );
       });
     } else {
       setState(() {
@@ -690,6 +772,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     bool isRetry = false,
     bool forceNormalProbe = false,
     bool skipStop = false,
+    Duration? resumePosition,
   }) async {
     final session = ++_sessionId;
     _opening = true;
@@ -755,6 +838,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
           .open(Media(channel.url, httpHeaders: headers))
           .timeout(_connectTimeout);
       if (!mounted || session != _sessionId) return;
+
+      if (!widget.isLiveContent &&
+          resumePosition != null &&
+          resumePosition > Duration.zero) {
+        try {
+          await _player.seek(resumePosition);
+        } catch (_) {
+          // Si el servidor VOD no admite seek, seguimos desde donde permita.
+        }
+      }
 
       _opening = false;
       _connectTimeoutTimer = Timer(_connectTimeout, () {
@@ -1154,6 +1247,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   canNext: _currentIndex < widget.playlist.length - 1,
                   onPrevious: _previous,
                   onNext: _next,
+                  isLiveContent: widget.isLiveContent,
                 ),
                 if ((_isBuffering || _reconnecting) &&
                     _errorMessage == null)

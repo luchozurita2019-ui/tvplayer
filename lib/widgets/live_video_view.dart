@@ -15,6 +15,7 @@ class LiveVideoView extends StatefulWidget {
   final VoidCallback onNext;
   final bool canPrevious;
   final bool canNext;
+  final bool isLiveContent;
 
   const LiveVideoView({
     super.key,
@@ -24,6 +25,7 @@ class LiveVideoView extends StatefulWidget {
     required this.onNext,
     required this.canPrevious,
     required this.canNext,
+    this.isLiveContent = true,
   });
 
   @override
@@ -136,11 +138,12 @@ class _LiveVideoViewState extends State<LiveVideoView> {
         onPressed: widget.onNext,
       ),
       const MaterialDesktopVolumeButton(),
-      const MaterialDesktopPositionIndicator(),
-      _LiveControlIndicator(
-        active: _isLive,
-        label: _statusLabel,
-      ),
+      if (!widget.isLiveContent) const MaterialDesktopPositionIndicator(),
+      if (widget.isLiveContent)
+        _LiveControlIndicator(
+          active: _isLive,
+          label: _statusLabel,
+        ),
       const Spacer(),
       const MaterialDesktopFullscreenButton(),
     ];
