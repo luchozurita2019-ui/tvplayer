@@ -6,6 +6,7 @@ enum ServerCompatibilityMode {
   direct,
   compatible,
   liveRecovery,
+  advanced,
 }
 
 extension ServerCompatibilityModeLabel on ServerCompatibilityMode {
@@ -13,6 +14,7 @@ extension ServerCompatibilityModeLabel on ServerCompatibilityMode {
         ServerCompatibilityMode.direct => 'Directo',
         ServerCompatibilityMode.compatible => 'Compatible',
         ServerCompatibilityMode.liveRecovery => 'Live Recovery',
+        ServerCompatibilityMode.advanced => 'Compatibilidad avanzada',
       };
 }
 
@@ -22,7 +24,11 @@ class HostCompatibilityProfile {
   int directFailures;
   int compatibleFailures;
   int liveRecoveryFailures;
+  int advancedFailures;
   int liveEofRecoveries;
+  int runtimeRecoveries;
+  int normalProbeFallbacks;
+  bool preferNormalProbe;
   int successes;
   int lastUpdatedEpochMs;
 
@@ -32,7 +38,11 @@ class HostCompatibilityProfile {
     this.directFailures = 0,
     this.compatibleFailures = 0,
     this.liveRecoveryFailures = 0,
+    this.advancedFailures = 0,
     this.liveEofRecoveries = 0,
+    this.runtimeRecoveries = 0,
+    this.normalProbeFallbacks = 0,
+    this.preferNormalProbe = false,
     this.successes = 0,
     this.lastUpdatedEpochMs = 0,
   });
@@ -43,7 +53,11 @@ class HostCompatibilityProfile {
         'directFailures': directFailures,
         'compatibleFailures': compatibleFailures,
         'liveRecoveryFailures': liveRecoveryFailures,
+        'advancedFailures': advancedFailures,
         'liveEofRecoveries': liveEofRecoveries,
+        'runtimeRecoveries': runtimeRecoveries,
+        'normalProbeFallbacks': normalProbeFallbacks,
+        'preferNormalProbe': preferNormalProbe,
         'successes': successes,
         'lastUpdatedEpochMs': lastUpdatedEpochMs,
       };
@@ -62,7 +76,12 @@ class HostCompatibilityProfile {
       compatibleFailures: (json['compatibleFailures'] as num?)?.toInt() ?? 0,
       liveRecoveryFailures:
           (json['liveRecoveryFailures'] as num?)?.toInt() ?? 0,
+      advancedFailures: (json['advancedFailures'] as num?)?.toInt() ?? 0,
       liveEofRecoveries: (json['liveEofRecoveries'] as num?)?.toInt() ?? 0,
+      runtimeRecoveries: (json['runtimeRecoveries'] as num?)?.toInt() ?? 0,
+      normalProbeFallbacks:
+          (json['normalProbeFallbacks'] as num?)?.toInt() ?? 0,
+      preferNormalProbe: json['preferNormalProbe'] as bool? ?? false,
       successes: (json['successes'] as num?)?.toInt() ?? 0,
       lastUpdatedEpochMs:
           (json['lastUpdatedEpochMs'] as num?)?.toInt() ?? 0,
@@ -76,6 +95,8 @@ class ServerCompatibilityService {
   static final ServerCompatibilityService instance =
       ServerCompatibilityService._();
 
+  // Conservamos la clave v1 para no perder lo aprendido por V3.6. Los campos
+  // nuevos son opcionales y se cargan con valores seguros en perfiles viejos.
   static const _storageKey = 'server_compatibility_v1';
 
   final Map<String, HostCompatibilityProfile> _profiles = {};
@@ -131,22 +152,36 @@ class ServerCompatibilityService {
     return profile.preferredMode;
   }
 
+  Future<bool> normalProbePreferredForUrl(String url) async {
+    final profile = await profileForUrl(url);
+    return profile.preferNormalProbe;
+  }
+
   List<ServerCompatibilityMode> planFor(ServerCompatibilityMode preferred) {
     return switch (preferred) {
       ServerCompatibilityMode.direct => const [
           ServerCompatibilityMode.direct,
           ServerCompatibilityMode.compatible,
           ServerCompatibilityMode.liveRecovery,
+          ServerCompatibilityMode.advanced,
         ],
       ServerCompatibilityMode.compatible => const [
           ServerCompatibilityMode.compatible,
           ServerCompatibilityMode.direct,
+          ServerCompatibilityMode.advanced,
           ServerCompatibilityMode.liveRecovery,
         ],
       ServerCompatibilityMode.liveRecovery => const [
           ServerCompatibilityMode.liveRecovery,
           ServerCompatibilityMode.direct,
+          ServerCompatibilityMode.advanced,
           ServerCompatibilityMode.compatible,
+        ],
+      ServerCompatibilityMode.advanced => const [
+          ServerCompatibilityMode.advanced,
+          ServerCompatibilityMode.liveRecovery,
+          ServerCompatibilityMode.compatible,
+          ServerCompatibilityMode.direct,
         ],
     };
   }
@@ -177,15 +212,36 @@ class ServerCompatibilityService {
       case ServerCompatibilityMode.liveRecovery:
         profile.liveRecoveryFailures++;
         break;
+      case ServerCompatibilityMode.advanced:
+        profile.advancedFailures++;
+        break;
     }
     profile.lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
     await _save();
   }
 
-  Future<void> recordLiveEof(String url) async {
+  Future<void> recordNormalProbeFallback(String url) async {
+    final profile = await profileForUrl(url);
+    profile.normalProbeFallbacks++;
+    profile.preferNormalProbe = true;
+    profile.lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
+    await _save();
+  }
+
+  Future<void> recordRuntimeRecovery(String url) async {
+    final profile = await profileForUrl(url);
+    profile.runtimeRecoveries++;
+    profile.lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
+    await _save();
+  }
+
+  Future<void> recordLiveEof(
+    String url,
+    ServerCompatibilityMode recoveryMode,
+  ) async {
     final profile = await profileForUrl(url);
     profile.liveEofRecoveries++;
-    profile.preferredMode = ServerCompatibilityMode.liveRecovery;
+    profile.preferredMode = recoveryMode;
     profile.lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
     await _save();
   }
