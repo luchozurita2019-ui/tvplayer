@@ -1,0 +1,36 @@
+name: Apply V3.7.2 HotPlayer live recovery
+
+on:
+  push:
+    branches:
+      - performance-engine-v37-compatibility
+    paths:
+      - tooling/apply_v372_hotplayer_live.py
+      - .github/workflows/apply-v372-hotplayer-live.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: performance-engine-v37-compatibility
+
+      - name: Apply V3.7.2 patch
+        run: python3 tooling/apply_v372_hotplayer_live.py
+
+      - name: Commit fixes
+        run: |
+          if git diff --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/player_screen.dart
+          git commit -m "perf: retry live segments before reopening streams"
+          git push origin performance-engine-v37-compatibility
