@@ -5,6 +5,7 @@ import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
+import '../services/artwork_cache_service.dart';
 import '../services/playback_metrics_service.dart';
 import '../services/server_compatibility_service.dart';
 import '../widgets/channel_tile.dart';
@@ -135,6 +136,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    ArtworkCacheService.instance.pauseForPlayback();
     _currentIndex = widget.initialIndex;
     _effectiveSettings = widget.settings;
 
@@ -1252,6 +1254,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioBitrateSub?.cancel();
     _logSub?.cancel();
     unawaited(_player.dispose());
+    ArtworkCacheService.instance.resumeBrowsing();
     super.dispose();
   }
 

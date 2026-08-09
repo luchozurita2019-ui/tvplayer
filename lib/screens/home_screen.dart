@@ -7,6 +7,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../widgets/cached_artwork_image.dart';
 import 'add_source_screen.dart';
 import 'source_content_screen.dart';
 import 'playback_settings_screen.dart';
@@ -512,12 +513,15 @@ class _ChannelLogo extends StatelessWidget {
     return CircleAvatar(
       backgroundColor: Colors.transparent,
       child: ClipOval(
-        child: Image.network(
-          logo,
+        child: SizedBox(
           width: 40,
           height: 40,
-          fit: BoxFit.contain,
-          errorBuilder: (_, __, ___) => const Icon(Icons.tv),
+          child: CachedArtworkImage(
+            url: logo,
+            fit: BoxFit.contain,
+            cacheWidth: 80,
+            fallback: const Icon(Icons.tv),
+          ),
         ),
       ),
     );
