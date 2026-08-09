@@ -64,7 +64,8 @@ class Channel {
   static String _canonicalHeaderName(String key) {
     return switch (key.trim().toLowerCase()) {
       'user-agent' => 'User-Agent',
-      'referer' || 'referrer' => 'Referer',
+      'referer' => 'Referer',
+      'referrer' => 'Referer',
       'origin' => 'Origin',
       'cookie' => 'Cookie',
       'authorization' => 'Authorization',
