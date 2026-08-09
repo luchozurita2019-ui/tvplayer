@@ -38,6 +38,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _runtimeStatsInterval = Duration(seconds: 1);
   static const String _fastProbeSize = '131072';
   static const String _normalProbeSize = '5000000';
+  static const int _hlsSegmentRetryCount = 5;
+  static const Duration _liveTransientErrorGrace = Duration(seconds: 6);
 
   final PlaybackMetricsService _metrics = PlaybackMetricsService.instance;
   final ServerCompatibilityService _compatibility =
@@ -105,6 +107,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _runtimeStatsTimer;
   Timer? _connectTimeoutTimer;
   Timer? _retryTimer;
+  Timer? _transientLiveFailureTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
   Stopwatch? _startupStopwatch;
@@ -156,6 +159,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _connectTimeoutTimer?.cancel();
         _retryTimer?.cancel();
         _retryTimer = null;
+        _transientLiveFailureTimer?.cancel();
+        _transientLiveFailureTimer = null;
         _hasEverPlayed = true;
         _retryCount = 0;
         _lastProgressAt = DateTime.now();
@@ -184,7 +189,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _errorSub = _player.stream.error.listen((error) {
       if (_opening) return;
-      _handleFailure('Error de reproducción: $error');
+      final message = 'Error de reproducción: $error';
+      if (widget.isLiveContent && _hasEverPlayed) {
+        _scheduleTransientLiveFailure(message);
+        return;
+      }
+      _handleFailure(message);
     });
 
     _playingSub = _player.stream.playing.listen((playing) {
@@ -196,6 +206,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (position != _lastKnownPosition) {
         _lastKnownPosition = position;
         _lastProgressAt = DateTime.now();
+        _transientLiveFailureTimer?.cancel();
+        _transientLiveFailureTimer = null;
       }
     });
 
@@ -281,6 +293,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         // de un corte/reapertura. Películas y series mantienen su cache normal.
         if (widget.isLiveContent) {
           await platform.setProperty('demuxer-max-back-bytes', '0');
+          await platform.setProperty('cache-on-disk', 'no');
         }
       }
     } catch (_) {
@@ -296,8 +309,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final tuning = await _metrics.tuningFor(channel.url, widget.settings);
     if (!mounted || session != _sessionId) return false;
 
-    _effectiveSettings = tuning.settings;
-    _tuningLabel = tuning.label;
+    final tunedSettings = tuning.settings;
+    final applyLiveStabilityFloor =
+        widget.isLiveContent && widget.settings.profile == BufferProfile.auto;
+    _effectiveSettings = applyLiveStabilityFloor
+        ? tunedSettings.copyWith(
+            bufferMb: tunedSettings.bufferMb < 16 ? 16 : tunedSettings.bufferMb,
+            readaheadSeconds: tunedSettings.readaheadSeconds < 2.5
+                ? 2.5
+                : tunedSettings.readaheadSeconds,
+            recoveryBufferSeconds: tunedSettings.recoveryBufferSeconds < 1.5
+                ? 1.5
+                : tunedSettings.recoveryBufferSeconds,
+            connectTimeoutSeconds: tunedSettings.connectTimeoutSeconds < 8
+                ? 8
+                : tunedSettings.connectTimeoutSeconds,
+            stallThresholdSeconds: tunedSettings.stallThresholdSeconds < 12
+                ? 12
+                : tunedSettings.stallThresholdSeconds,
+          )
+        : tunedSettings;
+    _tuningLabel = applyLiveStabilityFloor
+        ? '${tuning.label} · Live estable'
+        : tuning.label;
     _useFastProbe = tuning.useFastProbe;
     final modeNeedsNormalProbe =
         _compatibilityMode == ServerCompatibilityMode.compatible ||
@@ -321,6 +355,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty(
           'demuxer-max-bytes',
           '${_effectiveSettings.bufferMb}MiB',
+        );
+        await platform.setProperty(
+          'network-timeout',
+          _effectiveSettings.connectTimeoutSeconds.toString(),
         );
         await platform.setProperty(
           'demuxer-lavf-probesize',
@@ -348,40 +386,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final recoveryMode =
             _compatibilityMode == ServerCompatibilityMode.liveRecovery ||
                 _compatibilityMode == ServerCompatibilityMode.advanced;
-        if (recoveryMode) {
-          final isAdvanced =
-              _compatibilityMode == ServerCompatibilityMode.advanced;
+        final isAdvanced =
+            _compatibilityMode == ServerCompatibilityMode.advanced;
+        final isLiveHttp = widget.isLiveContent && _isHttpUrl(channel.url);
+        final isLiveHls = widget.isLiveContent && _looksLikeHls(channel.url);
 
-          // reconnect_at_eof es sólo para señales live/endless. En VOD puede
-          // convertir el final normal de una película en una reapertura.
-          final reconnectOptions = widget.isLiveContent
-              ? (isAdvanced
-                  ? 'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-                      'reconnect_on_network_error=1,'
-                      'reconnect_on_http_error=408,429,5xx,'
-                      'reconnect_delay_max=2'
-                  : 'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-                      'reconnect_on_network_error=1,reconnect_on_http_error=5xx,'
-                      'reconnect_delay_max=1')
-              : (isAdvanced
-                  ? 'reconnect=1,reconnect_streamed=1,'
-                      'reconnect_on_network_error=1,'
-                      'reconnect_on_http_error=408,429,5xx,'
-                      'reconnect_delay_max=2'
-                  : 'reconnect=1,reconnect_streamed=1,'
-                      'reconnect_on_network_error=1,reconnect_on_http_error=5xx,'
-                      'reconnect_delay_max=1');
+        // Hallazgo confirmado en HotPlayer Mac: seg_max_retry=5. Hacemos que
+        // FFmpeg reintente el segmento HLS antes de considerar caído el canal.
+        // live_start_index=-1 mantiene una reapertura pegada al borde en vivo.
+        if (isLiveHls) {
+          await platform.setProperty(
+            'demuxer-lavf-o',
+            'seg_max_retry=$_hlsSegmentRetryCount,live_start_index=-1',
+          );
+        }
+
+        // En live HTTP la recuperación de transporte trabaja desde la primera
+        // apertura, no sólo después de que Flutter reinicie el Media. Esto evita
+        // muchos cortes visibles y repeticiones de escenas.
+        if (isLiveHttp) {
+          final reconnectOptions = <String>[
+            'reconnect=1',
+            'reconnect_streamed=1',
+            'reconnect_on_network_error=1',
+            'reconnect_at_eof=1',
+            if (recoveryMode) 'reconnect_on_http_error=5xx',
+            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
+          ].join(',');
           await platform.setProperty('stream-lavf-o', reconnectOptions);
-
-          // Si sabemos que es HLS en vivo, al reabrir empezamos en el último
-          // segmento disponible en vez de varios segmentos atrás. Esto reduce
-          // la repetición de escenas después de un corte.
-          if (widget.isLiveContent && _looksLikeHls(channel.url)) {
-            await platform.setProperty(
-              'demuxer-lavf-o',
-              'live_start_index=-1',
-            );
-          }
+        } else if (recoveryMode) {
+          // VOD puede reconectar errores de red, pero nunca reabrimos por EOF:
+          // el final de una película o episodio es un final real.
+          final reconnectOptions = <String>[
+            'reconnect=1',
+            'reconnect_streamed=1',
+            'reconnect_on_network_error=1',
+            'reconnect_on_http_error=5xx',
+            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
+          ].join(',');
+          await platform.setProperty('stream-lavf-o', reconnectOptions);
         }
       }
     } catch (_) {
@@ -399,22 +442,40 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final silentFor = DateTime.now().difference(_lastProgressAt);
 
-    // Mientras mpv está oficialmente en buffering le damos un margen extra
-    // para que la reconexión nativa actúe antes de reiniciar el Media. Reiniciar
-    // demasiado pronto era una causa de volver a segmentos HLS ya vistos.
-    final bufferingGrace = Duration(
-      seconds: _stallThreshold.inSeconds < 8
-          ? 12
-          : _stallThreshold.inSeconds + 4,
-    );
+    // HotPlayer deja que FFmpeg intente recuperar segmentos antes de
+    // reconstruir la reproducción. En live damos ese mismo margen: un microcorte
+    // no debe convertirse en stop/open del Media.
+    final liveGrace = widget.isLiveContent
+        ? Duration(
+            seconds: _stallThreshold.inSeconds < 15
+                ? 15
+                : _stallThreshold.inSeconds,
+          )
+        : _stallThreshold;
+    final bufferingGrace = widget.isLiveContent
+        ? Duration(
+            seconds: _stallThreshold.inSeconds + 8 < 20
+                ? 20
+                : _stallThreshold.inSeconds + 8,
+          )
+        : Duration(
+            seconds: _stallThreshold.inSeconds < 8
+                ? 12
+                : _stallThreshold.inSeconds + 4,
+          );
     final effectiveStallThreshold =
-        _isBuffering ? bufferingGrace : _stallThreshold;
+        _isBuffering ? bufferingGrace : liveGrace;
 
     if (silentFor > effectiveStallThreshold) {
       final url = widget.playlist[_currentIndex].url;
       unawaited(_metrics.recordStall(url));
       _handleFailure('El stream dejó de responder', silent: true);
     }
+  }
+
+  bool _isHttpUrl(String url) {
+    final uri = Uri.tryParse(url);
+    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
   }
 
   bool _looksLikeHls(String url) {
@@ -695,11 +756,41 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  void _scheduleTransientLiveFailure(String message) {
+    _transientLiveFailureTimer?.cancel();
+    final session = _sessionId;
+    final progressAtError = _lastProgressAt;
+
+    if (mounted) {
+      setState(() {
+        _engineDiagnostic =
+            'Corte transitorio: FFmpeg está intentando recuperar la señal';
+      });
+    }
+
+    _transientLiveFailureTimer = Timer(_liveTransientErrorGrace, () {
+      _transientLiveFailureTimer = null;
+      if (!mounted ||
+          session != _sessionId ||
+          _opening ||
+          _reconnecting ||
+          _errorMessage != null) {
+        return;
+      }
+
+      // Si hubo progreso desde el error, la recuperación nativa funcionó.
+      if (_lastProgressAt.isAfter(progressAtError)) return;
+      _handleFailure(message, silent: true);
+    });
+  }
+
   void _handleFailure(String message, {bool silent = false}) {
     if (!mounted || _opening) return;
 
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
+    _transientLiveFailureTimer?.cancel();
+    _transientLiveFailureTimer = null;
 
     final failedSession = _sessionId;
     final url = widget.playlist[_currentIndex].url;
@@ -779,6 +870,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _retryTimer = null;
+    _transientLiveFailureTimer?.cancel();
+    _transientLiveFailureTimer = null;
 
     if (!isRetry) {
       _retryCount = 0;
@@ -1162,6 +1255,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _runtimeStatsTimer?.cancel();
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
+    _transientLiveFailureTimer?.cancel();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
     _positionSub?.cancel();
