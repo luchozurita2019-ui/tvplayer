@@ -150,7 +150,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           !mounted ||
           _opening ||
           _reconnecting ||
-          _isBuffering ||
           _errorMessage != null) {
         return;
       }
@@ -286,9 +285,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         // señal continúe. No queremos que mpv transforme ese EOF en Pause.
         await platform.setProperty('keep-open', 'no');
 
-        // No dejamos que mpv cambie el estado global a Pause cuando el cache
-        // se vacía. El frame puede quedar quieto mientras llegan paquetes,
-        // pero el motor sigue en reproducción y FFmpeg puede reconectar abajo.
+        // Dejamos activo el buffering nativo de mpv. Si la red se queda sin
+        // datos, pausa internamente, rellena el cache y continúa sin destruir
+        // la sesión HTTP/HLS; esto es mucho más tolerante a conexiones débiles.
         await platform.setProperty('cache-pause', 'yes');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
