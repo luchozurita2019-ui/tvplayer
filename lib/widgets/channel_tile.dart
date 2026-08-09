@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import '../models/channel.dart';
+import 'cached_artwork_image.dart';
 
 class ChannelTile extends StatelessWidget {
   final Channel channel;
   final bool isFavorite;
   final VoidCallback onFavoriteToggle;
   final VoidCallback onTap;
+  final bool allowNetworkArtwork;
 
   const ChannelTile({
     super.key,
@@ -13,6 +15,7 @@ class ChannelTile extends StatelessWidget {
     required this.isFavorite,
     required this.onFavoriteToggle,
     required this.onTap,
+    this.allowNetworkArtwork = true,
   });
 
   @override
@@ -21,22 +24,16 @@ class ChannelTile extends StatelessWidget {
       leading: SizedBox(
         width: 48,
         height: 48,
-        child: channel.logoUrl != null
-            ? ClipRRect(
-                borderRadius: BorderRadius.circular(6),
-                child: Image.network(
-                  channel.logoUrl!,
-                  fit: BoxFit.cover,
-                  // Si el logo falla o tarda, no bloquea la lista:
-                  // cae a un ícono genérico al instante.
-                  errorBuilder: (_, __, ___) => const _FallbackIcon(),
-                  loadingBuilder: (context, child, progress) {
-                    if (progress == null) return child;
-                    return const _FallbackIcon();
-                  },
-                ),
-              )
-            : const _FallbackIcon(),
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(6),
+          child: CachedArtworkImage(
+            url: channel.logoUrl,
+            fit: BoxFit.cover,
+            cacheWidth: 96,
+            allowNetwork: allowNetworkArtwork,
+            fallback: const _FallbackIcon(),
+          ),
+        ),
       ),
       title: Text(channel.name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: channel.group != null ? Text(channel.group!) : null,

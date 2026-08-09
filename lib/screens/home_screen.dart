@@ -6,6 +6,7 @@ import '../models/playback_settings.dart';
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
+import '../services/artwork_cache_service.dart';
 import 'add_source_screen.dart';
 import 'source_content_screen.dart';
 import 'playback_settings_screen.dart';
@@ -222,6 +223,42 @@ class _PlaylistCard extends StatelessWidget {
 
   const _PlaylistCard({required this.playlist});
 
+  Future<void> _openPlaylist(BuildContext context) async {
+    final navigator = Navigator.of(context);
+    final cache = ArtworkCacheService.instance;
+
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.4),
+            ),
+            SizedBox(width: 16),
+            Expanded(child: Text('Preparando canales, logos y portadas…')),
+          ],
+        ),
+      ),
+    );
+
+    try {
+      await cache.warmProvider(playlist);
+    } finally {
+      if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
+    }
+    if (!context.mounted) return;
+
+    await navigator.push(
+      MaterialPageRoute(
+        builder: (_) => SourceContentScreen(playlist: playlist),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.read<IptvProvider>();
@@ -229,11 +266,7 @@ class _PlaylistCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: () => Navigator.of(context).push(
-          MaterialPageRoute(
-            builder: (_) => SourceContentScreen(playlist: playlist),
-          ),
-        ),
+        onTap: () => _openPlaylist(context),
         child: Padding(
           padding: const EdgeInsets.all(18),
           child: Row(

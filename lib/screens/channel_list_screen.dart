@@ -1,9 +1,13 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
+import '../services/artwork_cache_service.dart';
+import '../widgets/cached_artwork_image.dart';
 import 'player_screen.dart';
 
 enum _CatalogMode { live, movies, series, radios }
@@ -48,6 +52,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   String _query = '';
   late List<String> _groups;
   late Map<String, int> _groupCounts;
+  bool _initialArtworkReady = false;
 
   _CatalogMode get _mode {
     final id = widget.playlist.id;
@@ -61,6 +66,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   void initState() {
     super.initState();
     _rebuildCategoryCache(widget.playlist);
+    unawaited(_prepareInitialArtwork());
   }
 
   @override
@@ -85,6 +91,16 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     final groups = counts.keys.toList()..sort();
     _groups = List.unmodifiable(groups);
     _groupCounts = Map.unmodifiable(counts);
+  }
+
+  Future<void> _prepareInitialArtwork() async {
+    final limit = _mode.usesPoster ? 12 : 24;
+    await ArtworkCacheService.instance.warmSection(
+      widget.playlist.channels,
+      limit: limit,
+    );
+    if (!mounted) return;
+    setState(() => _initialArtworkReady = true);
   }
 
   @override
@@ -151,8 +167,19 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           const SizedBox(width: 8),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
+      body: !_initialArtworkReady
+          ? const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(),
+                  SizedBox(height: 14),
+                  Text('Preparando logos y portadas…'),
+                ],
+              ),
+            )
+          : LayoutBuilder(
+              builder: (context, constraints) {
           if (constraints.maxWidth >= 900) {
             return _DesktopCatalogLayout(
               mode: mode,
@@ -219,16 +246,17 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     }).toList(growable: false);
   }
 
-  void _openChannel(
+  Future<void> _openChannel(
     BuildContext context,
     List<Channel> channels,
     Channel channel,
     IptvProvider provider,
-  ) {
+  ) async {
     final index = channels.indexOf(channel);
     if (index < 0) return;
 
-    Navigator.of(context).push(
+    ArtworkCacheService.instance.pauseForPlayback();
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           channel: channel,
@@ -240,6 +268,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
         ),
       ),
     );
+    ArtworkCacheService.instance.resumeBrowsing();
   }
 }
 
@@ -576,7 +605,7 @@ class _CatalogGrid extends StatelessWidget {
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(28, 8, 28, 34),
-          cacheExtent: 700,
+          cacheExtent: 80,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
             crossAxisSpacing: 18,
@@ -974,27 +1003,11 @@ class _Artwork extends StatelessWidget {
       return _ArtworkFallback(mode: mode);
     }
 
-    return Image.network(
-      logo,
+    return CachedArtworkImage(
+      url: logo,
       fit: fit,
-      filterQuality: FilterQuality.medium,
-      errorBuilder: (_, __, ___) => _ArtworkFallback(mode: mode),
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
-        return Center(
-          child: SizedBox(
-            width: 26,
-            height: 26,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              value: progress.expectedTotalBytes == null
-                  ? null
-                  : progress.cumulativeBytesLoaded /
-                      progress.expectedTotalBytes!,
-            ),
-          ),
-        );
-      },
+      cacheWidth: mode.usesPoster ? 420 : 300,
+      fallback: _ArtworkFallback(mode: mode),
     );
   }
 }

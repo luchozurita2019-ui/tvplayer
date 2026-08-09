@@ -1439,6 +1439,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             isFavorite: false,
                             onFavoriteToggle: () {},
                             onTap: () => _switchToChannel(realIndex),
+                            allowNetworkArtwork: false,
                           ),
                         );
                       },
