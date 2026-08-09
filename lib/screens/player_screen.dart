@@ -18,6 +18,7 @@ class PlayerScreen extends StatefulWidget {
   final List<Channel> playlist;
   final int initialIndex;
   final PlaybackSettings settings;
+  final bool isLiveContent;
 
   const PlayerScreen({
     super.key,
@@ -25,6 +26,7 @@ class PlayerScreen extends StatefulWidget {
     required this.playlist,
     required this.initialIndex,
     required this.settings,
+    this.isLiveContent = true,
   });
 
   @override
@@ -36,6 +38,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _runtimeStatsInterval = Duration(seconds: 1);
   static const String _fastProbeSize = '131072';
   static const String _normalProbeSize = '5000000';
+  static const int _hlsSegmentRetryCount = 5;
+  static const Duration _liveTransientErrorGrace = Duration(seconds: 6);
 
   final PlaybackMetricsService _metrics = PlaybackMetricsService.instance;
   final ServerCompatibilityService _compatibility =
@@ -88,9 +92,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     ServerCompatibilityMode.direct,
     ServerCompatibilityMode.compatible,
     ServerCompatibilityMode.liveRecovery,
+    ServerCompatibilityMode.advanced,
   ];
   int _compatibilityIndex = 0;
   int _compatibilityFallbacks = 0;
+  int _runtimeRecoveryPromotions = 0;
+  bool _compatibilityPrefersNormalProbe = false;
   ServerCompatibilityMode _compatibilityMode =
       ServerCompatibilityMode.direct;
   String? _compatibilityUrl;
@@ -100,6 +107,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   Timer? _runtimeStatsTimer;
   Timer? _connectTimeoutTimer;
   Timer? _retryTimer;
+  Timer? _transientLiveFailureTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
   Stopwatch? _startupStopwatch;
@@ -151,6 +159,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _connectTimeoutTimer?.cancel();
         _retryTimer?.cancel();
         _retryTimer = null;
+        _transientLiveFailureTimer?.cancel();
+        _transientLiveFailureTimer = null;
         _hasEverPlayed = true;
         _retryCount = 0;
         _lastProgressAt = DateTime.now();
@@ -179,7 +189,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _errorSub = _player.stream.error.listen((error) {
       if (_opening) return;
-      _handleFailure('Error de reproducción: $error');
+      final message = 'Error de reproducción: $error';
+      if (widget.isLiveContent && _hasEverPlayed) {
+        _scheduleTransientLiveFailure(message);
+        return;
+      }
+      _handleFailure(message);
     });
 
     _playingSub = _player.stream.playing.listen((playing) {
@@ -191,6 +206,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       if (position != _lastKnownPosition) {
         _lastKnownPosition = position;
         _lastProgressAt = DateTime.now();
+        _transientLiveFailureTimer?.cancel();
+        _transientLiveFailureTimer = null;
       }
     });
 
@@ -270,6 +287,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty('cache-pause', 'no');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
+
+        // En TV en vivo no necesitamos conservar paquetes ya reproducidos.
+        // Un back-buffer grande puede volver a mostrar escenas viejas después
+        // de un corte/reapertura. Películas y series mantienen su cache normal.
+        if (widget.isLiveContent) {
+          await platform.setProperty('demuxer-max-back-bytes', '0');
+          await platform.setProperty('cache-on-disk', 'no');
+        }
       }
     } catch (_) {
       // Optimización nativa opcional.
@@ -284,12 +309,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final tuning = await _metrics.tuningFor(channel.url, widget.settings);
     if (!mounted || session != _sessionId) return false;
 
-    _effectiveSettings = tuning.settings;
-    _tuningLabel = tuning.label;
+    final tunedSettings = tuning.settings;
+    final applyLiveStabilityFloor =
+        widget.isLiveContent && widget.settings.profile == BufferProfile.auto;
+    _effectiveSettings = applyLiveStabilityFloor
+        ? tunedSettings.copyWith(
+            bufferMb: tunedSettings.bufferMb < 16 ? 16 : tunedSettings.bufferMb,
+            readaheadSeconds: tunedSettings.readaheadSeconds < 2.5
+                ? 2.5
+                : tunedSettings.readaheadSeconds,
+            recoveryBufferSeconds: tunedSettings.recoveryBufferSeconds < 1.5
+                ? 1.5
+                : tunedSettings.recoveryBufferSeconds,
+            connectTimeoutSeconds: tunedSettings.connectTimeoutSeconds < 8
+                ? 8
+                : tunedSettings.connectTimeoutSeconds,
+            stallThresholdSeconds: tunedSettings.stallThresholdSeconds < 12
+                ? 12
+                : tunedSettings.stallThresholdSeconds,
+          )
+        : tunedSettings;
+    _tuningLabel = applyLiveStabilityFloor
+        ? '${tuning.label} · Live estable'
+        : tuning.label;
     _useFastProbe = tuning.useFastProbe;
+    final modeNeedsNormalProbe =
+        _compatibilityMode == ServerCompatibilityMode.compatible ||
+            _compatibilityMode == ServerCompatibilityMode.advanced;
     _currentOpenUsesFastProbe = _useFastProbe &&
         !forceNormalProbe &&
-        _compatibilityMode != ServerCompatibilityMode.compatible;
+        !_compatibilityPrefersNormalProbe &&
+        !modeNeedsNormalProbe;
 
     try {
       final platform = _player.platform;
@@ -307,6 +357,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
           '${_effectiveSettings.bufferMb}MiB',
         );
         await platform.setProperty(
+          'network-timeout',
+          _effectiveSettings.connectTimeoutSeconds.toString(),
+        );
+        await platform.setProperty(
           'demuxer-lavf-probesize',
           _currentOpenUsesFastProbe ? _fastProbeSize : _normalProbeSize,
         );
@@ -321,20 +375,56 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty('demuxer-lavf-propagate-opts', 'no');
         await platform.setProperty('demuxer-lavf-o', '');
         await platform.setProperty('stream-lavf-o', '');
+        final disableMime =
+            _compatibilityMode == ServerCompatibilityMode.compatible ||
+                _compatibilityMode == ServerCompatibilityMode.advanced;
         await platform.setProperty(
           'demuxer-lavf-allow-mimetype',
-          _compatibilityMode == ServerCompatibilityMode.compatible
-              ? 'no'
-              : 'yes',
+          disableMime ? 'no' : 'yes',
         );
 
-        if (_compatibilityMode == ServerCompatibilityMode.liveRecovery) {
+        final recoveryMode =
+            _compatibilityMode == ServerCompatibilityMode.liveRecovery ||
+                _compatibilityMode == ServerCompatibilityMode.advanced;
+        final isAdvanced =
+            _compatibilityMode == ServerCompatibilityMode.advanced;
+        final isLiveHttp = widget.isLiveContent && _isHttpUrl(channel.url);
+        final isLiveHls = widget.isLiveContent && _looksLikeHls(channel.url);
+
+        // Hallazgo confirmado en HotPlayer Mac: seg_max_retry=5. Hacemos que
+        // FFmpeg reintente el segmento HLS antes de considerar caído el canal.
+        // live_start_index=-1 mantiene una reapertura pegada al borde en vivo.
+        if (isLiveHls) {
           await platform.setProperty(
-            'stream-lavf-o',
-            'reconnect=1,reconnect_at_eof=1,reconnect_streamed=1,'
-                'reconnect_on_network_error=1,reconnect_on_http_error=5xx,'
-                'reconnect_delay_max=1',
+            'demuxer-lavf-o',
+            'seg_max_retry=$_hlsSegmentRetryCount,live_start_index=-1',
           );
+        }
+
+        // En live HTTP la recuperación de transporte trabaja desde la primera
+        // apertura, no sólo después de que Flutter reinicie el Media. Esto evita
+        // muchos cortes visibles y repeticiones de escenas.
+        if (isLiveHttp) {
+          final reconnectOptions = <String>[
+            'reconnect=1',
+            'reconnect_streamed=1',
+            'reconnect_on_network_error=1',
+            'reconnect_at_eof=1',
+            if (recoveryMode) 'reconnect_on_http_error=5xx',
+            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
+          ].join(',');
+          await platform.setProperty('stream-lavf-o', reconnectOptions);
+        } else if (recoveryMode) {
+          // VOD puede reconectar errores de red, pero nunca reabrimos por EOF:
+          // el final de una película o episodio es un final real.
+          final reconnectOptions = <String>[
+            'reconnect=1',
+            'reconnect_streamed=1',
+            'reconnect_on_network_error=1',
+            'reconnect_on_http_error=5xx',
+            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
+          ].join(',');
+          await platform.setProperty('stream-lavf-o', reconnectOptions);
         }
       }
     } catch (_) {
@@ -351,11 +441,49 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!_isPlaying || !_hasEverPlayed) return;
 
     final silentFor = DateTime.now().difference(_lastProgressAt);
-    if (silentFor > _stallThreshold) {
+
+    // HotPlayer deja que FFmpeg intente recuperar segmentos antes de
+    // reconstruir la reproducción. En live damos ese mismo margen: un microcorte
+    // no debe convertirse en stop/open del Media.
+    final liveGrace = widget.isLiveContent
+        ? Duration(
+            seconds: _stallThreshold.inSeconds < 15
+                ? 15
+                : _stallThreshold.inSeconds,
+          )
+        : _stallThreshold;
+    final bufferingGrace = widget.isLiveContent
+        ? Duration(
+            seconds: _stallThreshold.inSeconds + 8 < 20
+                ? 20
+                : _stallThreshold.inSeconds + 8,
+          )
+        : Duration(
+            seconds: _stallThreshold.inSeconds < 8
+                ? 12
+                : _stallThreshold.inSeconds + 4,
+          );
+    final effectiveStallThreshold =
+        _isBuffering ? bufferingGrace : liveGrace;
+
+    if (silentFor > effectiveStallThreshold) {
       final url = widget.playlist[_currentIndex].url;
       unawaited(_metrics.recordStall(url));
       _handleFailure('El stream dejó de responder', silent: true);
     }
+  }
+
+  bool _isHttpUrl(String url) {
+    final uri = Uri.tryParse(url);
+    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+  }
+
+  bool _looksLikeHls(String url) {
+    final value = url.toLowerCase();
+    final format = _containerFormat?.toLowerCase() ?? '';
+    return value.contains('.m3u8') ||
+        format.contains('hls') ||
+        format.contains('applehttp');
   }
 
   Future<void> _refreshRuntimeStats() async {
@@ -442,6 +570,21 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _handleCompletedStream() async {
+    // Películas y series tienen un final real. No debemos interpretarlo como
+    // una caída de señal y volver a abrir el archivo desde el principio.
+    if (!widget.isLiveContent) {
+      _connectTimeoutTimer?.cancel();
+      _retryTimer?.cancel();
+      if (mounted) {
+        setState(() {
+          _isBuffering = false;
+          _reconnecting = false;
+          _engineDiagnostic = 'Reproducción finalizada correctamente';
+        });
+      }
+      return;
+    }
+
     final channel = widget.playlist[_currentIndex];
     final uri = Uri.tryParse(channel.url);
     final isHttpLive =
@@ -450,16 +593,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_hasEverPlayed && isHttpLive) {
       _seamlessEofRecoveries++;
       _retryTimer?.cancel();
-      await _compatibility.recordLiveEof(channel.url);
+
+      // Si el servidor necesitó MIME relajado para abrir, conservamos ese
+      // comportamiento durante la recuperación. Advanced = Compatible +
+      // reconexión, evitando que un EOF haga volver a un modo incompatible.
+      final recoveryMode =
+          _compatibilityMode == ServerCompatibilityMode.compatible ||
+                  _compatibilityMode == ServerCompatibilityMode.advanced
+              ? ServerCompatibilityMode.advanced
+              : ServerCompatibilityMode.liveRecovery;
+      await _compatibility.recordLiveEof(channel.url, recoveryMode);
       if (!mounted) return;
 
-      final liveIndex =
-          _compatibilityPlan.indexOf(ServerCompatibilityMode.liveRecovery);
-      if (liveIndex >= 0) _compatibilityIndex = liveIndex;
-      _compatibilityMode = ServerCompatibilityMode.liveRecovery;
+      final recoveryIndex = _compatibilityPlan.indexOf(recoveryMode);
+      if (recoveryIndex >= 0) _compatibilityIndex = recoveryIndex;
+      _compatibilityMode = recoveryMode;
       setState(() {
         _engineDiagnostic =
-            'EOF de señal en vivo: activado Live Recovery para este servidor';
+            'EOF de señal en vivo: activado ${recoveryMode.label} para este servidor';
       });
 
       scheduleMicrotask(() {
@@ -468,7 +619,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _playCurrent(
             isRetry: true,
             forceNormalProbe: true,
-            skipStop: true,
           ),
         );
       });
@@ -508,12 +658,64 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return true;
   }
 
+  bool _promoteRuntimeRecoveryMode(String reason) {
+    if (!_hasEverPlayed) return false;
+
+    final previous = _compatibilityMode;
+    final ServerCompatibilityMode? target = switch (previous) {
+      ServerCompatibilityMode.direct => ServerCompatibilityMode.liveRecovery,
+      ServerCompatibilityMode.compatible => ServerCompatibilityMode.advanced,
+      ServerCompatibilityMode.liveRecovery => ServerCompatibilityMode.advanced,
+      ServerCompatibilityMode.advanced => null,
+    };
+    if (target == null) return false;
+
+    final targetIndex = _compatibilityPlan.indexOf(target);
+    if (targetIndex < 0) return false;
+
+    final url = widget.playlist[_currentIndex].url;
+    unawaited(_compatibility.recordFailure(url, previous));
+    unawaited(_compatibility.recordRuntimeRecovery(url));
+
+    _compatibilityIndex = targetIndex;
+    _compatibilityFallbacks++;
+    _runtimeRecoveryPromotions++;
+    _compatibilityMode = target;
+    _normalProbeFallbackUsed = true;
+    _retryCount = 0;
+
+    setState(() {
+      _reconnecting = true;
+      _errorMessage = null;
+      _engineDiagnostic =
+          '$reason · señal inestable en ${previous.label}; probando ${target.label}';
+    });
+
+    final resumePosition =
+        widget.isLiveContent ? null : _lastKnownPosition;
+    scheduleMicrotask(() {
+      if (!mounted) return;
+      unawaited(
+        _playCurrent(
+          isRetry: true,
+          forceNormalProbe: true,
+          resumePosition: resumePosition,
+        ),
+      );
+    });
+    return true;
+  }
+
   void _handlePlayerLog(PlayerLog log) {
     if (!mounted) return;
     final text = log.text.toLowerCase();
     String? diagnostic;
 
-    if (text.contains('403') || text.contains('forbidden')) {
+    if (text.contains('429') || text.contains('too many requests')) {
+      diagnostic = 'HTTP 429: el servidor limitó temporalmente las solicitudes';
+    } else if (text.contains('408') || text.contains('request timeout')) {
+      diagnostic = 'HTTP 408: el servidor agotó el tiempo de la solicitud';
+    } else if (text.contains('403') || text.contains('forbidden')) {
       diagnostic = 'HTTP 403: el servidor rechazó la solicitud o sus headers';
     } else if (text.contains('401') || text.contains('unauthorized')) {
       diagnostic = 'HTTP 401: el servidor exige autorización válida';
@@ -521,6 +723,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       diagnostic = 'HTTP 404: la URL o un segmento del stream no existe';
     } else if (text.contains('timed out') || text.contains('timeout')) {
       diagnostic = 'Timeout de red: el servidor tardó demasiado en responder';
+    } else if (text.contains('connection reset') ||
+        text.contains('broken pipe')) {
+      diagnostic = 'La conexión fue cerrada durante la reproducción';
     } else if (text.contains('connection refused')) {
       diagnostic = 'Conexión rechazada por el servidor';
     } else if (text.contains('certificate') ||
@@ -530,8 +735,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (text.contains('invalid data') ||
         text.contains('could not find codec parameters')) {
       diagnostic = 'El servidor respondió, pero el formato no pudo detectarse';
+    } else if (text.contains('too many redirects') ||
+        text.contains('redirect loop')) {
+      diagnostic = 'El servidor entró en un bucle de redirecciones HTTP';
+    } else if (RegExp(r'\b5\d\d\b').hasMatch(text) &&
+        text.contains('http')) {
+      diagnostic = 'El servidor respondió con un error HTTP 5xx temporal';
     } else if (text.contains('mime')) {
-      diagnostic = 'El MIME del servidor puede ser incompatible; disponible fallback Compatible';
+      diagnostic =
+          'El MIME del servidor puede ser incompatible; disponible fallback Compatible';
     } else if (text.contains('eof')) {
       diagnostic = 'EOF detectado en la señal en vivo';
     } else if ((log.level == 'error' || log.level == 'fatal' || log.level == 'warn') &&
@@ -544,14 +756,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
   }
 
+  void _scheduleTransientLiveFailure(String message) {
+    _transientLiveFailureTimer?.cancel();
+    final session = _sessionId;
+    final progressAtError = _lastProgressAt;
+
+    if (mounted) {
+      setState(() {
+        _engineDiagnostic =
+            'Corte transitorio: FFmpeg está intentando recuperar la señal';
+      });
+    }
+
+    _transientLiveFailureTimer = Timer(_liveTransientErrorGrace, () {
+      _transientLiveFailureTimer = null;
+      if (!mounted ||
+          session != _sessionId ||
+          _opening ||
+          _reconnecting ||
+          _errorMessage != null) {
+        return;
+      }
+
+      // Si hubo progreso desde el error, la recuperación nativa funcionó.
+      if (_lastProgressAt.isAfter(progressAtError)) return;
+      _handleFailure(message, silent: true);
+    });
+  }
+
   void _handleFailure(String message, {bool silent = false}) {
     if (!mounted || _opening) return;
 
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
+    _transientLiveFailureTimer?.cancel();
+    _transientLiveFailureTimer = null;
 
     final failedSession = _sessionId;
     final url = widget.playlist[_currentIndex].url;
+
+    // Si el canal ya llegó a reproducir y luego se corta, no repetimos el
+    // mismo modo a ciegas: promovemos sólo ese servidor a una estrategia con
+    // reconexión. Esto no afecta a proveedores que funcionan bien en Directo.
+    if (_hasEverPlayed && _promoteRuntimeRecoveryMode(message)) {
+      return;
+    }
 
     if (!_hasEverPlayed && _advanceCompatibilityMode(message)) {
       return;
@@ -568,9 +817,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _errorMessage = null;
       });
 
+      final resumePosition =
+          widget.isLiveContent ? null : _lastKnownPosition;
       _retryTimer = Timer(Duration(seconds: seconds), () {
         if (!mounted || failedSession != _sessionId) return;
-        unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
+        unawaited(
+          _playCurrent(
+            isRetry: true,
+            forceNormalProbe: true,
+            resumePosition: resumePosition,
+          ),
+        );
       });
     } else {
       setState(() {
@@ -587,7 +844,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _normalProbeFallbackUsed = true;
     final url = widget.playlist[_currentIndex].url;
+    _compatibilityPrefersNormalProbe = true;
     unawaited(_metrics.recordFastProbeFallback(url));
+    unawaited(_compatibility.recordNormalProbeFallback(url));
 
     setState(() {
       _reconnecting = true;
@@ -604,12 +863,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     bool isRetry = false,
     bool forceNormalProbe = false,
     bool skipStop = false,
+    Duration? resumePosition,
   }) async {
     final session = ++_sessionId;
     _opening = true;
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _retryTimer = null;
+    _transientLiveFailureTimer?.cancel();
+    _transientLiveFailureTimer = null;
 
     if (!isRetry) {
       _retryCount = 0;
@@ -617,15 +879,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _resetStreamInfo();
 
       final channelUrl = widget.playlist[_currentIndex].url;
-      final preferred = await _compatibility.preferredModeForUrl(channelUrl);
+      final profile = await _compatibility.profileForUrl(channelUrl);
       if (!mounted || session != _sessionId) return;
-      _compatibilityPlan = _compatibility.planFor(preferred);
+      _compatibilityPlan = _compatibility.planFor(profile.preferredMode);
       _compatibilityIndex = 0;
       _compatibilityFallbacks = 0;
+      _runtimeRecoveryPromotions = 0;
+      _compatibilityPrefersNormalProbe = profile.preferNormalProbe;
       _compatibilityMode = _compatibilityPlan.first;
       _compatibilityUrl = channelUrl;
       _engineDiagnostic =
-          'Apertura ${_compatibilityMode.label} para este servidor';
+          'Apertura ${_compatibilityMode.label} para este servidor'
+          '${_compatibilityPrefersNormalProbe ? ' · probe normal aprendido' : ''}';
     }
 
     _hasEverPlayed = false;
@@ -666,6 +931,16 @@ class _PlayerScreenState extends State<PlayerScreen> {
           .open(Media(channel.url, httpHeaders: headers))
           .timeout(_connectTimeout);
       if (!mounted || session != _sessionId) return;
+
+      if (!widget.isLiveContent &&
+          resumePosition != null &&
+          resumePosition > Duration.zero) {
+        try {
+          await _player.seek(resumePosition);
+        } catch (_) {
+          // Si el servidor VOD no admite seek, seguimos desde donde permita.
+        }
+      }
 
       _opening = false;
       _connectTimeoutTimer = Timer(_connectTimeout, () {
@@ -714,6 +989,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _pausedForCache = false;
     _eofReached = false;
     _seamlessEofRecoveries = 0;
+    _runtimeRecoveryPromotions = 0;
   }
 
   void _switchToChannel(int index) {
@@ -883,6 +1159,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
               Text('Modo de compatibilidad: ${_compatibilityMode.label}'),
               Text('Fallbacks de compatibilidad: $_compatibilityFallbacks'),
               Text(
+                'Probe aprendido: ${_compatibilityPrefersNormalProbe ? 'normal' : 'adaptativo'}',
+              ),
+              Text('Promociones de recuperación: $_runtimeRecoveryPromotions'),
+              Text(
                 'Headers enviados: ${channel.resolvedHttpHeaders(_defaultUserAgent).keys.join(', ')}',
               ),
               Text('Diagnóstico de red: $_engineDiagnostic'),
@@ -948,6 +1228,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
             Text('Resolución actual: $_resolutionText'),
             Text('Modo servidor: ${_compatibilityMode.label}'),
             Text('Fallbacks compatibilidad: $_compatibilityFallbacks'),
+            Text(
+              'Probe aprendido: ${_compatibilityPrefersNormalProbe ? 'normal' : 'adaptativo'}',
+            ),
+            Text('Promociones de recuperación: $_runtimeRecoveryPromotions'),
             Text('Pausa de caché mpv: ${_pausedForCache ? 'sí' : 'no'}'),
             Text('EOF detectado: ${_eofReached ? 'sí' : 'no'}'),
             Text('Recuperaciones EOF: $_seamlessEofRecoveries'),
@@ -971,6 +1255,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _runtimeStatsTimer?.cancel();
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
+    _transientLiveFailureTimer?.cancel();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
     _positionSub?.cancel();
@@ -1056,6 +1341,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   canNext: _currentIndex < widget.playlist.length - 1,
                   onPrevious: _previous,
                   onNext: _next,
+                  isLiveContent: widget.isLiveContent,
                 ),
                 if ((_isBuffering || _reconnecting) &&
                     _errorMessage == null)

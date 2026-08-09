@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature-source-types-v1
+      - performance-engine-v37-compatibility
   workflow_dispatch:
 
 jobs:

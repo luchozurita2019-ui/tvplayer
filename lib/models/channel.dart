@@ -28,21 +28,53 @@ class Channel {
   });
 
   Map<String, String> resolvedHttpHeaders(String defaultUserAgent) {
-    final result = <String, String>{
-      'User-Agent': httpUserAgent ?? defaultUserAgent,
-      if (httpReferrer != null && httpReferrer!.trim().isNotEmpty)
-        'Referer': httpReferrer!.trim(),
-    };
+    final result = <String, String>{};
+
+    void put(String rawKey, String rawValue) {
+      final key = rawKey.trim();
+      final value = rawValue.trim();
+      if (key.isEmpty || value.isEmpty) return;
+
+      // HTTP no distingue mayúsculas/minúsculas en nombres de headers. Evitar
+      // pares duplicados como Referer/referer mejora compatibilidad con proxies
+      // y servidores estrictos y permite que el proveedor reemplace defaults.
+      String? duplicate;
+      for (final existing in result.keys) {
+        if (existing.toLowerCase() == key.toLowerCase()) {
+          duplicate = existing;
+          break;
+        }
+      }
+      if (duplicate != null) result.remove(duplicate);
+      result[_canonicalHeaderName(key)] = value;
+    }
+
+    put('User-Agent', httpUserAgent ?? defaultUserAgent);
+    if (httpReferrer != null) put('Referer', httpReferrer!);
 
     final extras = httpHeaders;
     if (extras != null) {
       for (final entry in extras.entries) {
-        final key = entry.key.trim();
-        final value = entry.value.trim();
-        if (key.isNotEmpty && value.isNotEmpty) result[key] = value;
+        put(entry.key, entry.value);
       }
     }
     return result;
+  }
+
+  static String _canonicalHeaderName(String key) {
+    return switch (key.trim().toLowerCase()) {
+      'user-agent' => 'User-Agent',
+      'referer' => 'Referer',
+      'referrer' => 'Referer',
+      'origin' => 'Origin',
+      'cookie' => 'Cookie',
+      'authorization' => 'Authorization',
+      'accept' => 'Accept',
+      'accept-language' => 'Accept-Language',
+      'connection' => 'Connection',
+      'host' => 'Host',
+      _ => key.trim(),
+    };
   }
 
   Map<String, dynamic> toJson() => {

@@ -235,6 +235,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           playlist: channels,
           initialIndex: index,
           settings: provider.playbackSettings,
+          isLiveContent:
+              _mode == _CatalogMode.live || _mode == _CatalogMode.radios,
         ),
       ),
     );
