@@ -1,0 +1,33 @@
+name: Fix artwork playback guards
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - tooling/fix_artwork_cache_playback_paths.py
+      - .github/workflows/fix-artwork-cache-playback.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+          fetch-depth: 0
+
+      - name: Apply playback guards
+        run: python3 tooling/fix_artwork_cache_playback_paths.py
+
+      - name: Commit code changes only
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/player_screen.dart lib/screens/home_screen.dart
+          git commit -m "perf: suspend artwork traffic for every playback path"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
