@@ -1,0 +1,30 @@
+name: Apply zap and connection health patch
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - .github/workflows/apply-zap-health-v1.yml
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+
+      - name: Apply patch
+        run: python3 tooling/apply_zap_health_v1.py
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/player_screen.dart lib/services/playback_metrics_service.dart
+          git commit -m "perf: add fast zapping and connection health"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
