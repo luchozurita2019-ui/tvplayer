@@ -4,10 +4,11 @@ on:
   push:
     branches:
       - performance-engine-v38-hotplayer-baseline
+    paths:
+      - .github/workflows/apply-runtime-stats-ondemand.yml
 
 jobs:
   patch:
-    if: github.event.head_commit.message == 'ci: apply runtime stats optimization'
     runs-on: ubuntu-latest
     permissions:
       contents: write
