@@ -1143,6 +1143,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
       });
     } else {
+      _zapStopwatch?.stop();
+      _zapSession = null;
       setState(() {
         _reconnecting = false;
         _errorMessage = silent
@@ -1188,6 +1190,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (isZap) {
       _zapStopwatch = Stopwatch()..start();
       _zapSession = session;
+    } else if (isRetry && (_zapStopwatch?.isRunning ?? false)) {
+      _zapSession = session;
     }
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
@@ -1200,6 +1204,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
       _normalProbeFallbackUsed = false;
       _providerIssueHint = false;
       _lastConnectionDetail = null;
+      _recentBufferingEvents = 0;
+      _bufferingWindowStartedAt = DateTime.now();
+      _connectionHealth.value = _ConnectionHealthSnapshot.stable;
       _resetStreamInfo();
 
       final channelUrl = widget.playlist[_currentIndex].url;
@@ -1225,7 +1232,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (mounted) {
       setState(() {
         _errorMessage = null;
-        _isBuffering = true;
+        _isBuffering = isZap ? false : true;
         _reconnecting = isRetry;
         _lastStartupMs = null;
       });
@@ -1249,7 +1256,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
         if (!mounted || session != _sessionId) return;
       }
 
-      _acceptPlaybackEvents = true;
       final channel = widget.playlist[_currentIndex];
       final fallbackUserAgent =
           _compatibilityMode == ServerCompatibilityMode.compatible ||
@@ -1258,9 +1264,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               : _defaultUserAgent;
       final headers = channel.resolvedHttpHeaders(fallbackUserAgent);
 
-      await _player
-          .open(Media(channel.url, httpHeaders: headers))
-          .timeout(_connectTimeout);
+      final openFuture = _player.open(Media(channel.url, httpHeaders: headers));
+      _acceptPlaybackEvents = true;
+      await openFuture.timeout(_connectTimeout);
       if (!mounted || session != _sessionId) return;
 
       if (!widget.isLiveContent &&
