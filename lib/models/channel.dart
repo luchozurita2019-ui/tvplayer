@@ -27,7 +27,10 @@ class Channel {
     this.httpHeaders,
   });
 
-  Map<String, String> resolvedHttpHeaders(String defaultUserAgent) {
+  Map<String, String> resolvedHttpHeaders(
+    String defaultUserAgent, {
+    bool includeDefaultUserAgent = true,
+  }) {
     final result = <String, String>{};
 
     void put(String rawKey, String rawValue) {
@@ -49,7 +52,11 @@ class Channel {
       result[_canonicalHeaderName(key)] = value;
     }
 
-    put('User-Agent', httpUserAgent ?? defaultUserAgent);
+    if (httpUserAgent != null) {
+      put('User-Agent', httpUserAgent!);
+    } else if (includeDefaultUserAgent) {
+      put('User-Agent', defaultUserAgent);
+    }
     if (httpReferrer != null) put('Referer', httpReferrer!);
 
     final extras = httpHeaders;

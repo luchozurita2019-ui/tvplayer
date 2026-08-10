@@ -12,6 +12,7 @@ import '../services/artwork_cache_service.dart';
 import '../services/parental_control_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import 'add_source_screen.dart';
+import 'edit_source_screen.dart';
 import 'source_content_screen.dart';
 import 'playback_settings_screen.dart';
 import 'parental_control_screen.dart';
@@ -324,6 +325,32 @@ class _PlaylistCard extends StatelessWidget {
     );
   }
 
+  Future<void> _editPlaylist(BuildContext context) async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => EditSourceScreen(playlist: playlist),
+      ),
+    );
+  }
+
+  Future<void> _refreshPlaylist(BuildContext context) async {
+    final provider = context.read<IptvProvider>();
+    final messenger = ScaffoldMessenger.of(context);
+    await provider.refreshPlaylist(playlist.id);
+    if (!context.mounted) return;
+    messenger
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            provider.error == null
+                ? 'Lista actualizada correctamente.'
+                : 'No se pudo actualizar: ${provider.error}',
+          ),
+        ),
+      );
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.read<IptvProvider>();
@@ -382,13 +409,43 @@ class _PlaylistCard extends StatelessWidget {
               ),
               PopupMenuButton<String>(
                 tooltip: 'Opciones',
-                onSelected: (value) {
-                  if (value == 'delete') {
-                    provider.removePlaylist(playlist.id);
+                onSelected: (value) async {
+                  switch (value) {
+                    case 'edit':
+                      await _editPlaylist(context);
+                      break;
+                    case 'refresh':
+                      await _refreshPlaylist(context);
+                      break;
+                    case 'delete':
+                      await provider.removePlaylist(playlist.id);
+                      break;
                   }
                 },
-                itemBuilder: (_) => const [
+                itemBuilder: (_) => [
+                  const PopupMenuItem(
+                    value: 'edit',
+                    child: Row(
+                      children: [
+                        Icon(Icons.edit_outlined),
+                        SizedBox(width: 10),
+                        Text('Editar lista'),
+                      ],
+                    ),
+                  ),
                   PopupMenuItem(
+                    value: 'refresh',
+                    enabled: playlist.isRemote,
+                    child: const Row(
+                      children: [
+                        Icon(Icons.refresh_rounded),
+                        SizedBox(width: 10),
+                        Text('Actualizar lista'),
+                      ],
+                    ),
+                  ),
+                  const PopupMenuDivider(),
+                  const PopupMenuItem(
                     value: 'delete',
                     child: Row(
                       children: [

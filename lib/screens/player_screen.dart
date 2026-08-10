@@ -455,7 +455,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
           disableMime ? 'no' : 'yes',
         );
 
-        final isLiveHls = widget.isLiveContent && _looksLikeHls(channel.url);
+        final effectiveUrl = _playbackUrlForMode(channel.url);
+        final isLiveHls = widget.isLiveContent && _looksLikeHls(effectiveUrl);
 
         // HotPlayer Mac contiene seg_max_retry=5: dejamos que FFmpeg
         // recupere un segmento HLS antes de reconstruir toda la reproducción.
@@ -767,6 +768,30 @@ class _PlayerScreenState extends State<PlayerScreen> {
         format.contains('applehttp');
   }
 
+  bool _looksLikeXtreamLiveTs(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+      return false;
+    }
+    final path = uri.path.toLowerCase();
+    return path.contains('/live/') && path.endsWith('.ts');
+  }
+
+  String _playbackUrlForMode(String originalUrl) {
+    if (_compatibilityMode != ServerCompatibilityMode.xtreamHls ||
+        !_looksLikeXtreamLiveTs(originalUrl)) {
+      return originalUrl;
+    }
+
+    final uri = Uri.tryParse(originalUrl);
+    if (uri == null) return originalUrl;
+    final path = uri.path;
+    final lower = path.toLowerCase();
+    if (!lower.endsWith('.ts')) return originalUrl;
+    final hlsPath = '${path.substring(0, path.length - 3)}.m3u8';
+    return uri.replace(path: hlsPath).toString();
+  }
+
   Future<void> _refreshContainerFormat() async {
     if (_runtimeFormatLoaded ||
         !mounted ||
@@ -902,10 +927,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // comportamiento durante la recuperación. Advanced = Compatible +
       // reconexión, evitando que un EOF haga volver a un modo incompatible.
       final recoveryMode =
-          _compatibilityMode == ServerCompatibilityMode.compatible ||
-                  _compatibilityMode == ServerCompatibilityMode.advanced
-              ? ServerCompatibilityMode.advanced
-              : ServerCompatibilityMode.liveRecovery;
+          _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
+                  _compatibilityMode == ServerCompatibilityMode.xtreamHls
+              ? _compatibilityMode
+              : _compatibilityMode == ServerCompatibilityMode.compatible ||
+                      _compatibilityMode == ServerCompatibilityMode.advanced
+                  ? ServerCompatibilityMode.advanced
+                  : ServerCompatibilityMode.liveRecovery;
       await _compatibility.recordLiveEof(channel.url, recoveryMode);
       if (!mounted) return;
 
@@ -968,9 +996,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final previous = _compatibilityMode;
     final ServerCompatibilityMode? target = switch (previous) {
       ServerCompatibilityMode.direct => ServerCompatibilityMode.liveRecovery,
+      ServerCompatibilityMode.nativeHttp => null,
       ServerCompatibilityMode.compatible => ServerCompatibilityMode.advanced,
       ServerCompatibilityMode.liveRecovery => ServerCompatibilityMode.advanced,
       ServerCompatibilityMode.advanced => null,
+      ServerCompatibilityMode.xtreamHls => null,
     };
     if (target == null) return false;
 
@@ -1212,7 +1242,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final channelUrl = widget.playlist[_currentIndex].url;
       final profile = await _compatibility.profileForUrl(channelUrl);
       if (!mounted || session != _sessionId) return;
-      _compatibilityPlan = _compatibility.planFor(profile.preferredMode);
+      final learnedPlan = _compatibility.planFor(profile.preferredMode);
+      _compatibilityPlan = _looksLikeXtreamLiveTs(channelUrl)
+          ? learnedPlan
+          : learnedPlan
+              .where((mode) => mode != ServerCompatibilityMode.xtreamHls)
+              .toList(growable: false);
       _compatibilityIndex = 0;
       _compatibilityFallbacks = 0;
       _runtimeRecoveryPromotions = 0;
@@ -1262,9 +1297,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
                   _compatibilityMode == ServerCompatibilityMode.advanced
               ? _legacyVlcUserAgent
               : _defaultUserAgent;
-      final headers = channel.resolvedHttpHeaders(fallbackUserAgent);
+      final nativeHttp =
+          _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
+              _compatibilityMode == ServerCompatibilityMode.xtreamHls;
+      final headers = channel.resolvedHttpHeaders(
+        fallbackUserAgent,
+        includeDefaultUserAgent: !nativeHttp,
+      );
+      final playbackUrl = _playbackUrlForMode(channel.url);
+      final media = headers.isEmpty
+          ? Media(playbackUrl)
+          : Media(playbackUrl, httpHeaders: headers);
 
-      final openFuture = _player.open(Media(channel.url, httpHeaders: headers));
+      final openFuture = _player.open(media);
       _acceptPlaybackEvents = true;
       await openFuture.timeout(_connectTimeout);
       if (!mounted || session != _sessionId) return;

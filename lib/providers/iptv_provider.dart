@@ -124,6 +124,107 @@ class IptvProvider extends ChangeNotifier {
     }
   }
 
+  Future<void> renamePlaylist(String playlistId, String name) async {
+    final index = _playlists.indexWhere((p) => p.id == playlistId);
+    if (index == -1) return;
+    final playlist = _playlists[index];
+    final cleanName = name.trim().isEmpty ? playlist.name : name.trim();
+    final updated = playlist.copyWith(name: cleanName);
+    _playlists = [
+      ..._playlists.take(index),
+      updated,
+      ..._playlists.skip(index + 1),
+    ];
+    await _storage.savePlaylists(_playlists);
+    _error = null;
+    notifyListeners();
+  }
+
+  Future<void> updatePlaylistFromUrl({
+    required String playlistId,
+    required String name,
+    required String url,
+  }) async {
+    final index = _playlists.indexWhere((p) => p.id == playlistId);
+    if (index == -1) return;
+    _error = null;
+    _setLoading(true);
+    try {
+      final content = await M3uFetcher.fetch(url);
+      final channels = await compute(parseM3uInBackground, content);
+      if (channels.isEmpty) {
+        throw Exception('La lista M3U no contiene canales reproducibles.');
+      }
+      final current = _playlists[index];
+      final updated = current.copyWith(
+        name: name.trim().isEmpty ? current.name : name.trim(),
+        source: url,
+        isRemote: true,
+        channels: channels,
+        lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.m3u,
+      );
+      _playlists = [
+        ..._playlists.take(index),
+        updated,
+        ..._playlists.skip(index + 1),
+      ];
+      await _storage.savePlaylists(_playlists);
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
+  Future<void> updateXtreamSource({
+    required String playlistId,
+    required String name,
+    required String serverUrl,
+    required String username,
+    required String password,
+  }) async {
+    final index = _playlists.indexWhere((p) => p.id == playlistId);
+    if (index == -1) return;
+    _error = null;
+    _setLoading(true);
+    try {
+      final connection = await XtreamService.connect(
+        serverUrl: serverUrl,
+        username: username,
+        password: password,
+      );
+      final content = await M3uFetcher.fetch(connection.playlistUrl);
+      final channels = await compute(parseM3uInBackground, content);
+      if (channels.isEmpty) {
+        throw Exception(
+          'Xtream autenticó correctamente, pero no devolvió contenido reproducible.',
+        );
+      }
+      final current = _playlists[index];
+      final updated = current.copyWith(
+        name: name.trim().isEmpty ? current.name : name.trim(),
+        source: connection.playlistUrl,
+        isRemote: true,
+        channels: channels,
+        lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.xtream,
+      );
+      _playlists = [
+        ..._playlists.take(index),
+        updated,
+        ..._playlists.skip(index + 1),
+      ];
+      await _storage.savePlaylists(_playlists);
+      _error = null;
+    } catch (e) {
+      _error = e.toString();
+    } finally {
+      _setLoading(false);
+    }
+  }
+
   Future<void> addPlaylistFromContent(
       String name, String path, String content) async {
     _setLoading(true);

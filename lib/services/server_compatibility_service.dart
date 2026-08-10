@@ -4,17 +4,21 @@ import 'package:shared_preferences/shared_preferences.dart';
 
 enum ServerCompatibilityMode {
   direct,
+  nativeHttp,
   compatible,
   liveRecovery,
   advanced,
+  xtreamHls,
 }
 
 extension ServerCompatibilityModeLabel on ServerCompatibilityMode {
   String get label => switch (this) {
         ServerCompatibilityMode.direct => 'Directo',
+        ServerCompatibilityMode.nativeHttp => 'HTTP nativo',
         ServerCompatibilityMode.compatible => 'Compatible',
         ServerCompatibilityMode.liveRecovery => 'Live Recovery',
         ServerCompatibilityMode.advanced => 'Compatibilidad avanzada',
+        ServerCompatibilityMode.xtreamHls => 'Xtream HLS',
       };
 }
 
@@ -22,9 +26,11 @@ class HostCompatibilityProfile {
   final String host;
   ServerCompatibilityMode preferredMode;
   int directFailures;
+  int nativeHttpFailures;
   int compatibleFailures;
   int liveRecoveryFailures;
   int advancedFailures;
+  int xtreamHlsFailures;
   int liveEofRecoveries;
   int runtimeRecoveries;
   int normalProbeFallbacks;
@@ -36,9 +42,11 @@ class HostCompatibilityProfile {
     required this.host,
     this.preferredMode = ServerCompatibilityMode.direct,
     this.directFailures = 0,
+    this.nativeHttpFailures = 0,
     this.compatibleFailures = 0,
     this.liveRecoveryFailures = 0,
     this.advancedFailures = 0,
+    this.xtreamHlsFailures = 0,
     this.liveEofRecoveries = 0,
     this.runtimeRecoveries = 0,
     this.normalProbeFallbacks = 0,
@@ -51,9 +59,11 @@ class HostCompatibilityProfile {
         'host': host,
         'preferredMode': preferredMode.name,
         'directFailures': directFailures,
+        'nativeHttpFailures': nativeHttpFailures,
         'compatibleFailures': compatibleFailures,
         'liveRecoveryFailures': liveRecoveryFailures,
         'advancedFailures': advancedFailures,
+        'xtreamHlsFailures': xtreamHlsFailures,
         'liveEofRecoveries': liveEofRecoveries,
         'runtimeRecoveries': runtimeRecoveries,
         'normalProbeFallbacks': normalProbeFallbacks,
@@ -73,10 +83,14 @@ class HostCompatibilityProfile {
       host: json['host'] as String? ?? 'desconocido',
       preferredMode: mode,
       directFailures: (json['directFailures'] as num?)?.toInt() ?? 0,
+      nativeHttpFailures:
+          (json['nativeHttpFailures'] as num?)?.toInt() ?? 0,
       compatibleFailures: (json['compatibleFailures'] as num?)?.toInt() ?? 0,
       liveRecoveryFailures:
           (json['liveRecoveryFailures'] as num?)?.toInt() ?? 0,
       advancedFailures: (json['advancedFailures'] as num?)?.toInt() ?? 0,
+      xtreamHlsFailures:
+          (json['xtreamHlsFailures'] as num?)?.toInt() ?? 0,
       liveEofRecoveries: (json['liveEofRecoveries'] as num?)?.toInt() ?? 0,
       runtimeRecoveries: (json['runtimeRecoveries'] as num?)?.toInt() ?? 0,
       normalProbeFallbacks:
@@ -161,27 +175,51 @@ class ServerCompatibilityService {
     return switch (preferred) {
       ServerCompatibilityMode.direct => const [
           ServerCompatibilityMode.direct,
+          ServerCompatibilityMode.nativeHttp,
           ServerCompatibilityMode.compatible,
           ServerCompatibilityMode.liveRecovery,
           ServerCompatibilityMode.advanced,
+          ServerCompatibilityMode.xtreamHls,
+        ],
+      ServerCompatibilityMode.nativeHttp => const [
+          ServerCompatibilityMode.nativeHttp,
+          ServerCompatibilityMode.direct,
+          ServerCompatibilityMode.compatible,
+          ServerCompatibilityMode.liveRecovery,
+          ServerCompatibilityMode.advanced,
+          ServerCompatibilityMode.xtreamHls,
         ],
       ServerCompatibilityMode.compatible => const [
           ServerCompatibilityMode.compatible,
+          ServerCompatibilityMode.nativeHttp,
           ServerCompatibilityMode.direct,
           ServerCompatibilityMode.advanced,
           ServerCompatibilityMode.liveRecovery,
+          ServerCompatibilityMode.xtreamHls,
         ],
       ServerCompatibilityMode.liveRecovery => const [
           ServerCompatibilityMode.liveRecovery,
+          ServerCompatibilityMode.nativeHttp,
           ServerCompatibilityMode.direct,
           ServerCompatibilityMode.advanced,
           ServerCompatibilityMode.compatible,
+          ServerCompatibilityMode.xtreamHls,
         ],
       ServerCompatibilityMode.advanced => const [
           ServerCompatibilityMode.advanced,
+          ServerCompatibilityMode.nativeHttp,
           ServerCompatibilityMode.liveRecovery,
           ServerCompatibilityMode.compatible,
           ServerCompatibilityMode.direct,
+          ServerCompatibilityMode.xtreamHls,
+        ],
+      ServerCompatibilityMode.xtreamHls => const [
+          ServerCompatibilityMode.xtreamHls,
+          ServerCompatibilityMode.nativeHttp,
+          ServerCompatibilityMode.direct,
+          ServerCompatibilityMode.compatible,
+          ServerCompatibilityMode.liveRecovery,
+          ServerCompatibilityMode.advanced,
         ],
     };
   }
@@ -206,6 +244,9 @@ class ServerCompatibilityService {
       case ServerCompatibilityMode.direct:
         profile.directFailures++;
         break;
+      case ServerCompatibilityMode.nativeHttp:
+        profile.nativeHttpFailures++;
+        break;
       case ServerCompatibilityMode.compatible:
         profile.compatibleFailures++;
         break;
@@ -214,6 +255,9 @@ class ServerCompatibilityService {
         break;
       case ServerCompatibilityMode.advanced:
         profile.advancedFailures++;
+        break;
+      case ServerCompatibilityMode.xtreamHls:
+        profile.xtreamHlsFailures++;
         break;
     }
     profile.lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
