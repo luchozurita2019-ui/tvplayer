@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
@@ -7,10 +9,12 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/parental_control_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import 'add_source_screen.dart';
 import 'source_content_screen.dart';
 import 'playback_settings_screen.dart';
+import 'parental_control_screen.dart';
 import 'player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -27,6 +31,7 @@ class _HomeScreenState extends State<HomeScreen> {
   void initState() {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(ParentalControlService.instance.init());
       context.read<IptvProvider>().init();
     });
   }
@@ -58,6 +63,11 @@ class _HomeScreenState extends State<HomeScreen> {
               ],
             ),
             actions: [
+              IconButton(
+                tooltip: 'Control parental',
+                icon: const Icon(Icons.shield_outlined),
+                onPressed: () => unawaited(_openParentalSettings(context)),
+              ),
               if (_section != 2)
                 IconButton(
                   tooltip: 'Rendimiento',
@@ -170,6 +180,58 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 
+  Future<void> _openParentalSettings(BuildContext context) async {
+    final parental = ParentalControlService.instance;
+    await parental.init();
+    if (!mounted) return;
+
+    if (parental.pinConfigured) {
+      final controller = TextEditingController();
+      final pin = await showDialog<String>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('Control parental'),
+          content: TextField(
+            controller: controller,
+            autofocus: true,
+            obscureText: true,
+            keyboardType: TextInputType.number,
+            maxLength: 4,
+            decoration: const InputDecoration(
+              labelText: 'Ingresá tu PIN',
+              counterText: '',
+            ),
+            onSubmitted: (value) =>
+                Navigator.pop(dialogContext, value.trim()),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(dialogContext),
+              child: const Text('Cancelar'),
+            ),
+            FilledButton(
+              onPressed: () =>
+                  Navigator.pop(dialogContext, controller.text.trim()),
+              child: const Text('Continuar'),
+            ),
+          ],
+        ),
+      );
+      controller.dispose();
+      if (!mounted || pin == null) return;
+      if (!parental.verifyPin(pin)) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(const SnackBar(content: Text('PIN incorrecto.')));
+        return;
+      }
+    }
+
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(builder: (_) => const ParentalControlScreen()),
+    );
+  }
 
 }
 
@@ -227,6 +289,8 @@ class _PlaylistCard extends StatelessWidget {
   Future<void> _openPlaylist(BuildContext context) async {
     final navigator = Navigator.of(context);
     final cache = ArtworkCacheService.instance;
+    await ParentalControlService.instance.init();
+    if (!context.mounted) return;
 
     showDialog<void>(
       context: context,
@@ -350,7 +414,10 @@ class _FavoritesView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
-    final favorites = provider.favorites;
+    final parental = ParentalControlService.instance;
+    final favorites = parental.enabled && parental.isLocked
+        ? provider.favorites.where(parental.canShowChannel).toList(growable: false)
+        : provider.favorites;
 
     if (favorites.isEmpty) {
       return const _EmptyState(

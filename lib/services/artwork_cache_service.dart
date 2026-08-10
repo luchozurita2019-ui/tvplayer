@@ -9,6 +9,7 @@ import 'package:path_provider/path_provider.dart';
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import 'content_classifier.dart';
+import 'parental_control_service.dart';
 
 /// Cache de arte orientado a IPTV.
 ///
@@ -60,6 +61,8 @@ class ArtworkCacheService {
 
   Future<void> warmProvider(Playlist playlist) async {
     await switchProvider(playlist.id);
+    final parental = ParentalControlService.instance;
+    await parental.init();
 
     final buckets = ContentClassifier.partition(playlist.channels);
     final urls = <String>[];
@@ -68,6 +71,7 @@ class ArtworkCacheService {
     void addFrom(List<Channel> channels, int limit) {
       var added = 0;
       for (final channel in channels) {
+        if (!parental.canShowChannel(channel)) continue;
         final url = _validArtworkUrl(channel.logoUrl);
         if (url == null || !seen.add(url)) continue;
         urls.add(url);
@@ -91,9 +95,12 @@ class ArtworkCacheService {
     required int limit,
     Duration maxWait = const Duration(milliseconds: 1800),
   }) async {
+    final parental = ParentalControlService.instance;
+    await parental.init();
     final urls = <String>[];
     final seen = <String>{};
     for (final channel in channels) {
+      if (!parental.canShowChannel(channel)) continue;
       final url = _validArtworkUrl(channel.logoUrl);
       if (url == null || !seen.add(url)) continue;
       urls.add(url);
