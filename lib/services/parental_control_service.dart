@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:crypto/crypto.dart';
@@ -24,6 +25,7 @@ class ParentalControlService extends ChangeNotifier {
   int _unlockMinutes = 15;
   String? _pinHash;
   DateTime? _unlockedUntil;
+  Timer? _unlockTimer;
   Set<String> _manualGroups = <String>{};
   Set<String> _allowedGroups = <String>{};
 
@@ -66,7 +68,7 @@ class ParentalControlService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _pinHash = _hashPin(pin);
     _enabled = true;
-    _unlockedUntil = null;
+    _clearUnlockTimer();
     await prefs.setString(_pinHashKey, _pinHash!);
     await prefs.setBool(_enabledKey, true);
     notifyListeners();
@@ -79,20 +81,27 @@ class ParentalControlService extends ChangeNotifier {
 
   Future<bool> unlock(String pin) async {
     if (!verifyPin(pin)) return false;
-    _unlockedUntil = DateTime.now().add(Duration(minutes: _unlockMinutes));
+    _clearUnlockTimer();
+    final duration = Duration(minutes: _unlockMinutes);
+    _unlockedUntil = DateTime.now().add(duration);
+    _unlockTimer = Timer(duration, () {
+      _unlockedUntil = null;
+      _unlockTimer = null;
+      notifyListeners();
+    });
     notifyListeners();
     return true;
   }
 
   void lockNow() {
-    _unlockedUntil = null;
+    _clearUnlockTimer();
     notifyListeners();
   }
 
   Future<void> setEnabled(bool value) async {
     final prefs = await SharedPreferences.getInstance();
     _enabled = value && pinConfigured;
-    if (!_enabled) _unlockedUntil = null;
+    if (!_enabled) _clearUnlockTimer();
     await prefs.setBool(_enabledKey, _enabled);
     notifyListeners();
   }
@@ -114,6 +123,9 @@ class ParentalControlService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _unlockMinutes = normalized;
     await prefs.setInt(_unlockMinutesKey, normalized);
+    if (_enabled && isUnlocked) {
+      _clearUnlockTimer();
+    }
     notifyListeners();
   }
 
@@ -158,6 +170,12 @@ class ParentalControlService extends ChangeNotifier {
     await prefs.setStringList(_manualGroupsKey, _manualGroups.toList()..sort());
     await prefs.setStringList(_allowedGroupsKey, _allowedGroups.toList()..sort());
     notifyListeners();
+  }
+
+  void _clearUnlockTimer() {
+    _unlockTimer?.cancel();
+    _unlockTimer = null;
+    _unlockedUntil = null;
   }
 
   static String _hashPin(String pin) {
