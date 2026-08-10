@@ -138,6 +138,10 @@ class ParentalControlService extends ChangeNotifier {
   }
 
   bool isProtectedChannel(Channel channel) {
+    final normalizedGroup = _normalize(channel.group ?? '');
+    if (normalizedGroup.isNotEmpty && _allowedGroups.contains(normalizedGroup)) {
+      return false;
+    }
     if (isProtectedGroup(channel.group)) return true;
     return _looksAdultText(_normalize(channel.name));
   }
