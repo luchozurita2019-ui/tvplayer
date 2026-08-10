@@ -18,6 +18,34 @@ const String _defaultUserAgent =
 const String _legacyVlcUserAgent =
     'VLC/3.0.20 LibVLC/3.0.20 (iptv_player; +https://github.com)';
 
+enum _ConnectionHealthLevel { stable, unstable, poor }
+
+enum _ConnectionIssueSource { none, internet, provider, unknown }
+
+class _ConnectionHealthSnapshot {
+  final _ConnectionHealthLevel level;
+  final _ConnectionIssueSource source;
+  final String title;
+  final String detail;
+  final String confidence;
+
+  const _ConnectionHealthSnapshot({
+    required this.level,
+    required this.source,
+    required this.title,
+    required this.detail,
+    required this.confidence,
+  });
+
+  static const stable = _ConnectionHealthSnapshot(
+    level: _ConnectionHealthLevel.stable,
+    source: _ConnectionIssueSource.none,
+    title: 'Conexión estable',
+    detail: 'La reproducción está recibiendo datos con normalidad.',
+    confidence: 'alta',
+  );
+}
+
 class PlayerScreen extends StatefulWidget {
   final Channel channel;
   final List<Channel> playlist;
@@ -65,6 +93,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _normalProbeFallbackUsed = false;
   bool _runtimeStatsBusy = false;
   bool _runtimeFormatLoaded = false;
+  bool _acceptPlaybackEvents = true;
+  bool _providerIssueHint = false;
 
   String? _errorMessage;
   String _channelListQuery = '';
@@ -73,7 +103,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _sessionId = 0;
   int _startupSession = 0;
   int? _lastStartupMs;
+  int? _lastZapMs;
+  int? _zapSession;
   String? _startupUrl;
+  String? _lastConnectionDetail;
+  int _recentBufferingEvents = 0;
+  DateTime _bufferingWindowStartedAt = DateTime.now();
 
   int? _videoWidth;
   int? _videoHeight;
@@ -108,13 +143,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String? _compatibilityUrl;
   String _engineDiagnostic = 'Sin errores de red detectados';
 
+  final ValueNotifier<_ConnectionHealthSnapshot> _connectionHealth =
+      ValueNotifier<_ConnectionHealthSnapshot>(_ConnectionHealthSnapshot.stable);
+
   Timer? _watchdogTimer;
   Timer? _connectTimeoutTimer;
   Timer? _retryTimer;
   Timer? _transientLiveFailureTimer;
+  Timer? _connectionProbeTimer;
+  Timer? _connectionRecoveryTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
   Stopwatch? _startupStopwatch;
+  Stopwatch? _zapStopwatch;
 
   StreamSubscription? _bufferingSub;
   StreamSubscription? _errorSub;
@@ -158,9 +199,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _bufferingSub = _player.stream.buffering.listen((buffering) {
-      if (!mounted) return;
+      if (!mounted || !_acceptPlaybackEvents) return;
+
+      if (buffering && _hasEverPlayed && !_opening && !_reconnecting) {
+        _onBufferingStarted();
+      }
 
       if (!buffering) {
+        _onBufferingRecovered();
         _connectTimeoutTimer?.cancel();
         _retryTimer?.cancel();
         _retryTimer = null;
@@ -187,9 +233,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _startupStopwatch!.stop();
         final elapsed = _startupStopwatch!.elapsedMilliseconds;
         final url = _startupUrl;
-        if (mounted) setState(() => _lastStartupMs = elapsed);
+
+        int? zapElapsed;
+        if ((_zapStopwatch?.isRunning ?? false) && _zapSession == _sessionId) {
+          _zapStopwatch!.stop();
+          zapElapsed = _zapStopwatch!.elapsedMilliseconds;
+          _zapSession = null;
+        }
+
+        if (mounted) {
+          setState(() {
+            _lastStartupMs = elapsed;
+            if (zapElapsed != null) _lastZapMs = zapElapsed;
+          });
+        }
         if (url != null) {
           unawaited(_metrics.recordStartup(url, elapsed));
+          if (zapElapsed != null) {
+            unawaited(_metrics.recordZap(url, zapElapsed));
+          }
           unawaited(_compatibility.recordSuccess(url, _compatibilityMode));
         }
       }
@@ -206,11 +268,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _playingSub = _player.stream.playing.listen((playing) {
+      if (!_acceptPlaybackEvents) return;
       _isPlaying = playing;
       if (playing) _lastProgressAt = DateTime.now();
     });
 
     _positionSub = _player.stream.position.listen((position) {
+      if (!_acceptPlaybackEvents) return;
       if (position != _lastKnownPosition) {
         _lastKnownPosition = position;
         _lastProgressAt = DateTime.now();
@@ -454,10 +518,244 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _isBuffering ? bufferingGrace : liveGrace;
 
     if (silentFor > effectiveStallThreshold) {
+      _scheduleConnectionDiagnosis(severe: true);
       final url = widget.playlist[_currentIndex].url;
       unawaited(_metrics.recordStall(url));
       _handleFailure('El stream dejó de responder', silent: true);
     }
+  }
+
+  void _onBufferingStarted() {
+    final now = DateTime.now();
+    if (now.difference(_bufferingWindowStartedAt) > const Duration(seconds: 60)) {
+      _bufferingWindowStartedAt = now;
+      _recentBufferingEvents = 0;
+    }
+    _recentBufferingEvents++;
+    _connectionRecoveryTimer?.cancel();
+
+    if (_connectionHealth.value.level == _ConnectionHealthLevel.stable) {
+      _connectionHealth.value = const _ConnectionHealthSnapshot(
+        level: _ConnectionHealthLevel.unstable,
+        source: _ConnectionIssueSource.unknown,
+        title: 'Señal inestable',
+        detail: 'TV FULL está esperando datos. Estamos verificando si el origen es la conexión o el servidor.',
+        confidence: 'baja',
+      );
+    }
+
+    _scheduleConnectionDiagnosis(
+      severe: _recentBufferingEvents >= 3,
+      delay: const Duration(seconds: 2),
+    );
+  }
+
+  void _onBufferingRecovered() {
+    _connectionProbeTimer?.cancel();
+    _connectionRecoveryTimer?.cancel();
+    _connectionRecoveryTimer = Timer(const Duration(seconds: 7), () {
+      if (!mounted || _isBuffering || _reconnecting || _errorMessage != null) {
+        return;
+      }
+      _providerIssueHint = false;
+      _lastConnectionDetail = null;
+      _connectionHealth.value = _ConnectionHealthSnapshot.stable;
+    });
+  }
+
+  void _scheduleConnectionDiagnosis({
+    bool severe = false,
+    Duration delay = const Duration(milliseconds: 700),
+  }) {
+    if (!mounted || !_hasEverPlayed) return;
+    final session = _sessionId;
+    _connectionProbeTimer?.cancel();
+    _connectionProbeTimer = Timer(delay, () {
+      if (!mounted || session != _sessionId) return;
+      unawaited(_diagnoseConnectionHealth(severe: severe));
+    });
+  }
+
+  Future<void> _diagnoseConnectionHealth({bool severe = false}) async {
+    if (!mounted || !_hasEverPlayed || _opening || _reconnecting) return;
+
+    await _refreshRuntimeStats();
+    if (!mounted) return;
+
+    final channel = widget.playlist[_currentIndex];
+    final current = await _metrics.statsForUrl(channel.url);
+    final all = await _metrics.allStats();
+    if (!mounted) return;
+
+    final mediaBits = (_videoBitrate ?? 0) + (_audioBitrate ?? 0);
+    final networkBits = (_networkReadBytesPerSecond ?? 0) * 8;
+    final ratio = mediaBits > 0 && networkBits > 0 ? networkBits / mediaBits : null;
+
+    final currentHostLooksBad = current.startupCount >= 3 &&
+        ((current.averageStartupMs ?? 0) >= 1800 ||
+            current.failureRatio >= 0.20 ||
+            current.stallRatio >= 0.15);
+    final otherHostsLookHealthy = all.any((stats) {
+      if (stats.host == current.host || stats.startupCount < 2) return false;
+      final avg = stats.averageStartupMs;
+      return (avg == null || avg < 1400) &&
+          stats.failureRatio < 0.12 &&
+          stats.stallRatio < 0.10;
+    });
+
+    _ConnectionIssueSource source;
+    String title;
+    String detail;
+    String confidence;
+
+    if (_providerIssueHint || (currentHostLooksBad && otherHostsLookHealthy)) {
+      source = _ConnectionIssueSource.provider;
+      title = 'Servidor del canal inestable';
+      detail = _lastConnectionDetail ??
+          'Este servidor acumula más demoras o cortes que otros servidores usados en TV FULL.';
+      confidence = _providerIssueHint ? 'alta' : 'media';
+    } else if (ratio != null && ratio < 0.95 && !currentHostLooksBad) {
+      source = _ConnectionIssueSource.internet;
+      title = 'Posible conexión lenta';
+      detail = ratio < 0.65
+          ? 'Los datos están llegando bastante más lento de lo que necesita este canal. Probá Wi‑Fi más cerca del router o cable Ethernet.'
+          : 'La velocidad recibida está por debajo del bitrate necesario para sostener este canal de forma continua.';
+      confidence = ratio < 0.65 ? 'alta' : 'media';
+    } else {
+      source = _ConnectionIssueSource.unknown;
+      title = 'Recepción inestable';
+      detail = _lastConnectionDetail ??
+          'La señal está llegando de forma irregular. Puede ser la conexión del usuario o el servidor del canal.';
+      confidence = 'baja';
+    }
+
+    final poorByThroughput = ratio != null && ratio < 0.65;
+    final level = severe || _recentBufferingEvents >= 3 || poorByThroughput
+        ? _ConnectionHealthLevel.poor
+        : _ConnectionHealthLevel.unstable;
+
+    _connectionHealth.value = _ConnectionHealthSnapshot(
+      level: level,
+      source: source,
+      title: title,
+      detail: detail,
+      confidence: confidence,
+    );
+  }
+
+  bool _looksLikeConnectionLog(String text) {
+    return text.contains('timeout') ||
+        text.contains('timed out') ||
+        text.contains('connection reset') ||
+        text.contains('broken pipe') ||
+        text.contains('connection refused') ||
+        text.contains('too many requests') ||
+        text.contains('network') ||
+        text.contains('http 5') ||
+        RegExp(r'\b5\d\d\b').hasMatch(text);
+  }
+
+  bool _looksProviderSpecific(String text) {
+    return text.contains('401') ||
+        text.contains('403') ||
+        text.contains('404') ||
+        text.contains('429') ||
+        text.contains('connection refused') ||
+        (RegExp(r'\b5\d\d\b').hasMatch(text) && text.contains('http'));
+  }
+
+  Future<void> _showConnectionHealthInfo(
+    _ConnectionHealthSnapshot snapshot,
+  ) async {
+    await _refreshRuntimeStats();
+    if (!mounted) return;
+
+    final sourceLabel = switch (snapshot.source) {
+      _ConnectionIssueSource.internet => 'Conexión / Wi‑Fi',
+      _ConnectionIssueSource.provider => 'Servidor del canal',
+      _ConnectionIssueSource.unknown => 'No determinado',
+      _ConnectionIssueSource.none => 'Sin problemas',
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Estado de reproducción'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(snapshot.title),
+            const SizedBox(height: 8),
+            Text(snapshot.detail),
+            const SizedBox(height: 14),
+            Text('Causa probable: $sourceLabel'),
+            Text('Confianza del diagnóstico: ${snapshot.confidence}'),
+            Text('Velocidad recibida: $_networkSpeedText'),
+            Text('Bitrate de video: ${_formatBitrate(_videoBitrate)}'),
+            Text('Bitrate de audio: ${_formatBitrate(_audioBitrate)}'),
+            Text('Buffer disponible: ${_lastCacheSeconds == null ? 'No disponible' : '${_lastCacheSeconds!.toStringAsFixed(1)} s'}'),
+            if (_lastZapMs != null) Text('Último cambio de canal: $_lastZapMs ms'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionHealthBadge() {
+    return ValueListenableBuilder<_ConnectionHealthSnapshot>(
+      valueListenable: _connectionHealth,
+      builder: (context, snapshot, _) {
+        if (snapshot.level == _ConnectionHealthLevel.stable) {
+          return const SizedBox.shrink();
+        }
+
+        final isPoor = snapshot.level == _ConnectionHealthLevel.poor;
+        final color = isPoor ? Colors.redAccent : Colors.amberAccent;
+        final icon = snapshot.source == _ConnectionIssueSource.provider
+            ? Icons.dns_rounded
+            : snapshot.source == _ConnectionIssueSource.internet
+                ? Icons.wifi_off_rounded
+                : Icons.network_check_rounded;
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => unawaited(_showConnectionHealthInfo(snapshot)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xDC101820),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: color.withValues(alpha: 0.6)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: color),
+                  const SizedBox(width: 8),
+                  Text(
+                    snapshot.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
 
@@ -757,6 +1055,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       diagnostic = 'mpv/FFmpeg reportó un fallo de red durante la apertura';
     }
 
+    if (diagnostic != null && _hasEverPlayed && _looksLikeConnectionLog(text)) {
+      _providerIssueHint = _looksProviderSpecific(text);
+      _lastConnectionDetail = diagnostic;
+      _scheduleConnectionDiagnosis(
+        severe: log.level == 'error' || log.level == 'fatal',
+      );
+    }
+
     if (diagnostic != null && diagnostic != _engineDiagnostic) {
       setState(() => _engineDiagnostic = diagnostic!);
     }
@@ -870,10 +1176,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
     bool isRetry = false,
     bool forceNormalProbe = false,
     bool skipStop = false,
+    bool isZap = false,
     Duration? resumePosition,
   }) async {
     final session = ++_sessionId;
     _opening = true;
+    _acceptPlaybackEvents = false;
+    _connectionProbeTimer?.cancel();
+    _connectionRecoveryTimer?.cancel();
+
+    if (isZap) {
+      _zapStopwatch = Stopwatch()..start();
+      _zapSession = session;
+    }
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _retryTimer = null;
@@ -883,6 +1198,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!isRetry) {
       _retryCount = 0;
       _normalProbeFallbackUsed = false;
+      _providerIssueHint = false;
+      _lastConnectionDetail = null;
       _resetStreamInfo();
 
       final channelUrl = widget.playlist[_currentIndex].url;
@@ -924,13 +1241,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!prepared) return;
 
     try {
-      // En recuperación de EOF reemplazamos el Media directamente. Evitar un
-      // stop explícito reduce el hueco visible entre una conexión y la siguiente.
-      if (!skipStop) {
+      // En zapping live reemplazamos el Media directamente. El canal anterior
+      // puede seguir visible mientras preparamos headers/perfil; evitamos el
+      // hueco artificial de stop() -> open(). En retries/VOD conservamos stop().
+      if (!skipStop && !isZap) {
         await _player.stop();
         if (!mounted || session != _sessionId) return;
       }
 
+      _acceptPlaybackEvents = true;
       final channel = widget.playlist[_currentIndex];
       final fallbackUserAgent =
           _compatibilityMode == ServerCompatibilityMode.compatible ||
@@ -966,6 +1285,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } on TimeoutException {
       if (!mounted || session != _sessionId) return;
       _opening = false;
+      _acceptPlaybackEvents = true;
       unawaited(_player.stop());
       if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
         _startNormalProbeFallback(session);
@@ -975,6 +1295,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } catch (e) {
       if (!mounted || session != _sessionId) return;
       _opening = false;
+      _acceptPlaybackEvents = true;
       if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
         _startNormalProbeFallback(session);
         return;
@@ -1010,24 +1331,31 @@ class _PlayerScreenState extends State<PlayerScreen> {
       setState(() => _showChannelList = false);
       return;
     }
+    _zapTo(index);
+  }
+
+  void _zapTo(int index) {
+    if (index < 0 || index >= widget.playlist.length || index == _currentIndex) {
+      return;
+    }
     setState(() {
       _currentIndex = index;
       _showChannelList = false;
     });
-    unawaited(_playCurrent());
+    // El reemplazo directo se reserva para TV/radio. En VOD mantenemos el
+    // cierre explícito para no alterar seek/resume ni semántica de archivos.
+    unawaited(_playCurrent(isZap: widget.isLiveContent));
   }
 
   void _next() {
     if (_currentIndex < widget.playlist.length - 1) {
-      setState(() => _currentIndex++);
-      unawaited(_playCurrent());
+      _zapTo(_currentIndex + 1);
     }
   }
 
   void _previous() {
     if (_currentIndex > 0) {
-      setState(() => _currentIndex--);
-      unawaited(_playCurrent());
+      _zapTo(_currentIndex - 1);
     }
   }
 
@@ -1209,6 +1537,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       BufferProfile.custom => 'Personalizado',
     };
     final average = stats.averageStartupMs;
+    final averageZap = stats.averageZapMs;
 
     await showDialog<void>(
       context: context,
@@ -1235,6 +1564,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
             ),
             Text(
               'Promedio servidor: ${average == null ? 'sin muestras' : '${average.round()} ms'}',
+            ),
+            Text(
+              'Último zap: ${_lastZapMs == null ? 'sin medir' : '$_lastZapMs ms'}',
+            ),
+            Text(
+              'Promedio de zap: ${averageZap == null ? 'sin muestras' : '${averageZap.round()} ms'}',
             ),
             Text('Muestras: ${stats.startupCount}'),
             Text('Fallos: ${stats.failures} · Cortes: ${stats.stalls}'),
@@ -1271,6 +1606,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _transientLiveFailureTimer?.cancel();
+    _connectionProbeTimer?.cancel();
+    _connectionRecoveryTimer?.cancel();
+    _connectionHealth.dispose();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
     _positionSub?.cancel();
@@ -1315,14 +1653,22 @@ class _PlayerScreenState extends State<PlayerScreen> {
               channelNumber: _currentIndex + 1,
               resolution:
                   _videoWidth == null || _videoHeight == null ? '' : _resolutionText,
-              performanceLabel:
-                  _lastStartupMs == null ? null : '$_lastStartupMs ms',
+              performanceLabel: _lastZapMs != null
+                  ? 'Zap $_lastZapMs ms'
+                  : (_lastStartupMs == null ? null : '$_lastStartupMs ms'),
               onBack: () => Navigator.of(context).maybePop(),
               onShowChannelList: () =>
                   setState(() => _showChannelList = !_showChannelList),
               onShowStreamInfo: _showStreamInfo,
               onShowPerformance:
                   _lastStartupMs == null ? null : _showPerformanceInfo,
+            ),
+          ),
+          Positioned(
+            top: 18,
+            right: 18,
+            child: SafeArea(
+              child: _buildConnectionHealthBadge(),
             ),
           ),
           if ((_isBuffering || _reconnecting) && _errorMessage == null)

@@ -13,6 +13,10 @@ class HostPlaybackStats {
   int failures;
   int stalls;
   int fastProbeFallbacks;
+  int zapCount;
+  int zapTotalMs;
+  int fastestZapMs;
+  int slowestZapMs;
   int lastUpdatedEpochMs;
 
   HostPlaybackStats({
@@ -24,11 +28,17 @@ class HostPlaybackStats {
     this.failures = 0,
     this.stalls = 0,
     this.fastProbeFallbacks = 0,
+    this.zapCount = 0,
+    this.zapTotalMs = 0,
+    this.fastestZapMs = 0,
+    this.slowestZapMs = 0,
     this.lastUpdatedEpochMs = 0,
   });
 
   double? get averageStartupMs =>
       startupCount == 0 ? null : startupTotalMs / startupCount;
+
+  double? get averageZapMs => zapCount == 0 ? null : zapTotalMs / zapCount;
 
   double get failureRatio {
     final attempts = startupCount + failures;
@@ -37,7 +47,7 @@ class HostPlaybackStats {
 
   double get stallRatio => startupCount == 0 ? 0 : stalls / startupCount;
 
-  int get sampleScore => startupCount + failures + stalls;
+  int get sampleScore => startupCount + failures + stalls + zapCount;
 
   void recordStartup(int milliseconds) {
     startupCount++;
@@ -64,6 +74,16 @@ class HostPlaybackStats {
     lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
   }
 
+  void recordZap(int milliseconds) {
+    zapCount++;
+    zapTotalMs += milliseconds;
+    if (fastestZapMs == 0 || milliseconds < fastestZapMs) {
+      fastestZapMs = milliseconds;
+    }
+    if (milliseconds > slowestZapMs) slowestZapMs = milliseconds;
+    lastUpdatedEpochMs = DateTime.now().millisecondsSinceEpoch;
+  }
+
   Map<String, dynamic> toJson() => {
         'host': host,
         'startupCount': startupCount,
@@ -73,6 +93,10 @@ class HostPlaybackStats {
         'failures': failures,
         'stalls': stalls,
         'fastProbeFallbacks': fastProbeFallbacks,
+        'zapCount': zapCount,
+        'zapTotalMs': zapTotalMs,
+        'fastestZapMs': fastestZapMs,
+        'slowestZapMs': slowestZapMs,
         'lastUpdatedEpochMs': lastUpdatedEpochMs,
       };
 
@@ -87,6 +111,10 @@ class HostPlaybackStats {
       stalls: (json['stalls'] as num?)?.toInt() ?? 0,
       fastProbeFallbacks:
           (json['fastProbeFallbacks'] as num?)?.toInt() ?? 0,
+      zapCount: (json['zapCount'] as num?)?.toInt() ?? 0,
+      zapTotalMs: (json['zapTotalMs'] as num?)?.toInt() ?? 0,
+      fastestZapMs: (json['fastestZapMs'] as num?)?.toInt() ?? 0,
+      slowestZapMs: (json['slowestZapMs'] as num?)?.toInt() ?? 0,
       lastUpdatedEpochMs:
           (json['lastUpdatedEpochMs'] as num?)?.toInt() ?? 0,
     );
@@ -197,6 +225,12 @@ class PlaybackMetricsService {
   Future<void> recordFastProbeFallback(String url) async {
     final stats = await statsForUrl(url);
     stats.recordFastProbeFallback();
+    await _save();
+  }
+
+  Future<void> recordZap(String url, int milliseconds) async {
+    final stats = await statsForUrl(url);
+    stats.recordZap(milliseconds);
     await _save();
   }
 
