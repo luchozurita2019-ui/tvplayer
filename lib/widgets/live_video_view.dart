@@ -527,7 +527,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     final totalMs = _duration.inMilliseconds;
     final currentMs = _position.inMilliseconds.clamp(0, totalMs > 0 ? totalMs : 0);
     final max = totalMs > 0 ? totalMs.toDouble() : 1.0;
-    final value = currentMs.toDouble().clamp(0, max);
+    final value = currentMs.toDouble().clamp(0.0, max).toDouble();
 
     return Column(
       mainAxisSize: MainAxisSize.min,
