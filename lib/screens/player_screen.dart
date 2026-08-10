@@ -40,7 +40,6 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _watchdogInterval = Duration(seconds: 2);
-  static const Duration _runtimeStatsInterval = Duration(seconds: 1);
   static const String _fastProbeSize = '131072';
   static const String _normalProbeSize = '5000000';
   static const int _hlsSegmentRetryCount = 5;
@@ -65,6 +64,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _currentOpenUsesFastProbe = false;
   bool _normalProbeFallbackUsed = false;
   bool _runtimeStatsBusy = false;
+  bool _runtimeFormatLoaded = false;
 
   String? _errorMessage;
   String _channelListQuery = '';
@@ -109,7 +109,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   String _engineDiagnostic = 'Sin errores de red detectados';
 
   Timer? _watchdogTimer;
-  Timer? _runtimeStatsTimer;
   Timer? _connectTimeoutTimer;
   Timer? _retryTimer;
   Timer? _transientLiveFailureTimer;
@@ -170,6 +169,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _hasEverPlayed = true;
         _retryCount = 0;
         _lastProgressAt = DateTime.now();
+        // Leemos el formato real una sola vez por canal. Esto conserva la
+        // detección de HLS para URLs sin .m3u8 sin mantener un polling técnico.
+        unawaited(_refreshContainerFormat());
       }
 
       setState(() {
@@ -263,11 +265,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _logSub = _player.stream.log.listen(_handlePlayerLog);
 
+    // El watchdog conserva su frecuencia porque sólo observa estado de
+    // reproducción. Las estadísticas técnicas ya no se consultan en segundo
+    // plano: se leen únicamente cuando el usuario abre los paneles de info.
     _watchdogTimer = Timer.periodic(_watchdogInterval, (_) => _checkStall());
-    _runtimeStatsTimer = Timer.periodic(
-      _runtimeStatsInterval,
-      (_) => unawaited(_refreshRuntimeStats()),
-    );
 
     unawaited(_initializeAndPlay());
   }
@@ -468,6 +469,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
         format.contains('applehttp');
   }
 
+  Future<void> _refreshContainerFormat() async {
+    if (_runtimeFormatLoaded ||
+        !mounted ||
+        !_hasEverPlayed ||
+        _opening ||
+        _reconnecting) {
+      return;
+    }
+
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+
+    final format = await _readStringProperty(platform, 'file-format');
+    if (!mounted || format == null || format.isEmpty || format == 'N/A') return;
+
+    // No hacemos setState: este dato alimenta compatibilidad/diagnóstico y será
+    // leído por la UI sólo cuando corresponda.
+    _containerFormat = format;
+    _runtimeFormatLoaded = true;
+  }
+
   Future<void> _refreshRuntimeStats() async {
     if (_runtimeStatsBusy ||
         !mounted ||
@@ -495,34 +517,36 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final format = await _readStringProperty(platform, 'file-format');
 
       if (!mounted) return;
-      setState(() {
-        if (fps != null && fps > 0) _videoFps = fps;
-        if (videoBitrate != null && videoBitrate > 0) {
-          _videoBitrate = videoBitrate;
-        }
-        if (audioBitrate != null && audioBitrate > 0) {
-          _audioBitrate = audioBitrate;
-        }
-        if (cacheSeconds != null && cacheSeconds >= 0) {
-          _lastCacheSeconds = cacheSeconds;
-        }
-        if (cacheSpeed != null && cacheSpeed >= 0) {
-          _networkReadBytesPerSecond = cacheSpeed;
-        }
-        if (coreIdle != null) {
-          _coreIdle = coreIdle == 'yes' || coreIdle == 'true';
-        }
-        if (pausedForCache != null) {
-          _pausedForCache =
-              pausedForCache == 'yes' || pausedForCache == 'true';
-        }
-        if (eofReached != null) {
-          _eofReached = eofReached == 'yes' || eofReached == 'true';
-        }
-        if (format != null && format.isNotEmpty && format != 'N/A') {
-          _containerFormat = format;
-        }
-      });
+
+      // Snapshot técnico bajo demanda. No usamos setState porque estos valores
+      // no forman parte del camino crítico del video; los diálogos que los
+      // muestran se construyen después de que esta lectura termina.
+      if (fps != null && fps > 0) _videoFps = fps;
+      if (videoBitrate != null && videoBitrate > 0) {
+        _videoBitrate = videoBitrate;
+      }
+      if (audioBitrate != null && audioBitrate > 0) {
+        _audioBitrate = audioBitrate;
+      }
+      if (cacheSeconds != null && cacheSeconds >= 0) {
+        _lastCacheSeconds = cacheSeconds;
+      }
+      if (cacheSpeed != null && cacheSpeed >= 0) {
+        _networkReadBytesPerSecond = cacheSpeed;
+      }
+      if (coreIdle != null) {
+        _coreIdle = coreIdle == 'yes' || coreIdle == 'true';
+      }
+      if (pausedForCache != null) {
+        _pausedForCache = pausedForCache == 'yes' || pausedForCache == 'true';
+      }
+      if (eofReached != null) {
+        _eofReached = eofReached == 'yes' || eofReached == 'true';
+      }
+      if (format != null && format.isNotEmpty && format != 'N/A') {
+        _containerFormat = format;
+        _runtimeFormatLoaded = true;
+      }
     } finally {
       _runtimeStatsBusy = false;
     }
@@ -969,6 +993,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioCodec = null;
     _pixelFormat = null;
     _containerFormat = null;
+    _runtimeFormatLoaded = false;
     _audioChannels = null;
     _audioSampleRate = null;
     _lastCacheSeconds = null;
@@ -1169,6 +1194,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _showPerformanceInfo() async {
+    await _refreshRuntimeStats();
+    if (!mounted) return;
+
     final channel = widget.playlist[_currentIndex];
     final stats = await _metrics.statsForUrl(channel.url);
     if (!mounted) return;
@@ -1240,7 +1268,6 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _sessionId++;
     _watchdogTimer?.cancel();
-    _runtimeStatsTimer?.cancel();
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _transientLiveFailureTimer?.cancel();
