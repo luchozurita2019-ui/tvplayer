@@ -182,6 +182,16 @@ class ArtworkCacheService {
     if (pending != null) return pending;
 
     final future = () async {
+      // Migración v40: las versiones anteriores guardaban posters de forma
+      // persistente en Application Support. Ya no se reutilizan, así que los
+      // eliminamos una sola vez al iniciar el caché temporal para recuperar
+      // almacenamiento en equipos actualizados.
+      try {
+        final support = await getApplicationSupportDirectory();
+        final legacy = Directory('${support.path}/tv_full_artwork_cache');
+        if (await legacy.exists()) await legacy.delete(recursive: true);
+      } catch (_) {}
+
       final base = await getTemporaryDirectory();
       final root = Directory('${base.path}/tv_full_artwork_session');
       // Primera utilización del proceso: elimina cualquier resto de una

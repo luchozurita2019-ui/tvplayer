@@ -75,16 +75,14 @@ class XtreamSeriesCatalogSnapshot {
 /// Motor rápido de catálogos Xtream inspirado en el pipeline observado en
 /// Hot Player, pero manteniendo los fallbacks de TV FULL.
 ///
-/// Principios:
-/// - la autenticación Xtream se conserva en memoria durante la sesión;
-/// - Películas mantiene el flujo probado actual;
-/// - Series puede comenzar directamente desde la URL get.php ya guardada, sin
-///   esperar una autenticación extra sólo para mostrar el catálogo;
-/// - categorías y Series se descargan en paralelo;
-/// - el cuerpo se recibe como stream con timeout por inactividad;
-/// - jsonDecode, normalización y ordenamiento se ejecutan en un isolate;
-/// - el catálogo normalizado se guarda en disco para apertura inmediata;
-/// - las imágenes NO forman parte de esta carga y siguen su cola independiente.
+/// Principios v40:
+/// - para catálogo se intenta primero la conexión directa derivada de get.php;
+/// - categorías se resuelven antes del payload pesado para no competir por red;
+/// - get_vod_streams/get_series se escriben como stream a un archivo temporal;
+/// - lectura JSON y normalización pesada se ejecutan fuera del isolate de UI;
+/// - no se ordenan miles de elementos antes de poder mostrar el catálogo;
+/// - el catálogo local compacto es sólo fallback/offline y no contiene el bloque
+///   de conexión; las imágenes usan un caché temporal independiente.
 class XtreamFastCatalogService {
   XtreamFastCatalogService._();
 
