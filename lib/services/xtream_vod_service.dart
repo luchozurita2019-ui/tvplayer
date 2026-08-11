@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
 import 'xtream_service.dart';
+import 'xtream_http_client.dart';
 
 const String _vodUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -109,7 +110,7 @@ class XtreamVodDetails {
 class XtreamVodService {
   XtreamVodService._();
 
-  static final http.Client _client = http.Client();
+  static final http.Client _client = XtreamHttpClient.instance;
   static const _headers = <String, String>{
     'User-Agent': _vodUserAgent,
     'Accept': 'application/json,text/plain,*/*',

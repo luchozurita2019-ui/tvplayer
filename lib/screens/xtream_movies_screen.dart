@@ -7,6 +7,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
 import '../services/parental_control_service.dart';
+import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_service.dart';
 import '../services/xtream_vod_service.dart';
 import '../widgets/cached_artwork_image.dart';
@@ -31,6 +32,10 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   bool _sidebarCollapsed = false;
   final ParentalControlService _parental = ParentalControlService.instance;
   List<String> _catalogCategories = const <String>[];
+  String _progressLabel = 'Cargando información del servidor…';
+  int _loadGeneration = 0;
+  DateTime _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  int _lastProgressBytes = 0;
 
   static const double _sidebarMinWidth = 230;
   static const double _sidebarMaxWidth = 480;
@@ -61,24 +66,81 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     setState(() {});
   }
 
-  Future<_MovieCatalogData> _load() async {
+  Future<_MovieCatalogData> _load({bool forceNetwork = false}) async {
     await _parental.init();
-    final connection =
-        await XtreamService.reconnectFromPlaylistUrl(widget.playlist.source);
-    final movies = await XtreamVodService.fetchCatalog(connection);
-    final categories = movies
-        .map((item) => item.category)
-        .whereType<String>()
-        .where((value) => value.trim().isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    if (mounted) {
-      setState(() => _catalogCategories = List.unmodifiable(categories));
-    } else {
-      _catalogCategories = List.unmodifiable(categories);
+    final generation = ++_loadGeneration;
+    final fast = XtreamFastCatalogService.instance;
+
+    if (!forceNetwork) {
+      final cached = await fast.loadCachedMovies(widget.playlist.source);
+      if (cached != null && cached.movies.isNotEmpty) {
+        _setCatalogCategories(cached.categories);
+        // La UI se abre con disco inmediatamente y la red se actualiza detrás.
+        unawaited(_refreshMovieCatalog(generation));
+        return _MovieCatalogData(
+          connection: cached.connection,
+          movies: cached.movies,
+        );
+      }
     }
-    return _MovieCatalogData(connection: connection, movies: movies);
+
+    final fresh = await fast.refreshMovies(
+      widget.playlist.source,
+      forceSessionRefresh: forceNetwork,
+      onProgress: _onCatalogProgress,
+    );
+    _setCatalogCategories(fresh.categories);
+    return _MovieCatalogData(
+      connection: fresh.connection,
+      movies: fresh.movies,
+    );
+  }
+
+  void _setCatalogCategories(List<String> categories) {
+    final value = List<String>.unmodifiable(categories);
+    if (mounted) {
+      setState(() => _catalogCategories = value);
+    } else {
+      _catalogCategories = value;
+    }
+  }
+
+  void _onCatalogProgress(XtreamCatalogProgress progress) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final bytesDelta = progress.receivedBytes - _lastProgressBytes;
+    final elapsed = now.difference(_lastProgressUpdate);
+    if (progress.receivedBytes > 0 &&
+        bytesDelta < 128 * 1024 &&
+        elapsed < const Duration(milliseconds: 180)) {
+      return;
+    }
+    _lastProgressUpdate = now;
+    _lastProgressBytes = progress.receivedBytes;
+    setState(() => _progressLabel = progress.label);
+  }
+
+  Future<void> _refreshMovieCatalog(int generation) async {
+    try {
+      final fresh = await XtreamFastCatalogService.instance.refreshMovies(
+        widget.playlist.source,
+      );
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _catalogCategories = List<String>.unmodifiable(fresh.categories);
+        if (_category != null && !_catalogCategories.contains(_category)) {
+          _category = null;
+        }
+        _future = Future<_MovieCatalogData>.value(
+          _MovieCatalogData(
+            connection: fresh.connection,
+            movies: fresh.movies,
+          ),
+        );
+      });
+    } catch (_) {
+      // Si falla la actualización, el catálogo local permanece disponible.
+    }
   }
 
   Future<void> _loadSidebarPreferences() async {
@@ -98,7 +160,15 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     await prefs.setBool(_sidebarCollapsedKey, _sidebarCollapsed);
   }
 
-  void _retry() => setState(() => _future = _load());
+  void _retry() {
+    XtreamFastCatalogService.instance.invalidateSession(widget.playlist.source);
+    setState(() {
+      _progressLabel = 'Cargando información del servidor…';
+      _lastProgressBytes = 0;
+      _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+      _future = _load(forceNetwork: true);
+    });
+  }
 
   void _toggleSidebar() {
     setState(() => _sidebarCollapsed = !_sidebarCollapsed);
@@ -217,13 +287,13 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 14),
-                  Text('Cargando catálogo de películas por Xtream…'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 14),
+                  Text(_progressLabel),
                 ],
               ),
             );
@@ -252,37 +322,29 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   }
 
   Widget _buildCatalog(_MovieCatalogData data) {
-    final allCategories = data.movies
-        .map((item) => item.category)
-        .whereType<String>()
-        .where((value) => value.trim().isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    final categories = _parental.visibleGroups(allCategories);
+    final categories = _parental.visibleGroups(_catalogCategories);
     final categoryCounts = <String, int>{};
+    final visible = <XtreamVodSummary>[];
+    var visibleTotal = 0;
+    final normalized = _query.trim().toLowerCase();
+
+    // Una sola pasada: parental + conteos + categoría + búsqueda.
     for (final item in data.movies) {
       if (!_parental.canShowItem(name: item.name, group: item.category)) continue;
+      visibleTotal++;
       final category = item.category?.trim();
-      if (category == null || category.isEmpty) continue;
-      categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
-    }
-    final visibleTotal = data.movies
-        .where((item) =>
-            _parental.canShowItem(name: item.name, group: item.category))
-        .length;
-
-    final normalized = _query.trim().toLowerCase();
-    final visible = data.movies.where((item) {
-      if (!_parental.canShowItem(name: item.name, group: item.category)) {
-        return false;
+      if (category != null && category.isNotEmpty) {
+        categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
       }
-      if (_category != null && item.category != _category) return false;
-      if (normalized.isEmpty) return true;
-      return item.name.toLowerCase().contains(normalized) ||
-          (item.genre?.toLowerCase().contains(normalized) ?? false) ||
-          (item.category?.toLowerCase().contains(normalized) ?? false);
-    }).toList(growable: false);
+      if (_category != null && item.category != _category) continue;
+      if (normalized.isNotEmpty &&
+          !item.name.toLowerCase().contains(normalized) &&
+          !(item.genre?.toLowerCase().contains(normalized) ?? false) &&
+          !(item.category?.toLowerCase().contains(normalized) ?? false)) {
+        continue;
+      }
+      visible.add(item);
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {

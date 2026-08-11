@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
+import 'xtream_http_client.dart';
 
 const String _xtreamBrowserUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -47,7 +48,7 @@ class XtreamNativeCatalog {
 class XtreamService {
   XtreamService._();
 
-  static final http.Client _client = http.Client();
+  static final http.Client _client = XtreamHttpClient.instance;
 
   static const Map<String, String> _jsonHeaders = {
     'User-Agent': _xtreamBrowserUserAgent,

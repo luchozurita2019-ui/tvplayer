@@ -5,6 +5,7 @@ import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
 import 'xtream_service.dart';
+import 'xtream_http_client.dart';
 
 const String _seriesUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -132,7 +133,7 @@ class XtreamSeriesDetails {
 class XtreamSeriesService {
   XtreamSeriesService._();
 
-  static final http.Client _client = http.Client();
+  static final http.Client _client = XtreamHttpClient.instance;
 
   static const Map<String, String> _headers = {
     'User-Agent': _seriesUserAgent,

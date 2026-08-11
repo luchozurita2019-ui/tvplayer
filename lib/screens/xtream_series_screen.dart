@@ -8,6 +8,7 @@ import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
 import '../services/parental_control_service.dart';
+import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_series_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
@@ -32,6 +33,10 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   bool _sidebarCollapsed = false;
   final ParentalControlService _parental = ParentalControlService.instance;
   List<String> _catalogCategories = const <String>[];
+  String _progressLabel = 'Cargando información del servidor…';
+  int _loadGeneration = 0;
+  DateTime _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+  int _lastProgressBytes = 0;
 
   static const double _sidebarMinWidth = 230;
   static const double _sidebarMaxWidth = 480;
@@ -131,27 +136,91 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     );
   }
 
-  Future<_SeriesCatalogData> _load() async {
+  Future<_SeriesCatalogData> _load({bool forceNetwork = false}) async {
     await _parental.init();
-    final connection =
-        await XtreamService.reconnectFromPlaylistUrl(widget.playlist.source);
-    final series = await XtreamSeriesService.fetchCatalog(connection);
-    final categories = series
-        .map((item) => item.category)
-        .whereType<String>()
-        .where((value) => value.trim().isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    if (mounted) {
-      setState(() => _catalogCategories = List.unmodifiable(categories));
-    } else {
-      _catalogCategories = List.unmodifiable(categories);
+    final generation = ++_loadGeneration;
+    final fast = XtreamFastCatalogService.instance;
+
+    if (!forceNetwork) {
+      final cached = await fast.loadCachedSeries(widget.playlist.source);
+      if (cached != null && cached.series.isNotEmpty) {
+        _setCatalogCategories(cached.categories);
+        unawaited(_refreshSeriesCatalog(generation));
+        return _SeriesCatalogData(
+          connection: cached.connection,
+          series: cached.series,
+        );
+      }
     }
-    return _SeriesCatalogData(connection: connection, series: series);
+
+    final fresh = await fast.refreshSeries(
+      widget.playlist.source,
+      forceSessionRefresh: forceNetwork,
+      onProgress: _onCatalogProgress,
+    );
+    _setCatalogCategories(fresh.categories);
+    return _SeriesCatalogData(
+      connection: fresh.connection,
+      series: fresh.series,
+    );
   }
 
-  void _retry() => setState(() => _future = _load());
+  void _setCatalogCategories(List<String> categories) {
+    final value = List<String>.unmodifiable(categories);
+    if (mounted) {
+      setState(() => _catalogCategories = value);
+    } else {
+      _catalogCategories = value;
+    }
+  }
+
+  void _onCatalogProgress(XtreamCatalogProgress progress) {
+    if (!mounted) return;
+    final now = DateTime.now();
+    final bytesDelta = progress.receivedBytes - _lastProgressBytes;
+    final elapsed = now.difference(_lastProgressUpdate);
+    if (progress.receivedBytes > 0 &&
+        bytesDelta < 128 * 1024 &&
+        elapsed < const Duration(milliseconds: 180)) {
+      return;
+    }
+    _lastProgressUpdate = now;
+    _lastProgressBytes = progress.receivedBytes;
+    setState(() => _progressLabel = progress.label);
+  }
+
+  Future<void> _refreshSeriesCatalog(int generation) async {
+    try {
+      final fresh = await XtreamFastCatalogService.instance.refreshSeries(
+        widget.playlist.source,
+      );
+      if (!mounted || generation != _loadGeneration) return;
+      setState(() {
+        _catalogCategories = List<String>.unmodifiable(fresh.categories);
+        if (_category != null && !_catalogCategories.contains(_category)) {
+          _category = null;
+        }
+        _future = Future<_SeriesCatalogData>.value(
+          _SeriesCatalogData(
+            connection: fresh.connection,
+            series: fresh.series,
+          ),
+        );
+      });
+    } catch (_) {
+      // Conservamos la copia local cuando el proveedor no responde.
+    }
+  }
+
+  void _retry() {
+    XtreamFastCatalogService.instance.invalidateSession(widget.playlist.source);
+    setState(() {
+      _progressLabel = 'Cargando información del servidor…';
+      _lastProgressBytes = 0;
+      _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
+      _future = _load(forceNetwork: true);
+    });
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -182,20 +251,24 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(
+            return Center(
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 14),
-                  Text('Cargando catálogo de series por Xtream…'),
+                  const CircularProgressIndicator(),
+                  const SizedBox(height: 14),
+                  Text(_progressLabel),
                 ],
               ),
             );
           }
           if (snapshot.hasError) {
+            final rawError = snapshot.error.toString();
+            final message = rawError.contains('TimeoutException')
+                ? 'El servidor Xtream dejó de enviar datos durante demasiado tiempo. Reintentá la carga de Series.'
+                : rawError.replaceFirst('Exception: ', '');
             return _SeriesError(
-              message: snapshot.error.toString().replaceFirst('Exception: ', ''),
+              message: message,
               onRetry: _retry,
             );
           }
@@ -214,37 +287,28 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   }
 
   Widget _buildCatalog(BuildContext context, _SeriesCatalogData data) {
-    final allCategories = data.series
-        .map((item) => item.category)
-        .whereType<String>()
-        .where((value) => value.trim().isNotEmpty)
-        .toSet()
-        .toList()
-      ..sort();
-    final categories = _parental.visibleGroups(allCategories);
+    final categories = _parental.visibleGroups(_catalogCategories);
     final categoryCounts = <String, int>{};
+    final visible = <XtreamSeriesSummary>[];
+    var visibleTotal = 0;
+    final normalized = _query.trim().toLowerCase();
+
     for (final item in data.series) {
       if (!_parental.canShowItem(name: item.name, group: item.category)) continue;
+      visibleTotal++;
       final category = item.category?.trim();
-      if (category == null || category.isEmpty) continue;
-      categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
-    }
-    final visibleTotal = data.series
-        .where((item) =>
-            _parental.canShowItem(name: item.name, group: item.category))
-        .length;
-
-    final normalized = _query.trim().toLowerCase();
-    final visible = data.series.where((item) {
-      if (!_parental.canShowItem(name: item.name, group: item.category)) {
-        return false;
+      if (category != null && category.isNotEmpty) {
+        categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
       }
-      if (_category != null && item.category != _category) return false;
-      if (normalized.isEmpty) return true;
-      return item.name.toLowerCase().contains(normalized) ||
-          (item.genre?.toLowerCase().contains(normalized) ?? false) ||
-          (item.category?.toLowerCase().contains(normalized) ?? false);
-    }).toList(growable: false);
+      if (_category != null && item.category != _category) continue;
+      if (normalized.isNotEmpty &&
+          !item.name.toLowerCase().contains(normalized) &&
+          !(item.genre?.toLowerCase().contains(normalized) ?? false) &&
+          !(item.category?.toLowerCase().contains(normalized) ?? false)) {
+        continue;
+      }
+      visible.add(item);
+    }
 
     return LayoutBuilder(
       builder: (context, constraints) {
