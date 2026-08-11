@@ -5,6 +5,8 @@ import 'package:shared_preferences/shared_preferences.dart';
 enum ServerCompatibilityMode {
   direct,
   nativeHttp,
+  mpvHttp,
+  tlsLegacy,
   compatible,
   liveRecovery,
   advanced,
@@ -15,6 +17,8 @@ extension ServerCompatibilityModeLabel on ServerCompatibilityMode {
   String get label => switch (this) {
         ServerCompatibilityMode.direct => 'Directo',
         ServerCompatibilityMode.nativeHttp => 'HTTP nativo',
+        ServerCompatibilityMode.mpvHttp => 'HTTP mpv',
+        ServerCompatibilityMode.tlsLegacy => 'TLS compatible',
         ServerCompatibilityMode.compatible => 'Compatible',
         ServerCompatibilityMode.liveRecovery => 'Live Recovery',
         ServerCompatibilityMode.advanced => 'Compatibilidad avanzada',
@@ -27,6 +31,8 @@ class HostCompatibilityProfile {
   ServerCompatibilityMode preferredMode;
   int directFailures;
   int nativeHttpFailures;
+  int mpvHttpFailures;
+  int tlsLegacyFailures;
   int compatibleFailures;
   int liveRecoveryFailures;
   int advancedFailures;
@@ -43,6 +49,8 @@ class HostCompatibilityProfile {
     this.preferredMode = ServerCompatibilityMode.direct,
     this.directFailures = 0,
     this.nativeHttpFailures = 0,
+    this.mpvHttpFailures = 0,
+    this.tlsLegacyFailures = 0,
     this.compatibleFailures = 0,
     this.liveRecoveryFailures = 0,
     this.advancedFailures = 0,
@@ -60,6 +68,8 @@ class HostCompatibilityProfile {
         'preferredMode': preferredMode.name,
         'directFailures': directFailures,
         'nativeHttpFailures': nativeHttpFailures,
+        'mpvHttpFailures': mpvHttpFailures,
+        'tlsLegacyFailures': tlsLegacyFailures,
         'compatibleFailures': compatibleFailures,
         'liveRecoveryFailures': liveRecoveryFailures,
         'advancedFailures': advancedFailures,
@@ -85,6 +95,9 @@ class HostCompatibilityProfile {
       directFailures: (json['directFailures'] as num?)?.toInt() ?? 0,
       nativeHttpFailures:
           (json['nativeHttpFailures'] as num?)?.toInt() ?? 0,
+      mpvHttpFailures: (json['mpvHttpFailures'] as num?)?.toInt() ?? 0,
+      tlsLegacyFailures:
+          (json['tlsLegacyFailures'] as num?)?.toInt() ?? 0,
       compatibleFailures: (json['compatibleFailures'] as num?)?.toInt() ?? 0,
       liveRecoveryFailures:
           (json['liveRecoveryFailures'] as num?)?.toInt() ?? 0,
@@ -109,8 +122,8 @@ class ServerCompatibilityService {
   static final ServerCompatibilityService instance =
       ServerCompatibilityService._();
 
-  // Conservamos la clave v1 para no perder lo aprendido por V3.6. Los campos
-  // nuevos son opcionales y se cargan con valores seguros en perfiles viejos.
+  // Conservamos la clave v1 para no perder lo aprendido por versiones previas.
+  // Los campos nuevos son opcionales al decodificar perfiles antiguos.
   static const _storageKey = 'server_compatibility_v1';
 
   final Map<String, HostCompatibilityProfile> _profiles = {};
@@ -119,7 +132,12 @@ class ServerCompatibilityService {
   String hostForUrl(String url) {
     final uri = Uri.tryParse(url);
     final host = uri?.host.trim().toLowerCase() ?? '';
-    return host.isEmpty ? 'desconocido' : host;
+    if (host.isEmpty) return 'desconocido';
+
+    // El mismo panel puede exponer API en :59000 y video en :8443 con reglas
+    // distintas. Aprender por host+puerto evita mezclar esos comportamientos.
+    if (uri != null && uri.hasPort) return '$host:${uri.port}';
+    return host;
   }
 
   Future<void> _ensureLoaded() async {
@@ -172,56 +190,22 @@ class ServerCompatibilityService {
   }
 
   List<ServerCompatibilityMode> planFor(ServerCompatibilityMode preferred) {
-    return switch (preferred) {
-      ServerCompatibilityMode.direct => const [
-          ServerCompatibilityMode.direct,
-          ServerCompatibilityMode.nativeHttp,
-          ServerCompatibilityMode.compatible,
-          ServerCompatibilityMode.liveRecovery,
-          ServerCompatibilityMode.advanced,
-          ServerCompatibilityMode.xtreamHls,
-        ],
-      ServerCompatibilityMode.nativeHttp => const [
-          ServerCompatibilityMode.nativeHttp,
-          ServerCompatibilityMode.direct,
-          ServerCompatibilityMode.compatible,
-          ServerCompatibilityMode.liveRecovery,
-          ServerCompatibilityMode.advanced,
-          ServerCompatibilityMode.xtreamHls,
-        ],
-      ServerCompatibilityMode.compatible => const [
-          ServerCompatibilityMode.compatible,
-          ServerCompatibilityMode.nativeHttp,
-          ServerCompatibilityMode.direct,
-          ServerCompatibilityMode.advanced,
-          ServerCompatibilityMode.liveRecovery,
-          ServerCompatibilityMode.xtreamHls,
-        ],
-      ServerCompatibilityMode.liveRecovery => const [
-          ServerCompatibilityMode.liveRecovery,
-          ServerCompatibilityMode.nativeHttp,
-          ServerCompatibilityMode.direct,
-          ServerCompatibilityMode.advanced,
-          ServerCompatibilityMode.compatible,
-          ServerCompatibilityMode.xtreamHls,
-        ],
-      ServerCompatibilityMode.advanced => const [
-          ServerCompatibilityMode.advanced,
-          ServerCompatibilityMode.nativeHttp,
-          ServerCompatibilityMode.liveRecovery,
-          ServerCompatibilityMode.compatible,
-          ServerCompatibilityMode.direct,
-          ServerCompatibilityMode.xtreamHls,
-        ],
-      ServerCompatibilityMode.xtreamHls => const [
-          ServerCompatibilityMode.xtreamHls,
-          ServerCompatibilityMode.nativeHttp,
-          ServerCompatibilityMode.direct,
-          ServerCompatibilityMode.compatible,
-          ServerCompatibilityMode.liveRecovery,
-          ServerCompatibilityMode.advanced,
-        ],
-    };
+    const baseline = <ServerCompatibilityMode>[
+      ServerCompatibilityMode.direct,
+      ServerCompatibilityMode.nativeHttp,
+      ServerCompatibilityMode.mpvHttp,
+      ServerCompatibilityMode.tlsLegacy,
+      ServerCompatibilityMode.compatible,
+      ServerCompatibilityMode.liveRecovery,
+      ServerCompatibilityMode.advanced,
+      ServerCompatibilityMode.xtreamHls,
+    ];
+
+    // El modo aprendido se prueba primero; el resto conserva un orden estable.
+    return <ServerCompatibilityMode>[
+      preferred,
+      ...baseline.where((mode) => mode != preferred),
+    ];
   }
 
   Future<void> recordSuccess(
@@ -246,6 +230,12 @@ class ServerCompatibilityService {
         break;
       case ServerCompatibilityMode.nativeHttp:
         profile.nativeHttpFailures++;
+        break;
+      case ServerCompatibilityMode.mpvHttp:
+        profile.mpvHttpFailures++;
+        break;
+      case ServerCompatibilityMode.tlsLegacy:
+        profile.tlsLegacyFailures++;
         break;
       case ServerCompatibilityMode.compatible:
         profile.compatibleFailures++;
