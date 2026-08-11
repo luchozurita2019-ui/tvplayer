@@ -1,0 +1,336 @@
+name: Temporary Series timing diagnostic patcher
+
+on:
+  push:
+    branches: [ performance-engine-v38-hotplayer-baseline ]
+    paths:
+      - '.github/workflows/temp-series-timing-diagnostic.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch-series-diagnostics:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+          fetch-depth: 0
+
+      - name: Patch Series timing diagnostics
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          path = Path('lib/services/xtream_fast_catalog_service.dart')
+          text = path.read_text()
+
+          anchor = "  static const Duration _seriesTimeout = Duration(seconds: 35);\n"
+          insert = anchor + "\n  // Build temporal de diagnóstico: Series siempre mide una carga fresca de red.\n  // El caché existente no se borra, simplemente no se usa como atajo durante la prueba.\n  static const bool _seriesTimingDiagnosticMode = true;\n  String? _lastSeriesDiagnostics;\n\n  String? get lastSeriesDiagnostics => _lastSeriesDiagnostics;\n"
+          if anchor not in text:
+              raise SystemExit('No se encontró anchor de _seriesTimeout')
+          text = text.replace(anchor, insert, 1)
+
+          anchor = "  Future<XtreamSeriesCatalogSnapshot?> loadCachedSeries(\n    String playlistUrl,\n  ) async {\n"
+          replace = anchor + "    if (_seriesTimingDiagnosticMode) return null;\n"
+          if anchor not in text:
+              raise SystemExit('No se encontró loadCachedSeries')
+          text = text.replace(anchor, replace, 1)
+
+          start = text.index("  Future<XtreamSeriesCatalogSnapshot> refreshSeries(")
+          end = text.index("  Future<XtreamMovieCatalogSnapshot> _fetchMovies(", start)
+          refresh = r'''  Future<XtreamSeriesCatalogSnapshot> refreshSeries(
+    String playlistUrl, {
+    XtreamCatalogProgressCallback? onProgress,
+    bool forceSessionRefresh = false,
+  }) async {
+    final totalWatch = Stopwatch()..start();
+    final connectionWatch = Stopwatch()..start();
+    var connection = await _connectionForSeriesCatalog(
+      playlistUrl,
+      forceRefresh: forceSessionRefresh,
+    );
+    connectionWatch.stop();
+    var connectionElapsed = connectionWatch.elapsed;
+
+    try {
+      return await _fetchSeries(
+        connection,
+        playlistUrl,
+        onProgress,
+        totalWatch: totalWatch,
+        connectionElapsed: connectionElapsed,
+      );
+    } on _XtreamHttpException catch (error) {
+      // Si el acceso provisional fue rechazado, medimos también el costo real
+      // de autenticar y resolver el servidor antes del segundo intento.
+      if (error.statusCode != 401 && error.statusCode != 403) rethrow;
+      invalidateSession(playlistUrl);
+      final authWatch = Stopwatch()..start();
+      connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
+      authWatch.stop();
+      connectionElapsed += authWatch.elapsed;
+      return _fetchSeries(
+        connection,
+        playlistUrl,
+        onProgress,
+        totalWatch: totalWatch,
+        connectionElapsed: connectionElapsed,
+      );
+    } on TimeoutException {
+      rethrow;
+    } on SocketException {
+      rethrow;
+    } catch (error) {
+      // Conservamos el fallback anterior. Si entramos aquí, la prueba ya nos
+      // indica que el pipeline rápido no fue el camino utilizado.
+      try {
+        final fallbackWatch = Stopwatch()..start();
+        final series = await XtreamSeriesService.fetchCatalog(connection);
+        fallbackWatch.stop();
+        final categories = _categoriesFromSeries(series);
+        if (totalWatch.isRunning) totalWatch.stop();
+        final diagnostic = <String>[
+          'TV FULL · Diagnóstico Series',
+          'Ruta: FALLBACK XtreamSeriesService',
+          'Conexión: ${_formatDiagnosticDuration(connectionElapsed)}',
+          'Fallback catálogo: ${_formatDiagnosticDuration(fallbackWatch.elapsed)}',
+          'TOTAL: ${_formatDiagnosticDuration(totalWatch.elapsed)}',
+          'Elementos: ${series.length}',
+          'Fecha: ${DateTime.now().toIso8601String()}',
+        ].join('\n');
+        _lastSeriesDiagnostics = diagnostic;
+        debugPrint(diagnostic);
+        unawaited(_writeSeriesDiagnostic(diagnostic));
+        final snapshot = XtreamSeriesCatalogSnapshot(
+          connection: connection,
+          series: series,
+          categories: categories,
+          savedAt: DateTime.now(),
+          fromCache: false,
+        );
+        return snapshot;
+      } catch (_) {
+        throw error;
+      }
+    }
+  }
+
+'''
+          text = text[:start] + refresh + text[end:]
+
+          start = text.index("  Future<XtreamSeriesCatalogSnapshot> _fetchSeries(")
+          end = text.index("  Future<String> _downloadActionBody(", start)
+          fetch_series = r'''  Future<XtreamSeriesCatalogSnapshot> _fetchSeries(
+    XtreamConnectionResult connection,
+    String playlistUrl,
+    XtreamCatalogProgressCallback? onProgress, {
+    required Stopwatch totalWatch,
+    required Duration connectionElapsed,
+  }) async {
+    onProgress?.call(const XtreamCatalogProgress(
+      section: 'SERIES',
+      phase: 'Cargando categorías',
+      step: 1,
+      totalSteps: 2,
+    ));
+
+    Future<_SeriesTimedBody> downloadCategories() async {
+      final watch = Stopwatch()..start();
+      var bytes = 0;
+      try {
+        final body = await _downloadActionBody(
+          connection,
+          'get_series_categories',
+          _categoryTimeout,
+          onBytes: (value) => bytes = value,
+        );
+        watch.stop();
+        return _SeriesTimedBody(
+          body: body,
+          elapsed: watch.elapsed,
+          bytes: bytes,
+          success: true,
+        );
+      } catch (_) {
+        if (watch.isRunning) watch.stop();
+        return _SeriesTimedBody(
+          body: '[]',
+          elapsed: watch.elapsed,
+          bytes: bytes,
+          success: false,
+        );
+      }
+    }
+
+    Future<_SeriesTimedBody> downloadItems() async {
+      final watch = Stopwatch()..start();
+      var bytes = 0;
+      final body = await _downloadActionBody(
+        connection,
+        'get_series',
+        _seriesTimeout,
+        onBytes: (value) {
+          bytes = value;
+          onProgress?.call(XtreamCatalogProgress(
+            section: 'SERIES',
+            phase: 'Cargando lista',
+            step: 2,
+            totalSteps: 2,
+            receivedBytes: value,
+          ));
+        },
+      );
+      watch.stop();
+      return _SeriesTimedBody(
+        body: body,
+        elapsed: watch.elapsed,
+        bytes: bytes,
+        success: true,
+      );
+    }
+
+    // Igual que el build rápido anterior: categorías y catálogo comienzan en
+    // paralelo. Ahora medimos cada petición por separado.
+    onProgress?.call(const XtreamCatalogProgress(
+      section: 'SERIES',
+      phase: 'Cargando lista',
+      step: 2,
+      totalSteps: 2,
+    ));
+    final bodies = await Future.wait<_SeriesTimedBody>([
+      downloadCategories(),
+      downloadItems(),
+    ]);
+    final categoriesResult = bodies[0];
+    final itemsResult = bodies[1];
+
+    onProgress?.call(const XtreamCatalogProgress(
+      section: 'SERIES',
+      phase: 'Preparando catálogo',
+      step: 2,
+      totalSteps: 2,
+    ));
+    final prepareWatch = Stopwatch()..start();
+    final prepared = await compute(_prepareSeriesCatalog, <String, String>{
+      'categories': categoriesResult.body,
+      'items': itemsResult.body,
+    });
+    prepareWatch.stop();
+
+    final materializeWatch = Stopwatch()..start();
+    final series = _seriesListFromPrepared(prepared['items']);
+    if (series.isEmpty) {
+      throw const FormatException('Xtream no devolvió series válidas.');
+    }
+    final categories = _stringList(prepared['categories']);
+    materializeWatch.stop();
+
+    final snapshot = XtreamSeriesCatalogSnapshot(
+      connection: connection,
+      series: List<XtreamSeriesSummary>.unmodifiable(series),
+      categories: List<String>.unmodifiable(categories),
+      savedAt: DateTime.now(),
+      fromCache: false,
+    );
+
+    if (connection.serverName != null ||
+        connection.status != null ||
+        connection.expiration != null) {
+      rememberConnection(connection);
+    }
+
+    if (totalWatch.isRunning) totalWatch.stop();
+    final diagnostic = <String>[
+      'TV FULL · Diagnóstico Series',
+      'Ruta: motor rápido',
+      'Conexión: ${_formatDiagnosticDuration(connectionElapsed)}',
+      'Categorías: ${_formatDiagnosticDuration(categoriesResult.elapsed)} · ${_formatDiagnosticBytes(categoriesResult.bytes)} · ${categoriesResult.success ? 'OK' : 'fallback vacío'}',
+      'get_series: ${_formatDiagnosticDuration(itemsResult.elapsed)} · ${_formatDiagnosticBytes(itemsResult.bytes)}',
+      'JSON + isolate: ${_formatDiagnosticDuration(prepareWatch.elapsed)}',
+      'Materializar objetos: ${_formatDiagnosticDuration(materializeWatch.elapsed)}',
+      'TOTAL: ${_formatDiagnosticDuration(totalWatch.elapsed)}',
+      'Series: ${series.length}',
+      'Categorías finales: ${categories.length}',
+      'Fecha: ${DateTime.now().toIso8601String()}',
+    ].join('\n');
+    _lastSeriesDiagnostics = diagnostic;
+    debugPrint(diagnostic);
+    unawaited(_writeSeriesDiagnostic(diagnostic));
+
+    // En este build de medición no persistimos un catálogo nuevo de Series.
+    // Así la siguiente entrada vuelve a medir red fresca y el resultado no se
+    // falsea por el acceso local.
+    if (!_seriesTimingDiagnosticMode) {
+      unawaited(_writePreparedCache(
+        playlistUrl,
+        'series',
+        connection,
+        prepared,
+        snapshot.savedAt,
+      ));
+    }
+    return snapshot;
+  }
+
+'''
+          text = text[:start] + fetch_series + text[end:]
+
+          anchor = "  Future<File> _cacheFile(String playlistUrl, String kind) async {\n"
+          diagnostic_writer = r'''  Future<void> _writeSeriesDiagnostic(String content) async {
+    try {
+      final directory = await _ensureCacheDirectory();
+      final file = File('${directory.path}/series_diagnostic.txt');
+      await file.writeAsString(content, flush: true);
+    } catch (_) {
+      // El diagnóstico nunca debe afectar el catálogo.
+    }
+  }
+
+'''
+          if anchor not in text:
+              raise SystemExit('No se encontró _cacheFile')
+          text = text.replace(anchor, diagnostic_writer + anchor, 1)
+
+          anchor = "class _XtreamHttpException implements Exception {\n"
+          helpers = r'''class _SeriesTimedBody {
+  final String body;
+  final Duration elapsed;
+  final int bytes;
+  final bool success;
+
+  const _SeriesTimedBody({
+    required this.body,
+    required this.elapsed,
+    required this.bytes,
+    required this.success,
+  });
+}
+
+String _formatDiagnosticDuration(Duration value) =>
+    '${(value.inMicroseconds / 1000000).toStringAsFixed(3)} s';
+
+String _formatDiagnosticBytes(int bytes) {
+  if (bytes >= 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+  }
+  return '${(bytes / 1024).toStringAsFixed(1)} KB';
+}
+
+'''
+          if anchor not in text:
+              raise SystemExit('No se encontró _XtreamHttpException')
+          text = text.replace(anchor, helpers + anchor, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Commit diagnostics
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/services/xtream_fast_catalog_service.dart
+          git diff --cached --check
+          git commit -m "Measure fresh Series catalog timing"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
