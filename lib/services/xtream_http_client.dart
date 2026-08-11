@@ -19,7 +19,8 @@ class XtreamHttpClient {
   static const Map<String, String> jsonHeaders = <String, String>{
     'User-Agent': browserUserAgent,
     'Accept': 'application/json,text/plain,*/*',
-    'Accept-Encoding': 'gzip, deflate',
+    // dart:io negocia y descomprime gzip automáticamente. No fijamos
+    // Accept-Encoding a mano para conservar ese comportamiento en clones raros.
     'Connection': 'keep-alive',
   };
 }
