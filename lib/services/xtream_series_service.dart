@@ -202,11 +202,25 @@ class XtreamSeriesService {
     XtreamSeriesSummary summary, {
     Duration timeout = const Duration(seconds: 18),
   }) async {
+    // Una selección de serie tiene prioridad sobre cualquier refresco completo
+    // que haya quedado descargándose detrás del catálogo local.
+    XtreamHttpClient.cancelBrowsingRequests();
+
+    var activeConnection = connection;
+    try {
+      activeConnection = await XtreamService.reconnectFromPlaylistUrl(
+        connection.playlistUrl,
+        timeout: const Duration(seconds: 8),
+      );
+    } catch (_) {
+      // Conservamos como fallback la conexión con la que se abrió el catálogo.
+    }
+
     final uri = _endpoint(
-      connection.apiServer,
+      activeConnection.apiServer,
       <String, String>{
-        'username': connection.username,
-        'password': connection.password,
+        'username': activeConnection.username,
+        'password': activeConnection.password,
         'action': 'get_series_info',
         'series_id': summary.id,
       },
@@ -240,7 +254,8 @@ class XtreamSeriesService {
       genre: _cleanText(info['genre']) ?? summary.genre,
       releaseDate: _firstText(info, const ['releaseDate', 'release_date']) ??
           summary.releaseDate,
-      rating: _firstText(info, const ['rating', 'rating_5based']) ?? summary.rating,
+      rating:
+          _firstText(info, const ['rating', 'rating_5based']) ?? summary.rating,
       backdrops: _stringList(info['backdrop_path']).isNotEmpty
           ? _stringList(info['backdrop_path'])
           : summary.backdrops,
@@ -254,16 +269,24 @@ class XtreamSeriesService {
         final values = entry.value;
         if (values is! List) continue;
         for (final rawEpisode in values) {
-          final episode = _parseEpisode(rawEpisode, seasonFromKey);
+          final episode = _parseEpisode(
+            rawEpisode,
+            seasonFromKey,
+            activeConnection,
+          );
           if (episode == null) continue;
-          seasons.putIfAbsent(episode.season, () => <XtreamSeriesEpisode>[]).add(episode);
+          seasons
+              .putIfAbsent(episode.season, () => <XtreamSeriesEpisode>[])
+              .add(episode);
         }
       }
     } else if (episodesRaw is List) {
       for (final rawEpisode in episodesRaw) {
-        final episode = _parseEpisode(rawEpisode, 0);
+        final episode = _parseEpisode(rawEpisode, 0, activeConnection);
         if (episode == null) continue;
-        seasons.putIfAbsent(episode.season, () => <XtreamSeriesEpisode>[]).add(episode);
+        seasons
+            .putIfAbsent(episode.season, () => <XtreamSeriesEpisode>[])
+            .add(episode);
       }
     }
 
@@ -280,7 +303,11 @@ class XtreamSeriesService {
     return XtreamSeriesDetails(series: enriched, seasons: seasons);
   }
 
-  static XtreamSeriesEpisode? _parseEpisode(dynamic raw, int seasonFallback) {
+  static XtreamSeriesEpisode? _parseEpisode(
+    dynamic raw,
+    int seasonFallback,
+    XtreamConnectionResult activeConnection,
+  ) {
     if (raw is! Map) return null;
     final item = Map<String, dynamic>.from(raw);
     final id = item['id']?.toString().trim() ?? '';
@@ -300,12 +327,14 @@ class XtreamSeriesService {
         _cleanText(info['name']) ??
         'S${season.toString().padLeft(2, '0')} · Episodio ${number > 0 ? number : id}';
     final directSource = _firstText(
-      item,
-      const ['direct_source', 'directSource', 'stream_source'],
-    ) ?? _firstText(info, const ['direct_source', 'directSource', 'stream_source']);
+          item,
+          const ['direct_source', 'directSource', 'stream_source'],
+        ) ??
+        _firstText(
+          info,
+          const ['direct_source', 'directSource', 'stream_source'],
+        );
 
-    // En clones/paneles Xtream la extensión puede vivir en el episodio o en
-    // info. También la inferimos de direct_source antes de usar un fallback.
     final extension = _firstValidExtension([
       item['container_extension'],
       item['containerExtension'],
@@ -316,13 +345,22 @@ class XtreamSeriesService {
       _extensionFromUrl(directSource),
     ]);
 
+    // Igual que VOD: el episodio conserva una URL absoluta creada con la
+    // conexión recién validada. La pantalla puede haber nacido desde caché,
+    // pero PLAY no queda atado a un streamServer antiguo.
+    final playableDirect = XtreamSeriesEpisode._resolvedEpisodeDirectSource(
+          activeConnection.streamServer,
+          directSource,
+        ) ??
+        _seriesUrl(activeConnection, id, extension);
+
     return XtreamSeriesEpisode(
       id: id,
       season: season <= 0 ? 1 : season,
       number: number <= 0 ? 1 : number,
       title: title,
       extension: extension,
-      directSource: directSource,
+      directSource: playableDirect,
       plot: _cleanText(info['plot']),
       duration: _cleanText(info['duration']),
       image: _firstText(info, const ['movie_image', 'cover_big', 'cover']),
@@ -377,15 +415,41 @@ class XtreamSeriesService {
     return base.replace(path: path, queryParameters: query, fragment: '');
   }
 
+  static String _seriesUrl(
+    XtreamConnectionResult connection,
+    String episodeId,
+    String extension,
+  ) {
+    final prefix = connection.streamServer.pathSegments
+        .where((segment) => segment.trim().isNotEmpty)
+        .toList(growable: false);
+    return connection.streamServer
+        .replace(
+          pathSegments: <String>[
+            ...prefix,
+            'series',
+            connection.username,
+            connection.password,
+            '$episodeId.$extension',
+          ],
+          query: '',
+          fragment: '',
+        )
+        .toString();
+  }
+
   static String _firstValidExtension(Iterable<dynamic> candidates) {
     for (final candidate in candidates) {
-      final value = candidate?.toString().trim().toLowerCase().replaceFirst('.', '') ?? '';
+      final value = candidate
+              ?.toString()
+              .trim()
+              .toLowerCase()
+              .replaceFirst('.', '') ??
+          '';
       if (value.isNotEmpty && RegExp(r'^[a-z0-9]{2,6}$').hasMatch(value)) {
         return value;
       }
     }
-    // mp4 sigue siendo el último fallback, pero ya no se usa si el panel
-    // declaró el contenedor en otro campo o dentro de direct_source.
     return 'mp4';
   }
 
