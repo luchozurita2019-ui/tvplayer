@@ -56,19 +56,36 @@ class IptvProvider extends ChangeNotifier {
   Future<void> addPlaylistFromUrl(String name, String url) async {
     _setLoading(true);
     try {
-      final content = await M3uFetcher.fetch(url);
-      final channels = await compute(parseM3uInBackground, content);
+      final xtream = await XtreamService.tryConnectFromPlaylistUrl(url);
+      final List<Channel> channels;
+      final PlaylistSourceType detectedType;
+
+      if (xtream != null) {
+        // Muchos proveedores entregan una URL get.php aunque detrás exista una
+        // cuenta Xtream completa. Si player_api.php valida, usamos la API nativa
+        // porque conserva stream_id/server_info y es más compatible que tratar
+        // el enlace únicamente como texto M3U.
+        channels = await _loadXtreamChannels(xtream);
+        detectedType = PlaylistSourceType.xtream;
+      } else {
+        final content = await M3uFetcher.fetch(url);
+        channels = await compute(parseM3uInBackground, content);
+        detectedType = PlaylistSourceType.m3u;
+      }
+
       if (channels.isEmpty) {
-        throw Exception('La lista M3U no contiene canales reproducibles.');
+        throw Exception('El proveedor no devolvió canales reproducibles.');
       }
       final playlist = Playlist(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         name: name.trim().isEmpty ? 'Lista sin nombre' : name.trim(),
+        // Conservamos exactamente el enlace entregado por el proveedor. El tipo
+        // detectado se guarda aparte y controla cómo se actualiza después.
         source: url,
         isRemote: true,
         channels: channels,
         lastUpdated: DateTime.now(),
-        sourceType: PlaylistSourceType.m3u,
+        sourceType: detectedType,
       );
       _playlists = [..._playlists, playlist];
       await _storage.savePlaylists(_playlists);
@@ -198,10 +215,19 @@ class IptvProvider extends ChangeNotifier {
     _error = null;
     _setLoading(true);
     try {
-      final content = await M3uFetcher.fetch(url);
-      final channels = await compute(parseM3uInBackground, content);
+      final xtream = await XtreamService.tryConnectFromPlaylistUrl(url);
+      final List<Channel> channels;
+      final PlaylistSourceType detectedType;
+      if (xtream != null) {
+        channels = await _loadXtreamChannels(xtream);
+        detectedType = PlaylistSourceType.xtream;
+      } else {
+        final content = await M3uFetcher.fetch(url);
+        channels = await compute(parseM3uInBackground, content);
+        detectedType = PlaylistSourceType.m3u;
+      }
       if (channels.isEmpty) {
-        throw Exception('La lista M3U no contiene canales reproducibles.');
+        throw Exception('El proveedor no devolvió contenido reproducible.');
       }
       final current = _playlists[index];
       final updated = current.copyWith(
@@ -210,7 +236,7 @@ class IptvProvider extends ChangeNotifier {
         isRemote: true,
         channels: channels,
         lastUpdated: DateTime.now(),
-        sourceType: PlaylistSourceType.m3u,
+        sourceType: detectedType,
       );
       _playlists = [
         ..._playlists.take(index),
@@ -305,13 +331,24 @@ class IptvProvider extends ChangeNotifier {
     _setLoading(true);
     try {
       final List<Channel> channels;
+      var detectedType = playlist.sourceType;
       if (playlist.sourceType == PlaylistSourceType.xtream) {
         final connection =
             await XtreamService.reconnectFromPlaylistUrl(playlist.source);
         channels = await _loadXtreamChannels(connection);
       } else {
-        final content = await M3uFetcher.fetch(playlist.source);
-        channels = await compute(parseM3uInBackground, content);
+        // Las listas guardadas antes de la autodetección pueden seguir marcadas
+        // como M3U aunque sean un get.php Xtream. Actualizar las migra sin borrar.
+        final xtream =
+            await XtreamService.tryConnectFromPlaylistUrl(playlist.source);
+        if (xtream != null) {
+          channels = await _loadXtreamChannels(xtream);
+          detectedType = PlaylistSourceType.xtream;
+        } else {
+          final content = await M3uFetcher.fetch(playlist.source);
+          channels = await compute(parseM3uInBackground, content);
+          detectedType = PlaylistSourceType.m3u;
+        }
       }
 
       if (channels.isEmpty) {
@@ -320,6 +357,7 @@ class IptvProvider extends ChangeNotifier {
       final updated = playlist.copyWith(
         channels: channels,
         lastUpdated: DateTime.now(),
+        sourceType: detectedType,
       );
       _playlists = [
         ..._playlists.take(index),

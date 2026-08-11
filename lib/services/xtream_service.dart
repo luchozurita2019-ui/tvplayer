@@ -154,6 +154,42 @@ class XtreamService {
     );
   }
 
+  /// Detecta el formato de enlace que suelen entregar los paneles Xtream:
+  /// get.php?username=...&password=...&type=m3u_plus. La detección se confirma
+  /// después contra player_api.php; no alcanza con que la URL se parezca.
+  static bool looksLikeXtreamPlaylistUrl(String raw) {
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        uri.host.isEmpty) {
+      return false;
+    }
+    final path = uri.path.toLowerCase();
+    final isGetPhp = path.endsWith('/get.php') || path.endsWith('get.php');
+    if (!isGetPhp) return false;
+    final username = uri.queryParameters['username']?.trim() ?? '';
+    final password = uri.queryParameters['password']?.trim() ?? '';
+    return username.isNotEmpty && password.isNotEmpty;
+  }
+
+  /// Intenta convertir una URL M3U entregada por el proveedor en una conexión
+  /// Xtream real. Si player_api.php no valida, devuelve null y el llamador puede
+  /// continuar con el pipeline M3U tradicional sin romper compatibilidad.
+  static Future<XtreamConnectionResult?> tryConnectFromPlaylistUrl(
+    String playlistUrl, {
+    Duration timeout = const Duration(seconds: 12),
+  }) async {
+    if (!looksLikeXtreamPlaylistUrl(playlistUrl)) return null;
+    try {
+      return await reconnectFromPlaylistUrl(
+        playlistUrl,
+        timeout: timeout,
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+
   /// Reconstruye una cuenta guardada desde su get.php. Esto mantiene
   /// compatibilidad con las fuentes Xtream que TV FULL ya tenía persistidas.
   static Future<XtreamConnectionResult> reconnectFromPlaylistUrl(
