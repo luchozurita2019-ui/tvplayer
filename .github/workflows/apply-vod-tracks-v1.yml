@@ -1,0 +1,34 @@
+name: Apply VOD audio subtitle selectors v1
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - .github/workflows/apply-vod-tracks-v1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+          fetch-depth: 0
+      - name: Apply patch
+        run: python3 tooling/apply_vod_tracks_v1.py
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/widgets/live_video_view.dart
+          if git diff --cached --quiet; then
+            echo "No changes to commit"
+            exit 0
+          fi
+          git commit -m "feat: add VOD audio and subtitle selectors"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
