@@ -14,14 +14,12 @@ class ParentalControlService extends ChangeNotifier {
 
   static const _enabledKey = 'parental_enabled_v1';
   static const _pinHashKey = 'parental_pin_hash_v1';
-  static const _hideAdultKey = 'parental_hide_adult_v1';
   static const _unlockMinutesKey = 'parental_unlock_minutes_v1';
   static const _manualGroupsKey = 'parental_manual_groups_v1';
   static const _allowedGroupsKey = 'parental_allowed_groups_v1';
 
   bool _initialized = false;
   bool _enabled = false;
-  bool _hideAdult = false;
   int _unlockMinutes = 15;
   String? _pinHash;
   DateTime? _unlockedUntil;
@@ -30,7 +28,6 @@ class ParentalControlService extends ChangeNotifier {
   Set<String> _allowedGroups = <String>{};
 
   bool get enabled => _enabled;
-  bool get hideAdult => _hideAdult;
   int get unlockMinutes => _unlockMinutes;
   bool get pinConfigured => _pinHash != null && _pinHash!.isNotEmpty;
 
@@ -47,7 +44,6 @@ class ParentalControlService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     _enabled = prefs.getBool(_enabledKey) ?? false;
     _pinHash = prefs.getString(_pinHashKey);
-    _hideAdult = prefs.getBool(_hideAdultKey) ?? false;
     _unlockMinutes = prefs.getInt(_unlockMinutesKey) ?? 15;
     _manualGroups = (prefs.getStringList(_manualGroupsKey) ?? const <String>[])
         .map(_normalize)
@@ -103,13 +99,6 @@ class ParentalControlService extends ChangeNotifier {
     _enabled = value && pinConfigured;
     if (!_enabled) _clearUnlockTimer();
     await prefs.setBool(_enabledKey, _enabled);
-    notifyListeners();
-  }
-
-  Future<void> setHideAdult(bool value) async {
-    final prefs = await SharedPreferences.getInstance();
-    _hideAdult = value;
-    await prefs.setBool(_hideAdultKey, value);
     notifyListeners();
   }
 
