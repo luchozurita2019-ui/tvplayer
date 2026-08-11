@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
@@ -22,11 +23,51 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   late Future<_SeriesCatalogData> _future;
   String _query = '';
   String? _category;
+  double _sidebarWidth = 320;
+  bool _sidebarCollapsed = false;
+
+  static const double _sidebarMinWidth = 230;
+  static const double _sidebarMaxWidth = 480;
+  // Compartimos las mismas preferencias del catálogo general para que TV,
+  // Películas y Series mantengan exactamente el mismo ancho/estado.
+  static const String _sidebarWidthKey = 'catalog_sidebar_width_v1';
+  static const String _sidebarCollapsedKey = 'catalog_sidebar_collapsed_v1';
 
   @override
   void initState() {
     super.initState();
     _future = _load();
+    _loadSidebarPreferences();
+  }
+
+  Future<void> _loadSidebarPreferences() async {
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final width = prefs.getDouble(_sidebarWidthKey) ?? 320;
+    setState(() {
+      _sidebarWidth = width.clamp(_sidebarMinWidth, _sidebarMaxWidth).toDouble();
+      _sidebarCollapsed = prefs.getBool(_sidebarCollapsedKey) ?? false;
+    });
+  }
+
+  Future<void> _persistSidebar() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_sidebarWidthKey, _sidebarWidth);
+    await prefs.setBool(_sidebarCollapsedKey, _sidebarCollapsed);
+  }
+
+  void _resizeSidebar(double delta) {
+    if (_sidebarCollapsed) return;
+    setState(() {
+      _sidebarWidth = (_sidebarWidth + delta)
+          .clamp(_sidebarMinWidth, _sidebarMaxWidth)
+          .toDouble();
+    });
+  }
+
+  void _toggleSidebar() {
+    setState(() => _sidebarCollapsed = !_sidebarCollapsed);
+    _persistSidebar();
   }
 
   Future<_SeriesCatalogData> _load() async {
@@ -96,6 +137,13 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         .toSet()
         .toList()
       ..sort();
+    final categoryCounts = <String, int>{};
+    for (final item in data.series) {
+      final category = item.category?.trim();
+      if (category == null || category.isEmpty) continue;
+      categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
+    }
+
     final normalized = _query.trim().toLowerCase();
     final visible = data.series.where((item) {
       if (_category != null && item.category != _category) return false;
@@ -108,7 +156,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final columns = width >= 1500
+        final gridColumns = width >= 1500
             ? 7
             : width >= 1200
                 ? 6
@@ -119,10 +167,94 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                         : width >= 480
                             ? 3
                             : 2;
+
+        Widget grid() => visible.isEmpty
+            ? const Center(child: Text('No hay resultados.'))
+            : GridView.builder(
+                padding: const EdgeInsets.fromLTRB(28, 8, 28, 28),
+                gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                  crossAxisCount: gridColumns,
+                  crossAxisSpacing: 14,
+                  mainAxisSpacing: 16,
+                  childAspectRatio: 0.62,
+                ),
+                itemCount: visible.length,
+                itemBuilder: (context, index) {
+                  final series = visible[index];
+                  return _SeriesPosterCard(
+                    series: series,
+                    onTap: () => Navigator.of(context).push(
+                      MaterialPageRoute(
+                        builder: (_) => XtreamSeriesDetailScreen(
+                          connection: data.connection,
+                          summary: series,
+                        ),
+                      ),
+                    ),
+                  );
+                },
+              );
+
+        // En escritorio usamos exactamente el mismo patrón que TV/Películas:
+        // categorías verticales, plegables y con borde redimensionable.
+        if (width >= 760) {
+          return Row(
+            children: [
+              SizedBox(
+                width: _sidebarCollapsed ? 72 : _sidebarWidth,
+                child: _SeriesCategorySidebar(
+                  totalCount: data.series.length,
+                  categories: categories,
+                  categoryCounts: categoryCounts,
+                  selectedCategory: _category,
+                  collapsed: _sidebarCollapsed,
+                  onToggleCollapsed: _toggleSidebar,
+                  onCategorySelected: (value) =>
+                      setState(() => _category = value),
+                ),
+              ),
+              MouseRegion(
+                cursor: _sidebarCollapsed
+                    ? SystemMouseCursors.basic
+                    : SystemMouseCursors.resizeColumn,
+                child: GestureDetector(
+                  behavior: HitTestBehavior.opaque,
+                  onHorizontalDragUpdate: _sidebarCollapsed
+                      ? null
+                      : (details) => _resizeSidebar(details.delta.dx),
+                  onHorizontalDragEnd:
+                      _sidebarCollapsed ? null : (_) => _persistSidebar(),
+                  child: Container(
+                    width: 9,
+                    alignment: Alignment.center,
+                    child: Container(width: 1, color: Colors.white12),
+                  ),
+                ),
+              ),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    _SeriesCatalogToolbar(
+                      query: _query,
+                      visibleCount: visible.length,
+                      selectedCategory: _category,
+                      onQueryChanged: (value) => setState(() => _query = value),
+                    ),
+                    Expanded(child: grid()),
+                  ],
+                ),
+              ),
+            ],
+          );
+        }
+
+        // En tamaños angostos evitamos una barra lateral que quite demasiado
+        // espacio al póster, pero mantenemos categorías legibles con un selector.
         return Column(
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 10),
               child: Column(
                 children: [
                   TextField(
@@ -132,91 +264,328 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                     ),
                     onChanged: (value) => setState(() => _query = value),
                   ),
-                  if (categories.isNotEmpty) ...[
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      height: 38,
-                      child: ListView(
-                        scrollDirection: Axis.horizontal,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.only(right: 8),
-                            child: ChoiceChip(
-                              label: const Text('Todas'),
-                              selected: _category == null,
-                              onSelected: (_) => setState(() => _category = null),
-                            ),
-                          ),
-                          ...categories.map(
-                            (category) => Padding(
-                              padding: const EdgeInsets.only(right: 8),
-                              child: ChoiceChip(
-                                label: Text(category),
-                                selected: _category == category,
-                                onSelected: (_) =>
-                                    setState(() => _category = category),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
+                  const SizedBox(height: 10),
+                  DropdownButtonFormField<String?>(
+                    initialValue: _category,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      prefixIcon: Icon(Icons.folder_rounded),
+                      labelText: 'Categoría',
                     ),
-                  ],
-                ],
-              ),
-            ),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 22, vertical: 4),
-              child: Row(
-                children: [
-                  Text(
-                    '${visible.length} series',
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
+                    items: [
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Todos'),
+                      ),
+                      ...categories.map(
+                        (category) => DropdownMenuItem<String?>(
+                          value: category,
+                          child: Text(category, overflow: TextOverflow.ellipsis),
                         ),
-                  ),
-                  const Spacer(),
-                  const Text(
-                    'Catálogo Xtream nativo',
-                    style: TextStyle(color: Colors.white54),
+                      ),
+                    ],
+                    onChanged: (value) => setState(() => _category = value),
                   ),
                 ],
               ),
             ),
-            Expanded(
-              child: visible.isEmpty
-                  ? const Center(child: Text('No hay resultados.'))
-                  : GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 28),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        crossAxisSpacing: 14,
-                        mainAxisSpacing: 16,
-                        childAspectRatio: 0.62,
-                      ),
-                      itemCount: visible.length,
-                      itemBuilder: (context, index) {
-                        final series = visible[index];
-                        return _SeriesPosterCard(
-                          series: series,
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) => XtreamSeriesDetailScreen(
-                                connection: data.connection,
-                                summary: series,
-                              ),
-                            ),
-                          ),
-                        );
-                      },
-                    ),
-            ),
+            Expanded(child: grid()),
           ],
         );
       },
     );
   }
+
 }
+
+
+class _SeriesCatalogToolbar extends StatelessWidget {
+  final String query;
+  final int visibleCount;
+  final String? selectedCategory;
+  final ValueChanged<String> onQueryChanged;
+
+  const _SeriesCatalogToolbar({
+    required this.query,
+    required this.visibleCount,
+    required this.selectedCategory,
+    required this.onQueryChanged,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(28, 24, 28, 16),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  selectedCategory ?? 'SERIES',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.headlineSmall?.copyWith(
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  '$visibleCount series',
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        color: Colors.white60,
+                      ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 360,
+            child: TextFormField(
+              initialValue: query,
+              decoration: InputDecoration(
+                hintText: 'Buscar en series…',
+                prefixIcon: const Icon(Icons.search_rounded),
+                filled: true,
+                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                border: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+                enabledBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide.none,
+                ),
+                focusedBorder: OutlineInputBorder(
+                  borderRadius: BorderRadius.circular(16),
+                  borderSide: BorderSide(
+                    color: Theme.of(context).colorScheme.primary,
+                    width: 1.4,
+                  ),
+                ),
+                isDense: true,
+              ),
+              onChanged: onQueryChanged,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SeriesCategorySidebar extends StatelessWidget {
+  final int totalCount;
+  final List<String> categories;
+  final Map<String, int> categoryCounts;
+  final String? selectedCategory;
+  final bool collapsed;
+  final VoidCallback onToggleCollapsed;
+  final ValueChanged<String?> onCategorySelected;
+
+  const _SeriesCategorySidebar({
+    required this.totalCount,
+    required this.categories,
+    required this.categoryCounts,
+    required this.selectedCategory,
+    required this.collapsed,
+    required this.onToggleCollapsed,
+    required this.onCategorySelected,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: const Color(0xFF081728),
+      child: SafeArea(
+        top: false,
+        child: Column(
+          crossAxisAlignment:
+              collapsed ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: EdgeInsets.fromLTRB(
+                collapsed ? 8 : 20,
+                18,
+                collapsed ? 8 : 10,
+                8,
+              ),
+              child: Row(
+                mainAxisAlignment: collapsed
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
+                children: [
+                  Icon(
+                    Icons.video_library_rounded,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 28,
+                  ),
+                  if (!collapsed) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        'Series',
+                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                              fontWeight: FontWeight.w900,
+                            ),
+                      ),
+                    ),
+                    IconButton(
+                      tooltip: 'Achicar categorías',
+                      onPressed: onToggleCollapsed,
+                      icon: const Icon(Icons.keyboard_double_arrow_left_rounded),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            if (collapsed)
+              IconButton(
+                tooltip: 'Agrandar categorías',
+                onPressed: onToggleCollapsed,
+                icon: const Icon(Icons.keyboard_double_arrow_right_rounded),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'CATEGORÍAS',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                              color: Colors.white54,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                            ),
+                      ),
+                    ),
+                    const Tooltip(
+                      message: 'Arrastrá el borde derecho para cambiar el ancho',
+                      child: Icon(
+                        Icons.drag_indicator_rounded,
+                        color: Colors.white30,
+                        size: 20,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            Expanded(
+              child: ListView.builder(
+                padding: EdgeInsets.fromLTRB(
+                  collapsed ? 8 : 10,
+                  0,
+                  collapsed ? 8 : 10,
+                  20,
+                ),
+                itemCount: categories.length + 1,
+                itemBuilder: (context, index) {
+                  final category = index == 0 ? null : categories[index - 1];
+                  final label = category ?? 'Todos';
+                  final selected = category == selectedCategory;
+                  final count = category == null
+                      ? totalCount
+                      : (categoryCounts[category] ?? 0);
+
+                  if (collapsed) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Tooltip(
+                        message: '$label · $count',
+                        child: Material(
+                          color: selected
+                              ? Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withValues(alpha: 0.20)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(14),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: () => onCategorySelected(category),
+                            child: SizedBox(
+                              height: 52,
+                              child: Icon(
+                                category == null
+                                    ? Icons.grid_view_rounded
+                                    : Icons.folder_rounded,
+                                size: 25,
+                                color: selected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.white70,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
+                  return Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 3),
+                    child: Tooltip(
+                      message: label,
+                      waitDuration: const Duration(milliseconds: 450),
+                      child: ListTile(
+                        minTileHeight: 54,
+                        selected: selected,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        selectedTileColor: Theme.of(context)
+                            .colorScheme
+                            .primary
+                            .withValues(alpha: 0.20),
+                        leading: Icon(
+                          category == null
+                              ? Icons.grid_view_rounded
+                              : Icons.folder_rounded,
+                          size: 24,
+                          color: selected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.white70,
+                        ),
+                        title: Text(
+                          label,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight:
+                                selected ? FontWeight.w800 : FontWeight.w600,
+                          ),
+                        ),
+                        trailing: Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
+                          decoration: BoxDecoration(
+                            color: Colors.white.withValues(alpha: 0.06),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          child: Text(
+                            '$count',
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
+                        ),
+                        onTap: () => onCategorySelected(category),
+                      ),
+                    ),
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 
 class XtreamSeriesDetailScreen extends StatefulWidget {
   final XtreamConnectionResult connection;
