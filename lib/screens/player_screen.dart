@@ -96,6 +96,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _acceptPlaybackEvents = true;
   bool _providerIssueHint = false;
 
+  String? _baselineTlsVerify;
+  String? _baselineUserAgent;
+  String? _baselineReferrer;
+  String? _baselineHttpHeaderFields;
+
   String? _errorMessage;
   String _channelListQuery = '';
   String _tuningLabel = 'Equilibrado';
@@ -130,9 +135,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   List<ServerCompatibilityMode> _compatibilityPlan = const [
     ServerCompatibilityMode.direct,
+    ServerCompatibilityMode.nativeHttp,
+    ServerCompatibilityMode.mpvHttp,
+    ServerCompatibilityMode.tlsLegacy,
     ServerCompatibilityMode.compatible,
     ServerCompatibilityMode.liveRecovery,
     ServerCompatibilityMode.advanced,
+    ServerCompatibilityMode.xtreamHls,
   ];
   int _compatibilityIndex = 0;
   int _compatibilityFallbacks = 0;
@@ -393,6 +402,23 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
+        // Guardamos los defaults reales de esta compilación de libmpv. Los
+        // fallbacks HTTP/TLS pueden tocar opciones globales del Player, por lo
+        // que cada apertura restaura estos valores antes de probar otro modo.
+        try {
+          _baselineTlsVerify = (await platform.getProperty('tls-verify')).trim();
+        } catch (_) {}
+        try {
+          _baselineUserAgent = (await platform.getProperty('user-agent')).trim();
+        } catch (_) {}
+        try {
+          _baselineReferrer = (await platform.getProperty('referrer')).trim();
+        } catch (_) {}
+        try {
+          _baselineHttpHeaderFields =
+              (await platform.getProperty('http-header-fields')).trim();
+        } catch (_) {}
+
         // keep-open=yes convierte un EOF en una pausa del Player. En IPTV
         // algunos servidores terminan la conexión periódicamente aunque la
         // señal continúe. No queremos que mpv transforme ese EOF en Pause.
@@ -493,6 +519,62 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty('demuxer-lavf-propagate-opts', 'yes');
         await platform.setProperty('demuxer-lavf-o', '');
         await platform.setProperty('stream-lavf-o', '');
+
+        // Restauramos primero el estado HTTP/TLS original para que un fallback
+        // aprendido por un proveedor no contamine al intento siguiente.
+        if (_baselineTlsVerify != null && _baselineTlsVerify!.isNotEmpty) {
+          await platform.setProperty('tls-verify', _baselineTlsVerify!);
+        }
+        if (_baselineUserAgent != null && _baselineUserAgent!.isNotEmpty) {
+          await platform.setProperty('user-agent', _baselineUserAgent!);
+        }
+        await platform.setProperty(
+          'referrer',
+          _baselineReferrer ?? '',
+        );
+        await platform.setProperty(
+          'http-header-fields',
+          _baselineHttpHeaderFields ?? '',
+        );
+
+        if (_compatibilityMode == ServerCompatibilityMode.tlsLegacy) {
+          // Sólo se usa como fallback HTTPS por endpoint. Nunca desactivamos
+          // verificación TLS globalmente para toda la aplicación.
+          await platform.setProperty('tls-verify', 'no');
+        }
+
+        if (_compatibilityMode == ServerCompatibilityMode.mpvHttp) {
+          // Algunos paneles responden distinto cuando los headers se aplican
+          // directamente en libmpv/libavformat en vez de Media.httpHeaders.
+          final nativeHeaders = channel.resolvedHttpHeaders(_defaultUserAgent);
+          String? takeHeader(String wanted) {
+            String? foundKey;
+            for (final key in nativeHeaders.keys) {
+              if (key.toLowerCase() == wanted.toLowerCase()) {
+                foundKey = key;
+                break;
+              }
+            }
+            if (foundKey == null) return null;
+            return nativeHeaders.remove(foundKey);
+          }
+
+          final userAgent = takeHeader('User-Agent');
+          final referrer = takeHeader('Referer');
+          if (userAgent != null && userAgent.isNotEmpty) {
+            await platform.setProperty('user-agent', userAgent);
+          }
+          if (referrer != null && referrer.isNotEmpty) {
+            await platform.setProperty('referrer', referrer);
+          }
+          if (nativeHeaders.isNotEmpty) {
+            final fields = nativeHeaders.entries
+                .map((entry) => '${entry.key}: ${entry.value}')
+                .join(',');
+            await platform.setProperty('http-header-fields', fields);
+          }
+        }
+
         final disableMime =
             _compatibilityMode == ServerCompatibilityMode.compatible ||
                 _compatibilityMode == ServerCompatibilityMode.advanced;
@@ -974,6 +1056,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // reconexión, evitando que un EOF haga volver a un modo incompatible.
       final recoveryMode =
           _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
+                  _compatibilityMode == ServerCompatibilityMode.mpvHttp ||
+                  _compatibilityMode == ServerCompatibilityMode.tlsLegacy ||
                   _compatibilityMode == ServerCompatibilityMode.xtreamHls
               ? _compatibilityMode
               : _compatibilityMode == ServerCompatibilityMode.compatible ||
@@ -1043,6 +1127,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final ServerCompatibilityMode? target = switch (previous) {
       ServerCompatibilityMode.direct => ServerCompatibilityMode.liveRecovery,
       ServerCompatibilityMode.nativeHttp => null,
+      ServerCompatibilityMode.mpvHttp => null,
+      ServerCompatibilityMode.tlsLegacy => null,
       ServerCompatibilityMode.compatible => ServerCompatibilityMode.advanced,
       ServerCompatibilityMode.liveRecovery => ServerCompatibilityMode.advanced,
       ServerCompatibilityMode.advanced => null,
@@ -1289,11 +1375,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final profile = await _compatibility.profileForUrl(channelUrl);
       if (!mounted || session != _sessionId) return;
       final learnedPlan = _compatibility.planFor(profile.preferredMode);
-      _compatibilityPlan = _looksLikeXtreamLiveTs(channelUrl)
-          ? learnedPlan
-          : learnedPlan
-              .where((mode) => mode != ServerCompatibilityMode.xtreamHls)
-              .toList(growable: false);
+      final parsedChannelUri = Uri.tryParse(channelUrl);
+      final isHttps = parsedChannelUri?.scheme.toLowerCase() == 'https';
+      final isXtreamLiveTs = _looksLikeXtreamLiveTs(channelUrl);
+      _compatibilityPlan = learnedPlan
+          .where((mode) =>
+              isHttps || mode != ServerCompatibilityMode.tlsLegacy)
+          .where((mode) =>
+              isXtreamLiveTs || mode != ServerCompatibilityMode.xtreamHls)
+          .toList(growable: false);
       _compatibilityIndex = 0;
       _compatibilityFallbacks = 0;
       _runtimeRecoveryPromotions = 0;
@@ -1346,12 +1436,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final nativeHttp =
           _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
               _compatibilityMode == ServerCompatibilityMode.xtreamHls;
+      final useMpvHttp =
+          _compatibilityMode == ServerCompatibilityMode.mpvHttp;
       final headers = channel.resolvedHttpHeaders(
         fallbackUserAgent,
         includeDefaultUserAgent: !nativeHttp,
       );
       final playbackUrl = _playbackUrlForMode(channel.url);
-      final media = headers.isEmpty
+      final media = useMpvHttp || headers.isEmpty
           ? Media(playbackUrl)
           : Media(playbackUrl, httpHeaders: headers);
 
