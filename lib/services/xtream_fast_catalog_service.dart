@@ -87,7 +87,7 @@ class XtreamFastCatalogService {
   static final XtreamFastCatalogService instance = XtreamFastCatalogService._();
 
   static const int _cacheVersion = 1;
-  static const Duration _categoryTimeout = Duration(seconds: 12);
+  static const Duration _categoryTimeout = Duration(seconds: 6);
   static const Duration _movieTimeout = Duration(seconds: 35);
   static const Duration _seriesTimeout = Duration(seconds: 35);
 
@@ -205,6 +205,10 @@ class XtreamFastCatalogService {
       invalidateSession(playlistUrl);
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
       return _fetchMovies(connection, playlistUrl, onProgress);
+    } on TimeoutException {
+      rethrow;
+    } on SocketException {
+      rethrow;
     } catch (error) {
       // Compatibilidad: si un clon Xtream devuelve una estructura que nuestro
       // preparador rápido no entiende, conservamos el cargador probado anterior.
@@ -243,6 +247,10 @@ class XtreamFastCatalogService {
       invalidateSession(playlistUrl);
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
       return _fetchSeries(connection, playlistUrl, onProgress);
+    } on TimeoutException {
+      rethrow;
+    } on SocketException {
+      rethrow;
     } catch (error) {
       try {
         final series = await XtreamSeriesService.fetchCatalog(connection);
@@ -335,7 +343,13 @@ class XtreamFastCatalogService {
       fromCache: false,
     );
     rememberConnection(connection);
-    unawaited(_writeMovieCache(playlistUrl, snapshot));
+    unawaited(_writePreparedCache(
+      playlistUrl,
+      'movies',
+      connection,
+      prepared,
+      snapshot.savedAt,
+    ));
     return snapshot;
   }
 
@@ -411,7 +425,13 @@ class XtreamFastCatalogService {
       fromCache: false,
     );
     rememberConnection(connection);
-    unawaited(_writeSeriesCache(playlistUrl, snapshot));
+    unawaited(_writePreparedCache(
+      playlistUrl,
+      'series',
+      connection,
+      prepared,
+      snapshot.savedAt,
+    ));
     return snapshot;
   }
 
@@ -456,6 +476,27 @@ class XtreamFastCatalogService {
     } catch (_) {
       return null;
     }
+  }
+
+  Future<void> _writePreparedCache(
+    String playlistUrl,
+    String kind,
+    XtreamConnectionResult connection,
+    Map<String, dynamic> prepared,
+    DateTime savedAt,
+  ) async {
+    // Yield first so returning the fresh catalog to Flutter always wins over
+    // persistence. jsonEncode itself runs in compute() inside _writeCache.
+    await Future<void>.delayed(Duration.zero);
+    final payload = <String, dynamic>{
+      'version': _cacheVersion,
+      'kind': kind,
+      'savedAt': savedAt.millisecondsSinceEpoch,
+      'connection': _connectionToMap(connection),
+      'categories': prepared['categories'] ?? const <String>[],
+      'items': prepared['items'] ?? const <dynamic>[],
+    };
+    await _writeCache(playlistUrl, kind, payload);
   }
 
   Future<void> _writeMovieCache(
