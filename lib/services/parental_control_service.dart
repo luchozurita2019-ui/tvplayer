@@ -137,18 +137,28 @@ class ParentalControlService extends ChangeNotifier {
     return _looksAdultText(normalized);
   }
 
-  bool isProtectedChannel(Channel channel) {
-    final normalizedGroup = _normalize(channel.group ?? '');
+  /// Evalúa elementos de catálogos nativos (Xtream VOD/Series) con exactamente
+  /// las mismas reglas que usamos para los Channel de una M3U.
+  bool isProtectedItem({required String name, String? group}) {
+    final normalizedGroup = _normalize(group ?? '');
     if (normalizedGroup.isNotEmpty && _allowedGroups.contains(normalizedGroup)) {
       return false;
     }
-    if (isProtectedGroup(channel.group)) return true;
-    return _looksAdultText(_normalize(channel.name));
+    if (isProtectedGroup(group)) return true;
+    return _looksAdultText(_normalize(name));
+  }
+
+  bool canShowItem({required String name, String? group}) {
+    if (!_enabled || isUnlocked) return true;
+    return !isProtectedItem(name: name, group: group);
+  }
+
+  bool isProtectedChannel(Channel channel) {
+    return isProtectedItem(name: channel.name, group: channel.group);
   }
 
   bool canShowChannel(Channel channel) {
-    if (!_enabled || isUnlocked) return true;
-    return !isProtectedChannel(channel);
+    return canShowItem(name: channel.name, group: channel.group);
   }
 
   List<String> visibleGroups(Iterable<String> groups) {
