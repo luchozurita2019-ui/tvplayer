@@ -1,0 +1,30 @@
+name: Apply HotPlayer compatibility patch
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - .github/workflows/apply-hotplayer-compat-v1.yml
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+
+      - name: Apply patch
+        run: python3 tooling/apply_hotplayer_compat_v1.py
+
+      - name: Commit changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/player_screen.dart
+          git commit -m "feat: add learned HTTP and TLS playback fallbacks"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
