@@ -33,7 +33,6 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   final ParentalControlService _parental = ParentalControlService.instance;
   List<String> _catalogCategories = const <String>[];
   String _progressLabel = 'Cargando información del servidor…';
-  int _loadGeneration = 0;
   DateTime _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   int _lastProgressBytes = 0;
 
@@ -68,32 +67,32 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   Future<_MovieCatalogData> _load({bool forceNetwork = false}) async {
     await _parental.init();
-    final generation = ++_loadGeneration;
     final fast = XtreamFastCatalogService.instance;
 
-    if (!forceNetwork) {
+    try {
+      final fresh = await fast.refreshMovies(
+        widget.playlist.source,
+        forceSessionRefresh: forceNetwork,
+        onProgress: _onCatalogProgress,
+      );
+      _setCatalogCategories(fresh.categories);
+      return _MovieCatalogData(
+        connection: fresh.connection,
+        movies: fresh.movies,
+      );
+    } catch (_) {
+      // La copia local es únicamente respaldo/offline. Nunca dispara una
+      // actualización pesada escondida detrás de la interfaz.
       final cached = await fast.loadCachedMovies(widget.playlist.source);
       if (cached != null && cached.movies.isNotEmpty) {
         _setCatalogCategories(cached.categories);
-        // La UI se abre con disco inmediatamente y la red se actualiza detrás.
-        unawaited(_refreshMovieCatalog(generation));
         return _MovieCatalogData(
           connection: cached.connection,
           movies: cached.movies,
         );
       }
+      rethrow;
     }
-
-    final fresh = await fast.refreshMovies(
-      widget.playlist.source,
-      forceSessionRefresh: forceNetwork,
-      onProgress: _onCatalogProgress,
-    );
-    _setCatalogCategories(fresh.categories);
-    return _MovieCatalogData(
-      connection: fresh.connection,
-      movies: fresh.movies,
-    );
   }
 
   void _setCatalogCategories(List<String> categories) {
@@ -118,29 +117,6 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     _lastProgressUpdate = now;
     _lastProgressBytes = progress.receivedBytes;
     setState(() => _progressLabel = progress.label);
-  }
-
-  Future<void> _refreshMovieCatalog(int generation) async {
-    try {
-      final fresh = await XtreamFastCatalogService.instance.refreshMovies(
-        widget.playlist.source,
-      );
-      if (!mounted || generation != _loadGeneration) return;
-      setState(() {
-        _catalogCategories = List<String>.unmodifiable(fresh.categories);
-        if (_category != null && !_catalogCategories.contains(_category)) {
-          _category = null;
-        }
-        _future = Future<_MovieCatalogData>.value(
-          _MovieCatalogData(
-            connection: fresh.connection,
-            movies: fresh.movies,
-          ),
-        );
-      });
-    } catch (_) {
-      // Si falla la actualización, el catálogo local permanece disponible.
-    }
   }
 
   Future<void> _loadSidebarPreferences() async {
@@ -246,7 +222,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     XtreamVodSummary movie, {
     XtreamVodDetails? details,
   }) async {
-    final channel = details?.toChannel(connection) ?? movie.toChannel(connection);
+    final channel =
+        details?.toChannel(connection) ?? movie.toChannel(connection);
     final provider = context.read<IptvProvider>();
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -268,16 +245,23 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('Películas', style: TextStyle(fontWeight: FontWeight.w900)),
-            Text(widget.playlist.name, style: Theme.of(context).textTheme.bodySmall),
+            const Text(
+              'Películas',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+            Text(
+              widget.playlist.name,
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
           ],
         ),
         actions: [
           if (_parental.enabled)
             ParentalLockButton(
               unlocked: _parental.isUnlocked,
-              hiddenCategoryCount:
-                  _parental.hiddenGroupCount(_catalogCategories),
+              hiddenCategoryCount: _parental.hiddenGroupCount(
+                _catalogCategories,
+              ),
               onPressed: () => unawaited(_toggleParentalLock()),
             ),
           const SizedBox(width: 8),
@@ -303,15 +287,13 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
             final message = rawError.contains('TimeoutException')
                 ? 'El servidor Xtream dejó de enviar datos durante demasiado tiempo. Reintentá la carga de Películas.'
                 : rawError.replaceFirst('Exception: ', '');
-            return _MovieError(
-              message: message,
-              onRetry: _retry,
-            );
+            return _MovieError(message: message, onRetry: _retry);
           }
           final data = snapshot.data!;
           if (data.movies.isEmpty) {
             return _MovieError(
-              message: 'El servidor Xtream no devolvió películas mediante get_vod_streams.',
+              message:
+                  'El servidor Xtream no devolvió películas mediante get_vod_streams.',
               onRetry: _retry,
             );
           }
@@ -330,7 +312,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
     // Una sola pasada: parental + conteos + categoría + búsqueda.
     for (final item in data.movies) {
-      if (!_parental.canShowItem(name: item.name, group: item.category)) continue;
+      if (!_parental.canShowItem(name: item.name, group: item.category))
+        continue;
       visibleTotal++;
       final category = item.category?.trim();
       if (category != null && category.isNotEmpty) {
@@ -352,14 +335,14 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         final gridColumns = width >= 1500
             ? 7
             : width >= 1200
-                ? 6
-                : width >= 950
-                    ? 5
-                    : width >= 700
-                        ? 4
-                        : width >= 480
-                            ? 3
-                            : 2;
+            ? 6
+            : width >= 950
+            ? 5
+            : width >= 700
+            ? 4
+            : width >= 480
+            ? 3
+            : 2;
 
         Widget grid() => visible.isEmpty
             ? const Center(child: Text('No hay resultados.'))
@@ -412,8 +395,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                   onHorizontalDragUpdate: _sidebarCollapsed
                       ? null
                       : (details) => _resizeSidebar(details.delta.dx),
-                  onHorizontalDragEnd:
-                      _sidebarCollapsed ? null : (_) => _persistSidebar(),
+                  onHorizontalDragEnd: _sidebarCollapsed
+                      ? null
+                      : (_) => _persistSidebar(),
                   child: Container(
                     width: 9,
                     alignment: Alignment.center,
@@ -459,11 +443,17 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                       labelText: 'Categoría',
                     ),
                     items: [
-                      const DropdownMenuItem<String?>(value: null, child: Text('Todos')),
+                      const DropdownMenuItem<String?>(
+                        value: null,
+                        child: Text('Todos'),
+                      ),
                       ...categories.map(
                         (category) => DropdownMenuItem<String?>(
                           value: category,
-                          child: Text(category, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            category,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
                     ],
@@ -493,7 +483,8 @@ class XtreamMovieDetailScreen extends StatefulWidget {
   });
 
   @override
-  State<XtreamMovieDetailScreen> createState() => _XtreamMovieDetailScreenState();
+  State<XtreamMovieDetailScreen> createState() =>
+      _XtreamMovieDetailScreenState();
 }
 
 class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
@@ -519,7 +510,9 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
     if (mounted) setState(() {});
   }
 
-  bool get _blocked => _parental.isLocked && _parental.isProtectedItem(
+  bool get _blocked =>
+      _parental.isLocked &&
+      _parental.isProtectedItem(
         name: widget.movie.name,
         group: widget.movie.category,
       );
@@ -530,8 +523,8 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
   }
 
   void _retry() => setState(() {
-        _future = XtreamVodService.fetchDetails(widget.connection, widget.movie);
-      });
+    _future = XtreamVodService.fetchDetails(widget.connection, widget.movie);
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -550,34 +543,37 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
               onUnlock: () => unawaited(requestParentalUnlock(context)),
             )
           : FutureBuilder<XtreamVodDetails>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 14),
-                  Text('Cargando información de la película…'),
-                ],
-              ),
-            );
-          }
-          if (snapshot.hasError) {
-            return _MovieError(
-              message: snapshot.error.toString().replaceFirst('Exception: ', ''),
-              onRetry: _retry,
-            );
-          }
-          final details = snapshot.data!;
-          return LayoutBuilder(
-            builder: (context, constraints) => constraints.maxWidth >= 980
-                ? _buildWide(details)
-                : _buildCompact(details),
-          );
-        },
-      ),
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 14),
+                        Text('Cargando información de la película…'),
+                      ],
+                    ),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return _MovieError(
+                    message: snapshot.error.toString().replaceFirst(
+                      'Exception: ',
+                      '',
+                    ),
+                    onRetry: _retry,
+                  );
+                }
+                final details = snapshot.data!;
+                return LayoutBuilder(
+                  builder: (context, constraints) => constraints.maxWidth >= 980
+                      ? _buildWide(details)
+                      : _buildCompact(details),
+                );
+              },
+            ),
     );
   }
 
@@ -592,7 +588,13 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
           Expanded(
             child: Column(
               children: [
-                _MovieHero(details: details, onPlay: () => _play(details), onTrailer: details.trailerChannel() == null ? null : () => _playTrailer(details)),
+                _MovieHero(
+                  details: details,
+                  onPlay: () => _play(details),
+                  onTrailer: details.trailerChannel() == null
+                      ? null
+                      : () => _playTrailer(details),
+                ),
                 const SizedBox(height: 18),
                 _MovieMetadata(details: details),
               ],
@@ -613,7 +615,9 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
           details: details,
           compact: true,
           onPlay: () => _play(details),
-          onTrailer: details.trailerChannel() == null ? null : () => _playTrailer(details),
+          onTrailer: details.trailerChannel() == null
+              ? null
+              : () => _playTrailer(details),
         ),
         const SizedBox(height: 16),
         _MovieMetadata(details: details),
@@ -754,7 +758,10 @@ class _MoviePosterCardState extends State<_MoviePosterCard> {
                       top: 8,
                       left: 8,
                       child: Container(
-                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 5),
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 5,
+                        ),
                         decoration: BoxDecoration(
                           color: Colors.black.withValues(alpha: 0.72),
                           borderRadius: BorderRadius.circular(10),
@@ -764,7 +771,12 @@ class _MoviePosterCardState extends State<_MoviePosterCard> {
                           children: [
                             const Icon(Icons.star_rounded, size: 16),
                             const SizedBox(width: 3),
-                            Text(movie.rating!, style: const TextStyle(fontWeight: FontWeight.w800)),
+                            Text(
+                              movie.rating!,
+                              style: const TextStyle(
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
                           ],
                         ),
                       ),
@@ -870,17 +882,19 @@ class _MovieHero extends StatelessWidget {
                     details.movie.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style: (compact
-                            ? Theme.of(context).textTheme.headlineSmall
-                            : Theme.of(context).textTheme.headlineMedium)
-                        ?.copyWith(fontWeight: FontWeight.w900),
+                    style:
+                        (compact
+                                ? Theme.of(context).textTheme.headlineSmall
+                                : Theme.of(context).textTheme.headlineMedium)
+                            ?.copyWith(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 8),
                   Wrap(
                     spacing: 12,
                     runSpacing: 6,
                     children: [
-                      if (details.releaseDate != null) Text(details.releaseDate!),
+                      if (details.releaseDate != null)
+                        Text(details.releaseDate!),
                       if (details.genre != null) Text(details.genre!),
                       if (details.duration != null) Text(details.duration!),
                       if (details.rating != null)
@@ -967,7 +981,9 @@ class _MovieMetadata extends StatelessWidget {
       return const Card(
         child: Padding(
           padding: EdgeInsets.all(20),
-          child: Text('El servidor no proporcionó metadatos adicionales para esta película.'),
+          child: Text(
+            'El servidor no proporcionó metadatos adicionales para esta película.',
+          ),
         ),
       );
     }
@@ -1010,11 +1026,14 @@ class _MovieCatalogToolbar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                      ),
+                    fontWeight: FontWeight.w900,
+                  ),
                 ),
                 const SizedBox(height: 4),
-                Text('$visibleCount películas', style: const TextStyle(color: Colors.white60)),
+                Text(
+                  '$visibleCount películas',
+                  style: const TextStyle(color: Colors.white60),
+                ),
               ],
             ),
           ),
@@ -1025,7 +1044,9 @@ class _MovieCatalogToolbar extends StatelessWidget {
                 hintText: 'Buscar en películas…',
                 prefixIcon: const Icon(Icons.search_rounded),
                 filled: true,
-                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                fillColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
@@ -1066,21 +1087,41 @@ class _MovieCategorySidebar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Column(
-          crossAxisAlignment: collapsed ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+          crossAxisAlignment: collapsed
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: EdgeInsets.fromLTRB(collapsed ? 8 : 20, 18, collapsed ? 8 : 10, 8),
+              padding: EdgeInsets.fromLTRB(
+                collapsed ? 8 : 20,
+                18,
+                collapsed ? 8 : 10,
+                8,
+              ),
               child: Row(
-                mainAxisAlignment: collapsed ? MainAxisAlignment.center : MainAxisAlignment.start,
+                mainAxisAlignment: collapsed
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
                 children: [
-                  Icon(Icons.movie_rounded, color: Theme.of(context).colorScheme.primary, size: 28),
+                  Icon(
+                    Icons.movie_rounded,
+                    color: Theme.of(context).colorScheme.primary,
+                    size: 28,
+                  ),
                   if (!collapsed) ...[
                     const SizedBox(width: 10),
-                    const Expanded(child: Text('Películas', style: TextStyle(fontWeight: FontWeight.w900))),
+                    const Expanded(
+                      child: Text(
+                        'Películas',
+                        style: TextStyle(fontWeight: FontWeight.w900),
+                      ),
+                    ),
                     IconButton(
                       tooltip: 'Achicar categorías',
                       onPressed: onToggleCollapsed,
-                      icon: const Icon(Icons.keyboard_double_arrow_left_rounded),
+                      icon: const Icon(
+                        Icons.keyboard_double_arrow_left_rounded,
+                      ),
                     ),
                   ],
                 ],
@@ -1097,23 +1138,44 @@ class _MovieCategorySidebar extends StatelessWidget {
                 padding: EdgeInsets.fromLTRB(20, 8, 20, 10),
                 child: Row(
                   children: [
-                    Expanded(child: Text('CATEGORÍAS', style: TextStyle(color: Colors.white54, fontWeight: FontWeight.w800, letterSpacing: 1.1))),
+                    Expanded(
+                      child: Text(
+                        'CATEGORÍAS',
+                        style: TextStyle(
+                          color: Colors.white54,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
+                    ),
                     Tooltip(
-                      message: 'Arrastrá el borde derecho para cambiar el ancho',
-                      child: Icon(Icons.drag_indicator_rounded, color: Colors.white30, size: 20),
+                      message:
+                          'Arrastrá el borde derecho para cambiar el ancho',
+                      child: Icon(
+                        Icons.drag_indicator_rounded,
+                        color: Colors.white30,
+                        size: 20,
+                      ),
                     ),
                   ],
                 ),
               ),
             Expanded(
               child: ListView.builder(
-                padding: EdgeInsets.fromLTRB(collapsed ? 8 : 10, 0, collapsed ? 8 : 10, 20),
+                padding: EdgeInsets.fromLTRB(
+                  collapsed ? 8 : 10,
+                  0,
+                  collapsed ? 8 : 10,
+                  20,
+                ),
                 itemCount: categories.length + 1,
                 itemBuilder: (context, index) {
                   final category = index == 0 ? null : categories[index - 1];
                   final label = category ?? 'Todos';
                   final selected = category == selectedCategory;
-                  final count = category == null ? totalCount : (categoryCounts[category] ?? 0);
+                  final count = category == null
+                      ? totalCount
+                      : (categoryCounts[category] ?? 0);
                   if (collapsed) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
@@ -1121,7 +1183,9 @@ class _MovieCategorySidebar extends StatelessWidget {
                         message: '$label · $count',
                         child: Material(
                           color: selected
-                              ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.20)
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.primary.withValues(alpha: 0.20)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(14),
                           child: InkWell(
@@ -1130,8 +1194,12 @@ class _MovieCategorySidebar extends StatelessWidget {
                             child: SizedBox(
                               height: 52,
                               child: Icon(
-                                category == null ? Icons.grid_view_rounded : Icons.folder_rounded,
-                                color: selected ? Theme.of(context).colorScheme.primary : Colors.white70,
+                                category == null
+                                    ? Icons.grid_view_rounded
+                                    : Icons.folder_rounded,
+                                color: selected
+                                    ? Theme.of(context).colorScheme.primary
+                                    : Colors.white70,
                               ),
                             ),
                           ),
@@ -1146,25 +1214,43 @@ class _MovieCategorySidebar extends StatelessWidget {
                       child: ListTile(
                         minTileHeight: 54,
                         selected: selected,
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-                        selectedTileColor: Theme.of(context).colorScheme.primary.withValues(alpha: 0.20),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
+                        selectedTileColor: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.20),
                         leading: Icon(
-                          category == null ? Icons.grid_view_rounded : Icons.folder_rounded,
-                          color: selected ? Theme.of(context).colorScheme.primary : Colors.white70,
+                          category == null
+                              ? Icons.grid_view_rounded
+                              : Icons.folder_rounded,
+                          color: selected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.white70,
                         ),
                         title: Text(
                           label,
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
-                          style: TextStyle(fontWeight: selected ? FontWeight.w800 : FontWeight.w600),
+                          style: TextStyle(
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
                         ),
                         trailing: Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 4,
+                          ),
                           decoration: BoxDecoration(
                             color: Colors.white.withValues(alpha: 0.06),
                             borderRadius: BorderRadius.circular(10),
                           ),
-                          child: Text('$count', style: Theme.of(context).textTheme.labelSmall),
+                          child: Text(
+                            '$count',
+                            style: Theme.of(context).textTheme.labelSmall,
+                          ),
                         ),
                         onTap: () => onCategorySelected(category),
                       ),

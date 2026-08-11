@@ -110,9 +110,7 @@ class _HomeScreenState extends State<HomeScreen> {
                       ],
                     ),
                     const VerticalDivider(width: 1),
-                    Expanded(
-                      child: _sectionBody(provider),
-                    ),
+                    Expanded(child: _sectionBody(provider)),
                   ],
                 )
               : _sectionBody(provider),
@@ -156,29 +154,29 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String get _sectionTitle => switch (_section) {
-        0 => 'Servicios',
-        1 => 'Favoritos',
-        _ => 'Rendimiento',
-      };
+    0 => 'Servicios',
+    1 => 'Favoritos',
+    _ => 'Rendimiento',
+  };
 
   Widget _sectionBody(IptvProvider provider) {
     return switch (_section) {
       0 => _PlaylistsView(
-          playlists: provider.playlists,
-          loading: provider.loading,
-        ),
+        playlists: provider.playlists,
+        loading: provider.loading,
+      ),
       1 => const _FavoritesView(),
       _ => _PerformanceView(
-          settings: provider.playbackSettings,
-          onOpenSettings: () => _openPlaybackSettings(context),
-        ),
+        settings: provider.playbackSettings,
+        onOpenSettings: () => _openPlaybackSettings(context),
+      ),
     };
   }
 
   void _openPlaybackSettings(BuildContext context) {
-    Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const PlaybackSettingsScreen()),
-    );
+    Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const PlaybackSettingsScreen()));
   }
 
   Future<void> _openParentalSettings(BuildContext context) async {
@@ -202,8 +200,7 @@ class _HomeScreenState extends State<HomeScreen> {
               labelText: 'Ingresá tu PIN',
               counterText: '',
             ),
-            onSubmitted: (value) =>
-                Navigator.pop(dialogContext, value.trim()),
+            onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
           ),
           actions: [
             TextButton(
@@ -229,11 +226,10 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => const ParentalControlScreen()),
-    );
+    await Navigator.of(
+      context,
+    ).push(MaterialPageRoute(builder: (_) => const ParentalControlScreen()));
   }
-
 }
 
 class _PlaylistsView extends StatelessWidget {
@@ -250,7 +246,8 @@ class _PlaylistsView extends StatelessWidget {
       return const _EmptyState(
         icon: Icons.playlist_add,
         title: 'Todavía no hay listas',
-        message: 'Agregá un servicio M3U/M3U8, Xtream Codes o Portal Stalker para comenzar.',
+        message:
+            'Agregá un servicio M3U/M3U8, Xtream Codes o Portal Stalker para comenzar.',
       );
     }
 
@@ -259,10 +256,10 @@ class _PlaylistsView extends StatelessWidget {
         final columns = constraints.maxWidth >= 1400
             ? 4
             : constraints.maxWidth >= 980
-                ? 3
-                : constraints.maxWidth >= 620
-                    ? 2
-                    : 1;
+            ? 3
+            : constraints.maxWidth >= 620
+            ? 2
+            : 1;
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(22, 22, 22, 100),
@@ -289,33 +286,12 @@ class _PlaylistCard extends StatelessWidget {
 
   Future<void> _openPlaylist(BuildContext context) async {
     final navigator = Navigator.of(context);
-    final cache = ArtworkCacheService.instance;
     await ParentalControlService.instance.init();
     if (!context.mounted) return;
 
-    showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (_) => const AlertDialog(
-        content: Row(
-          children: [
-            SizedBox(
-              width: 24,
-              height: 24,
-              child: CircularProgressIndicator(strokeWidth: 2.4),
-            ),
-            SizedBox(width: 16),
-            Expanded(child: Text('Preparando canales, logos y portadas…')),
-          ],
-        ),
-      ),
-    );
-
-    try {
-      await cache.warmProvider(playlist);
-    } finally {
-      if (context.mounted) Navigator.of(context, rootNavigator: true).pop();
-    }
+    // Sólo cambia la sesión de artwork. No mostramos un diálogo de "preparar"
+    // porque desde v38 no existe ninguna precarga real en este punto.
+    await ArtworkCacheService.instance.switchProvider(playlist.id);
     if (!context.mounted) return;
 
     await navigator.push(
@@ -327,9 +303,7 @@ class _PlaylistCard extends StatelessWidget {
 
   Future<void> _editPlaylist(BuildContext context) async {
     await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => EditSourceScreen(playlist: playlist),
-      ),
+      MaterialPageRoute(builder: (_) => EditSourceScreen(playlist: playlist)),
     );
   }
 
@@ -387,8 +361,8 @@ class _PlaylistCard extends StatelessWidget {
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
                     const SizedBox(height: 5),
                     Text(
@@ -473,7 +447,9 @@ class _FavoritesView extends StatelessWidget {
     final provider = context.watch<IptvProvider>();
     final parental = ParentalControlService.instance;
     final favorites = parental.enabled && parental.isLocked
-        ? provider.favorites.where(parental.canShowChannel).toList(growable: false)
+        ? provider.favorites
+              .where(parental.canShowChannel)
+              .toList(growable: false)
         : provider.favorites;
 
     if (favorites.isEmpty) {
@@ -523,13 +499,13 @@ class _PerformanceView extends StatelessWidget {
   });
 
   String get _profileLabel => switch (settings.profile) {
-        BufferProfile.auto => 'Automático',
-        BufferProfile.ultraFast => 'Ultra rápido',
-        BufferProfile.balanced => 'Equilibrado',
-        BufferProfile.stable => 'Estable',
-        BufferProfile.slowConnection => 'Conexión lenta',
-        BufferProfile.custom => 'Personalizado',
-      };
+    BufferProfile.auto => 'Automático',
+    BufferProfile.ultraFast => 'Ultra rápido',
+    BufferProfile.balanced => 'Equilibrado',
+    BufferProfile.stable => 'Estable',
+    BufferProfile.slowConnection => 'Conexión lenta',
+    BufferProfile.custom => 'Personalizado',
+  };
 
   @override
   Widget build(BuildContext context) {
@@ -554,9 +530,7 @@ class _PerformanceView extends StatelessWidget {
                         children: [
                           Text(
                             'Motor de reproducción',
-                            style: Theme.of(context)
-                                .textTheme
-                                .titleLarge
+                            style: Theme.of(context).textTheme.titleLarge
                                 ?.copyWith(fontWeight: FontWeight.w700),
                           ),
                           Text('Perfil actual: $_profileLabel'),
@@ -576,7 +550,8 @@ class _PerformanceView extends StatelessWidget {
                     ),
                     _MetricChip(
                       label: 'Lectura anticipada',
-                      value: '${settings.readaheadSeconds.toStringAsFixed(1)} s',
+                      value:
+                          '${settings.readaheadSeconds.toStringAsFixed(1)} s',
                     ),
                     _MetricChip(
                       label: 'Recuperación',
@@ -676,10 +651,9 @@ class _EmptyState extends StatelessWidget {
             const SizedBox(height: 16),
             Text(
               title,
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
-                  ?.copyWith(fontWeight: FontWeight.w700),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
             ),
             const SizedBox(height: 8),
             Text(message, textAlign: TextAlign.center),

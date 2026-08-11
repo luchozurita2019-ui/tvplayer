@@ -1,21 +1,19 @@
-import 'package:http/http.dart' as http;
+import 'dart:io';
 
-/// Cliente HTTP compartido para todas las llamadas Xtream.
+import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
+
+/// Cliente HTTP compartido para Xtream.
 ///
-/// Mantener una sola instancia permite que dart:io reutilice DNS, sockets,
-/// conexiones TCP/TLS y keep-alive entre player_api.php, categorías, VOD,
-/// series y fichas. La instancia es reiniciable: cuando el usuario va a
-/// reproducir, podemos cancelar una descarga de catálogo que haya quedado en
-/// segundo plano sin dejar inutilizables los servicios que conservan una
-/// referencia estática a este cliente.
+/// La v40 usa explícitamente dart:io/IOClient para tener un pool nativo
+/// predecible: keep-alive, gzip automático, conexiones limitadas por host y
+/// timeouts de conexión/idle. [instance] es estable aunque el pool interno se
+/// reinicie al priorizar reproducción sobre navegación.
 class XtreamHttpClient {
   XtreamHttpClient._();
 
   static final _RestartableXtreamClient instance = _RestartableXtreamClient();
 
-  /// Corta las solicitudes Xtream que siguen en vuelo (por ejemplo un refresh
-  /// completo de get_vod_streams) y abre un pool HTTP limpio para la siguiente
-  /// operación. Las referencias existentes a [instance] siguen siendo válidas.
   static void cancelBrowsingRequests() => instance.restart();
 
   static const String browserUserAgent =
@@ -26,14 +24,21 @@ class XtreamHttpClient {
   static const Map<String, String> jsonHeaders = <String, String>{
     'User-Agent': browserUserAgent,
     'Accept': 'application/json,text/plain,*/*',
-    // dart:io negocia y descomprime gzip automáticamente. No fijamos
-    // Accept-Encoding a mano para conservar ese comportamiento en clones raros.
     'Connection': 'keep-alive',
   };
 }
 
+http.Client _newNativeClient() {
+  final io = HttpClient()
+    ..connectionTimeout = const Duration(seconds: 8)
+    ..idleTimeout = const Duration(seconds: 30)
+    ..maxConnectionsPerHost = 4
+    ..autoUncompress = true;
+  return IOClient(io);
+}
+
 class _RestartableXtreamClient extends http.BaseClient {
-  http.Client _inner = http.Client();
+  http.Client _inner = _newNativeClient();
   bool _closed = false;
 
   @override
@@ -43,8 +48,6 @@ class _RestartableXtreamClient extends http.BaseClient {
         StateError('El cliente Xtream ya fue cerrado.'),
       );
     }
-    // Capturamos el cliente actual para que restart() pueda cerrar exactamente
-    // las solicitudes que estaban usando el pool anterior.
     final client = _inner;
     return client.send(request);
   }
@@ -52,7 +55,7 @@ class _RestartableXtreamClient extends http.BaseClient {
   void restart() {
     if (_closed) return;
     final previous = _inner;
-    _inner = http.Client();
+    _inner = _newNativeClient();
     previous.close();
   }
 

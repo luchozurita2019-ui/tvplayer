@@ -13,9 +13,8 @@ import 'xtream_series_service.dart';
 import 'xtream_service.dart';
 import 'xtream_vod_service.dart';
 
-typedef XtreamCatalogProgressCallback = void Function(
-  XtreamCatalogProgress progress,
-);
+typedef XtreamCatalogProgressCallback =
+    void Function(XtreamCatalogProgress progress);
 
 class XtreamCatalogProgress {
   final String section;
@@ -91,14 +90,11 @@ class XtreamFastCatalogService {
 
   static final XtreamFastCatalogService instance = XtreamFastCatalogService._();
 
-  static const int _cacheVersion = 1;
-  static const Duration _categoryTimeout = Duration(seconds: 6);
+  static const int _cacheVersion = 2;
+  static const Duration _categoryTimeout = Duration(seconds: 4);
   static const Duration _movieTimeout = Duration(seconds: 35);
   static const Duration _seriesTimeout = Duration(seconds: 35);
 
-  // Build temporal de diagnóstico: Series siempre mide una carga fresca de red.
-  // El caché existente no se borra, simplemente no se usa como atajo durante la prueba.
-  static const bool _seriesTimingDiagnosticMode = true;
   String? _lastSeriesDiagnostics;
 
   String? get lastSeriesDiagnostics => _lastSeriesDiagnostics;
@@ -109,6 +105,7 @@ class XtreamFastCatalogService {
       <String, Future<XtreamConnectionResult>>{};
 
   Directory? _cacheDirectory;
+  Directory? _transferDirectory;
 
   Future<XtreamConnectionResult> connectionForPlaylist(
     String playlistUrl, {
@@ -136,11 +133,11 @@ class XtreamFastCatalogService {
     }
   }
 
-  /// Para listar Series no necesitamos esperar player_api.php sin action.
-  /// La URL get.php ya contiene host/puerto/usuario/contraseña suficientes para
-  /// pedir get_series y get_series_categories. La conexión completa se vuelve a
-  /// validar al abrir una serie antes de pedir get_series_info/reproducir.
-  Future<XtreamConnectionResult> _connectionForSeriesCatalog(
+  /// Para listar catálogos no hace falta esperar player_api.php sin action.
+  /// get.php ya contiene host/puerto/usuario/contraseña. Si el panel rechaza
+  /// esta ruta con 401/403, refreshMovies/refreshSeries hacen el fallback a la
+  /// conexión autenticada y resuelta por server_info.
+  Future<XtreamConnectionResult> _connectionForCatalog(
     String playlistUrl, {
     bool forceRefresh = false,
   }) async {
@@ -170,9 +167,10 @@ class XtreamFastCatalogService {
     try {
       final payload = await compute(_decodeCachePayload, raw);
       if (payload['version'] != _cacheVersion || payload['kind'] != 'movies') {
+        unawaited(_deleteCacheFile(playlistUrl, 'movies'));
         return null;
       }
-      final connection = _connectionFromMap(payload['connection']);
+      final connection = _provisionalConnectionFromPlaylistUrl(playlistUrl);
       if (connection == null) return null;
       final movies = _movieListFromPrepared(payload['items']);
       if (movies.isEmpty) return null;
@@ -193,19 +191,15 @@ class XtreamFastCatalogService {
   Future<XtreamSeriesCatalogSnapshot?> loadCachedSeries(
     String playlistUrl,
   ) async {
-    if (_seriesTimingDiagnosticMode) return null;
     final raw = await _readCache(playlistUrl, 'series');
     if (raw == null) return null;
     try {
       final payload = await compute(_decodeCachePayload, raw);
       if (payload['version'] != _cacheVersion || payload['kind'] != 'series') {
+        unawaited(_deleteCacheFile(playlistUrl, 'series'));
         return null;
       }
-      // Un catálogo local no debe quedar inutilizable sólo porque el bloque de
-      // conexión viejo sea incompleto. get.php alcanza para reconstruir una
-      // conexión provisional y la ficha valida la conexión real al abrirse.
-      final connection = _connectionFromMap(payload['connection']) ??
-          _provisionalConnectionFromPlaylistUrl(playlistUrl);
+      final connection = _provisionalConnectionFromPlaylistUrl(playlistUrl);
       if (connection == null) return null;
       final series = _seriesListFromPrepared(payload['items']);
       if (series.isEmpty) return null;
@@ -228,7 +222,7 @@ class XtreamFastCatalogService {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
-    var connection = await connectionForPlaylist(
+    var connection = await _connectionForCatalog(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
@@ -245,8 +239,6 @@ class XtreamFastCatalogService {
     } on SocketException {
       rethrow;
     } catch (error) {
-      // Compatibilidad: si un clon Xtream devuelve una estructura que nuestro
-      // preparador rápido no entiende, conservamos el cargador probado anterior.
       try {
         final movies = await XtreamVodService.fetchCatalog(connection);
         final categories = _categoriesFromMovies(movies);
@@ -272,7 +264,7 @@ class XtreamFastCatalogService {
   }) async {
     final totalWatch = Stopwatch()..start();
     final connectionWatch = Stopwatch()..start();
-    var connection = await _connectionForSeriesCatalog(
+    var connection = await _connectionForCatalog(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
@@ -313,7 +305,7 @@ class XtreamFastCatalogService {
         final categories = _categoriesFromSeries(series);
         if (totalWatch.isRunning) totalWatch.stop();
         final diagnostic = <String>[
-          'TV FULL · Diagnóstico Series',
+          'TV FULL · Diagnóstico Series v40',
           'Ruta: FALLBACK XtreamSeriesService',
           'Conexión: ${_formatDiagnosticDuration(connectionElapsed)}',
           'Fallback catálogo: ${_formatDiagnosticDuration(fallbackWatch.elapsed)}',
@@ -342,12 +334,14 @@ class XtreamFastCatalogService {
     String playlistUrl,
     XtreamCatalogProgressCallback? onProgress,
   ) async {
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'MOVIE',
-      phase: 'Cargando categorías',
-      step: 1,
-      totalSteps: 2,
-    ));
+    onProgress?.call(
+      const XtreamCatalogProgress(
+        section: 'MOVIE',
+        phase: 'Cargando categorías',
+        step: 1,
+        totalSteps: 2,
+      ),
+    );
 
     String categoriesBody = '[]';
     try {
@@ -355,48 +349,52 @@ class XtreamFastCatalogService {
         connection,
         'get_vod_categories',
         _categoryTimeout,
-        onBytes: (bytes) => onProgress?.call(XtreamCatalogProgress(
-          section: 'MOVIE',
-          phase: 'Cargando categorías',
-          step: 1,
-          totalSteps: 2,
-          receivedBytes: bytes,
-        )),
       );
     } catch (_) {
-      // Muchos clones entregan category_name dentro de get_vod_streams.
       categoriesBody = '[]';
     }
 
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'MOVIE',
-      phase: 'Cargando lista',
-      step: 2,
-      totalSteps: 2,
-    ));
-    final itemsBody = await _downloadActionBody(
-      connection,
-      'get_vod_streams',
-      _movieTimeout,
-      onBytes: (bytes) => onProgress?.call(XtreamCatalogProgress(
+    onProgress?.call(
+      const XtreamCatalogProgress(
         section: 'MOVIE',
         phase: 'Cargando lista',
         step: 2,
         totalSteps: 2,
-        receivedBytes: bytes,
-      )),
+      ),
+    );
+    final transfer = await _downloadActionFile(
+      connection,
+      'get_vod_streams',
+      _movieTimeout,
+      onBytes: (bytes) => onProgress?.call(
+        XtreamCatalogProgress(
+          section: 'MOVIE',
+          phase: 'Cargando lista',
+          step: 2,
+          totalSteps: 2,
+          receivedBytes: bytes,
+        ),
+      ),
     );
 
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'MOVIE',
-      phase: 'Preparando catálogo',
-      step: 2,
-      totalSteps: 2,
-    ));
-    final prepared = await compute(_prepareMovieCatalog, <String, String>{
-      'categories': categoriesBody,
-      'items': itemsBody,
-    });
+    onProgress?.call(
+      const XtreamCatalogProgress(
+        section: 'MOVIE',
+        phase: 'Preparando catálogo',
+        step: 2,
+        totalSteps: 2,
+      ),
+    );
+    Map<String, dynamic> prepared;
+    try {
+      prepared = await compute(_prepareMovieCatalogFromFile, <String, String>{
+        'categories': categoriesBody,
+        'itemsPath': transfer.file.path,
+      });
+    } finally {
+      unawaited(_deleteFileQuietly(transfer.file));
+    }
+
     final movies = _movieListFromPrepared(prepared['items']);
     if (movies.isEmpty) {
       throw const FormatException('Xtream no devolvió películas válidas.');
@@ -409,14 +407,14 @@ class XtreamFastCatalogService {
       savedAt: DateTime.now(),
       fromCache: false,
     );
-    rememberConnection(connection);
-    unawaited(_writePreparedCache(
-      playlistUrl,
-      'movies',
-      connection,
-      prepared,
-      snapshot.savedAt,
-    ));
+    if (connection.serverName != null ||
+        connection.status != null ||
+        connection.expiration != null) {
+      rememberConnection(connection);
+    }
+    unawaited(
+      _writePreparedCache(playlistUrl, 'movies', prepared, snapshot.savedAt),
+    );
     return snapshot;
   }
 
@@ -427,92 +425,76 @@ class XtreamFastCatalogService {
     required Stopwatch totalWatch,
     required Duration connectionElapsed,
   }) async {
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'SERIES',
-      phase: 'Cargando categorías',
-      step: 1,
-      totalSteps: 2,
-    ));
+    onProgress?.call(
+      const XtreamCatalogProgress(
+        section: 'SERIES',
+        phase: 'Cargando categorías',
+        step: 1,
+        totalSteps: 2,
+      ),
+    );
 
-    Future<_SeriesTimedBody> downloadCategories() async {
-      final watch = Stopwatch()..start();
-      var bytes = 0;
-      try {
-        final body = await _downloadActionBody(
-          connection,
-          'get_series_categories',
-          _categoryTimeout,
-          onBytes: (value) => bytes = value,
-        );
-        watch.stop();
-        return _SeriesTimedBody(
-          body: body,
-          elapsed: watch.elapsed,
-          bytes: bytes,
-          success: true,
-        );
-      } catch (_) {
-        if (watch.isRunning) watch.stop();
-        return _SeriesTimedBody(
-          body: '[]',
-          elapsed: watch.elapsed,
-          bytes: bytes,
-          success: false,
-        );
-      }
-    }
-
-    Future<_SeriesTimedBody> downloadItems() async {
-      final watch = Stopwatch()..start();
-      var bytes = 0;
-      final body = await _downloadActionBody(
+    final categoryWatch = Stopwatch()..start();
+    var categoryBytes = 0;
+    var categorySuccess = true;
+    String categoriesBody;
+    try {
+      categoriesBody = await _downloadActionBody(
         connection,
-        'get_series',
-        _seriesTimeout,
-        onBytes: (value) {
-          bytes = value;
-          onProgress?.call(XtreamCatalogProgress(
-            section: 'SERIES',
-            phase: 'Cargando lista',
-            step: 2,
-            totalSteps: 2,
-            receivedBytes: value,
-          ));
-        },
+        'get_series_categories',
+        _categoryTimeout,
+        onBytes: (value) => categoryBytes = value,
       );
-      watch.stop();
-      return _SeriesTimedBody(
-        body: body,
-        elapsed: watch.elapsed,
-        bytes: bytes,
-        success: true,
-      );
+    } catch (_) {
+      categoriesBody = '[]';
+      categorySuccess = false;
     }
+    categoryWatch.stop();
 
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'SERIES',
-      phase: 'Cargando lista',
-      step: 2,
-      totalSteps: 2,
-    ));
-    final bodies = await Future.wait<_SeriesTimedBody>([
-      downloadCategories(),
-      downloadItems(),
-    ]);
-    final categoriesResult = bodies[0];
-    final itemsResult = bodies[1];
+    // Importante: get_series comienza DESPUÉS de categorías. No abrimos dos
+    // conexiones pesadas simultáneas contra paneles que pueden repartir/throttle
+    // ancho de banda por cuenta o IP.
+    onProgress?.call(
+      const XtreamCatalogProgress(
+        section: 'SERIES',
+        phase: 'Cargando lista',
+        step: 2,
+        totalSteps: 2,
+      ),
+    );
+    final transfer = await _downloadActionFile(
+      connection,
+      'get_series',
+      _seriesTimeout,
+      onBytes: (bytes) => onProgress?.call(
+        XtreamCatalogProgress(
+          section: 'SERIES',
+          phase: 'Cargando lista',
+          step: 2,
+          totalSteps: 2,
+          receivedBytes: bytes,
+        ),
+      ),
+    );
 
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'SERIES',
-      phase: 'Preparando catálogo',
-      step: 2,
-      totalSteps: 2,
-    ));
+    onProgress?.call(
+      const XtreamCatalogProgress(
+        section: 'SERIES',
+        phase: 'Preparando catálogo',
+        step: 2,
+        totalSteps: 2,
+      ),
+    );
     final prepareWatch = Stopwatch()..start();
-    final prepared = await compute(_prepareSeriesCatalog, <String, String>{
-      'categories': categoriesResult.body,
-      'items': itemsResult.body,
-    });
+    Map<String, dynamic> prepared;
+    try {
+      prepared = await compute(_prepareSeriesCatalogFromFile, <String, String>{
+        'categories': categoriesBody,
+        'itemsPath': transfer.file.path,
+      });
+    } finally {
+      unawaited(_deleteFileQuietly(transfer.file));
+    }
     prepareWatch.stop();
 
     final materializeWatch = Stopwatch()..start();
@@ -539,12 +521,12 @@ class XtreamFastCatalogService {
 
     if (totalWatch.isRunning) totalWatch.stop();
     final diagnostic = <String>[
-      'TV FULL · Diagnóstico Series',
-      'Ruta: motor rápido',
+      'TV FULL · Diagnóstico Series v40',
+      'Ruta: categorías → get_series → archivo temporal → isolate',
       'Conexión: ${_formatDiagnosticDuration(connectionElapsed)}',
-      'Categorías: ${_formatDiagnosticDuration(categoriesResult.elapsed)} · ${_formatDiagnosticBytes(categoriesResult.bytes)} · ${categoriesResult.success ? 'OK' : 'fallback vacío'}',
-      'get_series: ${_formatDiagnosticDuration(itemsResult.elapsed)} · ${_formatDiagnosticBytes(itemsResult.bytes)}',
-      'JSON + isolate: ${_formatDiagnosticDuration(prepareWatch.elapsed)}',
+      'Categorías: ${_formatDiagnosticDuration(categoryWatch.elapsed)} · ${_formatDiagnosticBytes(categoryBytes)} · ${categorySuccess ? 'OK' : 'fallback vacío'}',
+      'get_series red: ${_formatDiagnosticDuration(transfer.elapsed)} · ${_formatDiagnosticBytes(transfer.bytes)}',
+      'JSON + preparación isolate: ${_formatDiagnosticDuration(prepareWatch.elapsed)}',
       'Materializar objetos: ${_formatDiagnosticDuration(materializeWatch.elapsed)}',
       'TOTAL: ${_formatDiagnosticDuration(totalWatch.elapsed)}',
       'Series: ${series.length}',
@@ -555,15 +537,9 @@ class XtreamFastCatalogService {
     debugPrint(diagnostic);
     unawaited(_writeSeriesDiagnostic(diagnostic));
 
-    if (!_seriesTimingDiagnosticMode) {
-      unawaited(_writePreparedCache(
-        playlistUrl,
-        'series',
-        connection,
-        prepared,
-        snapshot.savedAt,
-      ));
-    }
+    unawaited(
+      _writePreparedCache(playlistUrl, 'series', prepared, snapshot.savedAt),
+    );
     return snapshot;
   }
 
@@ -582,7 +558,7 @@ class XtreamFastCatalogService {
       ..headers.addAll(XtreamHttpClient.jsonHeaders);
     final response = await XtreamHttpClient.instance
         .send(request)
-        .timeout(inactivityTimeout);
+        .timeout(const Duration(seconds: 12));
     if (response.statusCode != 200) {
       throw _XtreamHttpException(action, response.statusCode);
     }
@@ -600,6 +576,61 @@ class XtreamFastCatalogService {
     return utf8.decode(builder.takeBytes(), allowMalformed: true);
   }
 
+  Future<_CatalogFileDownload> _downloadActionFile(
+    XtreamConnectionResult connection,
+    String action,
+    Duration inactivityTimeout, {
+    ValueChanged<int>? onBytes,
+  }) async {
+    final uri = _endpoint(connection.apiServer, <String, String>{
+      'username': connection.username,
+      'password': connection.password,
+      'action': action,
+    });
+    final request = http.Request('GET', uri)
+      ..headers.addAll(XtreamHttpClient.jsonHeaders);
+    final watch = Stopwatch()..start();
+    final response = await XtreamHttpClient.instance
+        .send(request)
+        .timeout(const Duration(seconds: 12));
+    if (response.statusCode != 200) {
+      throw _XtreamHttpException(action, response.statusCode);
+    }
+
+    final directory = await _ensureTransferDirectory();
+    final safeAction = action.replaceAll(RegExp(r'[^a-zA-Z0-9_-]'), '_');
+    final file = File(
+      '${directory.path}/${DateTime.now().microsecondsSinceEpoch}_$safeAction.json',
+    );
+    final sink = file.openWrite();
+    var received = 0;
+    try {
+      await for (final chunk in response.stream.timeout(inactivityTimeout)) {
+        received += chunk.length;
+        sink.add(chunk);
+        onBytes?.call(received);
+      }
+      await sink.flush();
+      await sink.close();
+    } catch (_) {
+      try {
+        await sink.close();
+      } catch (_) {}
+      unawaited(_deleteFileQuietly(file));
+      rethrow;
+    }
+    watch.stop();
+    if (received == 0) {
+      unawaited(_deleteFileQuietly(file));
+      throw FormatException('Xtream $action devolvió una respuesta vacía.');
+    }
+    return _CatalogFileDownload(
+      file: file,
+      bytes: received,
+      elapsed: watch.elapsed,
+    );
+  }
+
   Future<String?> _readCache(String playlistUrl, String kind) async {
     try {
       final file = await _cacheFile(playlistUrl, kind);
@@ -613,18 +644,14 @@ class XtreamFastCatalogService {
   Future<void> _writePreparedCache(
     String playlistUrl,
     String kind,
-    XtreamConnectionResult connection,
     Map<String, dynamic> prepared,
     DateTime savedAt,
   ) async {
-    // Yield first so returning the fresh catalog to Flutter always wins over
-    // persistence. jsonEncode itself runs in compute() inside _writeCache.
     await Future<void>.delayed(Duration.zero);
     final payload = <String, dynamic>{
       'version': _cacheVersion,
       'kind': kind,
       'savedAt': savedAt.millisecondsSinceEpoch,
-      'connection': _connectionToMap(connection),
       'categories': prepared['categories'] ?? const <String>[],
       'items': prepared['items'] ?? const <dynamic>[],
     };
@@ -639,7 +666,6 @@ class XtreamFastCatalogService {
       'version': _cacheVersion,
       'kind': 'movies',
       'savedAt': snapshot.savedAt.millisecondsSinceEpoch,
-      'connection': _connectionToMap(snapshot.connection),
       'categories': snapshot.categories,
       'items': snapshot.movies.map(_movieToMap).toList(growable: false),
     };
@@ -654,7 +680,6 @@ class XtreamFastCatalogService {
       'version': _cacheVersion,
       'kind': 'series',
       'savedAt': snapshot.savedAt.millisecondsSinceEpoch,
-      'connection': _connectionToMap(snapshot.connection),
       'categories': snapshot.categories,
       'items': snapshot.series.map(_seriesToMap).toList(growable: false),
     };
@@ -688,6 +713,43 @@ class XtreamFastCatalogService {
     }
   }
 
+  Future<Directory> _ensureTransferDirectory() async {
+    final current = _transferDirectory;
+    if (current != null) return current;
+    final base = await getTemporaryDirectory();
+    final directory = Directory('${base.path}/tv_full_xtream_transfer');
+    if (!await directory.exists()) await directory.create(recursive: true);
+    _transferDirectory = directory;
+    unawaited(_cleanupStaleTransfers(directory));
+    return directory;
+  }
+
+  Future<void> _cleanupStaleTransfers(Directory directory) async {
+    final cutoff = DateTime.now().subtract(const Duration(hours: 6));
+    try {
+      await for (final entity in directory.list(followLinks: false)) {
+        if (entity is! File) continue;
+        try {
+          final stat = await entity.stat();
+          if (stat.modified.isBefore(cutoff)) await entity.delete();
+        } catch (_) {}
+      }
+    } catch (_) {}
+  }
+
+  Future<void> _deleteFileQuietly(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
+  Future<void> _deleteCacheFile(String playlistUrl, String kind) async {
+    try {
+      final file = await _cacheFile(playlistUrl, kind);
+      if (await file.exists()) await file.delete();
+    } catch (_) {}
+  }
+
   Future<File> _cacheFile(String playlistUrl, String kind) async {
     final directory = await _ensureCacheDirectory();
     final digest = sha256.convert(utf8.encode(playlistUrl.trim())).toString();
@@ -705,17 +767,15 @@ class XtreamFastCatalogService {
   }
 }
 
-class _SeriesTimedBody {
-  final String body;
-  final Duration elapsed;
+class _CatalogFileDownload {
+  final File file;
   final int bytes;
-  final bool success;
+  final Duration elapsed;
 
-  const _SeriesTimedBody({
-    required this.body,
-    required this.elapsed,
+  const _CatalogFileDownload({
+    required this.file,
     required this.bytes,
-    required this.success,
+    required this.elapsed,
   });
 }
 
@@ -739,6 +799,30 @@ class _XtreamHttpException implements Exception {
   String toString() => 'Xtream $action respondió HTTP $statusCode.';
 }
 
+Map<String, dynamic> _prepareMovieCatalogFromFile(Map<String, String> input) {
+  final path = input['itemsPath'];
+  if (path == null || path.isEmpty) {
+    throw const FormatException('Archivo temporal MOVIE inválido.');
+  }
+  final items = File(path).readAsStringSync();
+  return _prepareMovieCatalog(<String, String>{
+    'categories': input['categories'] ?? '[]',
+    'items': items,
+  });
+}
+
+Map<String, dynamic> _prepareSeriesCatalogFromFile(Map<String, String> input) {
+  final path = input['itemsPath'];
+  if (path == null || path.isEmpty) {
+    throw const FormatException('Archivo temporal SERIES inválido.');
+  }
+  final items = File(path).readAsStringSync();
+  return _prepareSeriesCatalog(<String, String>{
+    'categories': input['categories'] ?? '[]',
+    'items': items,
+  });
+}
+
 Map<String, dynamic> _prepareMovieCatalog(Map<String, String> input) {
   final categories = _categoryMapFromJson(input['categories'] ?? '[]');
   final rawItems = _jsonList(input['items'] ?? '[]');
@@ -752,8 +836,10 @@ Map<String, dynamic> _prepareMovieCatalog(Map<String, String> input) {
     final name = _cleanText(item['name']);
     if (id == null || name == null) continue;
     final categoryId = _cleanText(item['category_id']);
-    final fallbackCategory =
-        _firstText(item, const <String>['category_name', 'category']);
+    final fallbackCategory = _firstText(item, const <String>[
+      'category_name',
+      'category',
+    ]);
     final category = categoryId == null
         ? fallbackCategory
         : categories[categoryId] ?? fallbackCategory;
@@ -766,29 +852,25 @@ Map<String, dynamic> _prepareMovieCatalog(Map<String, String> input) {
         _firstText(item, const <String>['container_extension', 'extension']),
         'mp4',
       ),
-      'cover': _firstText(
-        item,
-        const <String>['stream_icon', 'movie_image', 'cover'],
-      ),
+      'cover': _firstText(item, const <String>[
+        'stream_icon',
+        'movie_image',
+        'cover',
+      ]),
       'category': category,
       'rating': _firstText(item, const <String>['rating', 'rating_5based']),
-      'releaseDate': _firstText(
-        item,
-        const <String>['releasedate', 'releaseDate', 'year'],
-      ),
+      'releaseDate': _firstText(item, const <String>[
+        'releasedate',
+        'releaseDate',
+        'year',
+      ]),
       'genre': _cleanText(item['genre']),
       'directSource': _cleanText(item['direct_source']),
     });
   }
 
-  items.sort((a, b) => (a['name'] as String)
-      .toLowerCase()
-      .compareTo((b['name'] as String).toLowerCase()));
   final categoryList = foundCategories.toList()..sort();
-  return <String, dynamic>{
-    'items': items,
-    'categories': categoryList,
-  };
+  return <String, dynamic>{'items': items, 'categories': categoryList};
 }
 
 Map<String, dynamic> _prepareSeriesCatalog(Map<String, String> input) {
@@ -804,8 +886,10 @@ Map<String, dynamic> _prepareSeriesCatalog(Map<String, String> input) {
     final name = _cleanText(item['name']);
     if (id == null || name == null) continue;
     final categoryId = _cleanText(item['category_id']);
-    final fallbackCategory =
-        _firstText(item, const <String>['category_name', 'category']);
+    final fallbackCategory = _firstText(item, const <String>[
+      'category_name',
+      'category',
+    ]);
     final category = categoryId == null
         ? fallbackCategory
         : categories[categoryId] ?? fallbackCategory;
@@ -821,22 +905,16 @@ Map<String, dynamic> _prepareSeriesCatalog(Map<String, String> input) {
       'cover': _cleanText(item['cover']),
       'category': category,
       'genre': _cleanText(item['genre']),
-      'releaseDate': _firstText(
-        item,
-        const <String>['releaseDate', 'release_date'],
-      ),
+      'releaseDate': _firstText(item, const <String>[
+        'releaseDate',
+        'release_date',
+      ]),
       'rating': _firstText(item, const <String>['rating', 'rating_5based']),
     });
   }
 
-  items.sort((a, b) => (a['name'] as String)
-      .toLowerCase()
-      .compareTo((b['name'] as String).toLowerCase()));
   final categoryList = foundCategories.toList()..sort();
-  return <String, dynamic>{
-    'items': items,
-    'categories': categoryList,
-  };
+  return <String, dynamic>{'items': items, 'categories': categoryList};
 }
 
 Map<String, dynamic> _decodeCachePayload(String raw) {
@@ -875,17 +953,19 @@ List<XtreamVodSummary> _movieListFromPrepared(dynamic raw) {
     final id = _cleanText(item['id']);
     final name = _cleanText(item['name']);
     if (id == null || name == null) continue;
-    result.add(XtreamVodSummary(
-      id: id,
-      name: name,
-      extension: _cleanExtension(_cleanText(item['extension']), 'mp4'),
-      cover: _cleanText(item['cover']),
-      category: _cleanText(item['category']),
-      rating: _cleanText(item['rating']),
-      releaseDate: _cleanText(item['releaseDate']),
-      genre: _cleanText(item['genre']),
-      directSource: _cleanText(item['directSource']),
-    ));
+    result.add(
+      XtreamVodSummary(
+        id: id,
+        name: name,
+        extension: _cleanExtension(_cleanText(item['extension']), 'mp4'),
+        cover: _cleanText(item['cover']),
+        category: _cleanText(item['category']),
+        rating: _cleanText(item['rating']),
+        releaseDate: _cleanText(item['releaseDate']),
+        genre: _cleanText(item['genre']),
+        directSource: _cleanText(item['directSource']),
+      ),
+    );
   }
   return result;
 }
@@ -899,36 +979,39 @@ List<XtreamSeriesSummary> _seriesListFromPrepared(dynamic raw) {
     final id = _cleanText(item['id']);
     final name = _cleanText(item['name']);
     if (id == null || name == null) continue;
-    result.add(XtreamSeriesSummary(
-      id: id,
-      name: name,
-      cover: _cleanText(item['cover']),
-      category: _cleanText(item['category']),
-      plot: _cleanText(item['plot']),
-      cast: _cleanText(item['cast']),
-      director: _cleanText(item['director']),
-      genre: _cleanText(item['genre']),
-      releaseDate: _cleanText(item['releaseDate']),
-      rating: _cleanText(item['rating']),
-      backdrops: _stringList(item['backdrops']),
-    ));
+    result.add(
+      XtreamSeriesSummary(
+        id: id,
+        name: name,
+        cover: _cleanText(item['cover']),
+        category: _cleanText(item['category']),
+        plot: _cleanText(item['plot']),
+        cast: _cleanText(item['cast']),
+        director: _cleanText(item['director']),
+        genre: _cleanText(item['genre']),
+        releaseDate: _cleanText(item['releaseDate']),
+        rating: _cleanText(item['rating']),
+        backdrops: _stringList(item['backdrops']),
+      ),
+    );
   }
   return result;
 }
 
 Map<String, dynamic> _movieToMap(XtreamVodSummary movie) => <String, dynamic>{
-      'id': movie.id,
-      'name': movie.name,
-      'extension': movie.extension,
-      'cover': movie.cover,
-      'category': movie.category,
-      'rating': movie.rating,
-      'releaseDate': movie.releaseDate,
-      'genre': movie.genre,
-      'directSource': movie.directSource,
-    };
+  'id': movie.id,
+  'name': movie.name,
+  'extension': movie.extension,
+  'cover': movie.cover,
+  'category': movie.category,
+  'rating': movie.rating,
+  'releaseDate': movie.releaseDate,
+  'genre': movie.genre,
+  'directSource': movie.directSource,
+};
 
-Map<String, dynamic> _seriesToMap(XtreamSeriesSummary series) => <String, dynamic>{
+Map<String, dynamic> _seriesToMap(XtreamSeriesSummary series) =>
+    <String, dynamic>{
       'id': series.id,
       'name': series.name,
       'cover': series.cover,
@@ -941,48 +1024,6 @@ Map<String, dynamic> _seriesToMap(XtreamSeriesSummary series) => <String, dynami
       'rating': series.rating,
       'backdrops': series.backdrops,
     };
-
-Map<String, dynamic> _connectionToMap(XtreamConnectionResult connection) =>
-    <String, dynamic>{
-      'playlistUrl': connection.playlistUrl,
-      'apiServer': connection.apiServer.toString(),
-      'streamServer': connection.streamServer.toString(),
-      'username': connection.username,
-      'password': connection.password,
-      'serverName': connection.serverName,
-      'status': connection.status,
-      'expiration': connection.expiration?.millisecondsSinceEpoch,
-    };
-
-XtreamConnectionResult? _connectionFromMap(dynamic raw) {
-  if (raw is! Map) return null;
-  final map = Map<String, dynamic>.from(raw);
-  final playlistUrl = _cleanText(map['playlistUrl']);
-  final apiServerRaw = _cleanText(map['apiServer']);
-  final streamServerRaw = _cleanText(map['streamServer']);
-  final username = _cleanText(map['username']);
-  final password = _cleanText(map['password']);
-  final apiServer = apiServerRaw == null ? null : Uri.tryParse(apiServerRaw);
-  final streamServer =
-      streamServerRaw == null ? null : Uri.tryParse(streamServerRaw);
-  if (playlistUrl == null ||
-      apiServer == null ||
-      streamServer == null ||
-      username == null ||
-      password == null) {
-    return null;
-  }
-  return XtreamConnectionResult(
-    playlistUrl: playlistUrl,
-    apiServer: apiServer,
-    streamServer: streamServer,
-    username: username,
-    password: password,
-    serverName: _cleanText(map['serverName']),
-    status: _cleanText(map['status']),
-    expiration: _dateFromMillis(map['expiration']),
-  );
-}
 
 XtreamConnectionResult? _provisionalConnectionFromPlaylistUrl(String raw) {
   final uri = Uri.tryParse(raw.trim());

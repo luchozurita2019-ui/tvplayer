@@ -34,7 +34,6 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   final ParentalControlService _parental = ParentalControlService.instance;
   List<String> _catalogCategories = const <String>[];
   String _progressLabel = 'Cargando información del servidor…';
-  int _loadGeneration = 0;
   DateTime _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   int _lastProgressBytes = 0;
 
@@ -74,7 +73,9 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     if (!mounted) return;
     final width = prefs.getDouble(_sidebarWidthKey) ?? 320;
     setState(() {
-      _sidebarWidth = width.clamp(_sidebarMinWidth, _sidebarMaxWidth).toDouble();
+      _sidebarWidth = width
+          .clamp(_sidebarMinWidth, _sidebarMaxWidth)
+          .toDouble();
       _sidebarCollapsed = prefs.getBool(_sidebarCollapsedKey) ?? false;
     });
   }
@@ -128,41 +129,38 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     }
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => XtreamSeriesDetailScreen(
-          connection: connection,
-          summary: series,
-        ),
+        builder: (_) =>
+            XtreamSeriesDetailScreen(connection: connection, summary: series),
       ),
     );
   }
 
   Future<_SeriesCatalogData> _load({bool forceNetwork = false}) async {
     await _parental.init();
-    final generation = ++_loadGeneration;
     final fast = XtreamFastCatalogService.instance;
 
-    if (!forceNetwork) {
+    try {
+      final fresh = await fast.refreshSeries(
+        widget.playlist.source,
+        forceSessionRefresh: forceNetwork,
+        onProgress: _onCatalogProgress,
+      );
+      _setCatalogCategories(fresh.categories);
+      return _SeriesCatalogData(
+        connection: fresh.connection,
+        series: fresh.series,
+      );
+    } catch (_) {
       final cached = await fast.loadCachedSeries(widget.playlist.source);
       if (cached != null && cached.series.isNotEmpty) {
         _setCatalogCategories(cached.categories);
-        unawaited(_refreshSeriesCatalog(generation));
         return _SeriesCatalogData(
           connection: cached.connection,
           series: cached.series,
         );
       }
+      rethrow;
     }
-
-    final fresh = await fast.refreshSeries(
-      widget.playlist.source,
-      forceSessionRefresh: forceNetwork,
-      onProgress: _onCatalogProgress,
-    );
-    _setCatalogCategories(fresh.categories);
-    return _SeriesCatalogData(
-      connection: fresh.connection,
-      series: fresh.series,
-    );
   }
 
   void _setCatalogCategories(List<String> categories) {
@@ -187,29 +185,6 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     _lastProgressUpdate = now;
     _lastProgressBytes = progress.receivedBytes;
     setState(() => _progressLabel = progress.label);
-  }
-
-  Future<void> _refreshSeriesCatalog(int generation) async {
-    try {
-      final fresh = await XtreamFastCatalogService.instance.refreshSeries(
-        widget.playlist.source,
-      );
-      if (!mounted || generation != _loadGeneration) return;
-      setState(() {
-        _catalogCategories = List<String>.unmodifiable(fresh.categories);
-        if (_category != null && !_catalogCategories.contains(_category)) {
-          _category = null;
-        }
-        _future = Future<_SeriesCatalogData>.value(
-          _SeriesCatalogData(
-            connection: fresh.connection,
-            series: fresh.series,
-          ),
-        );
-      });
-    } catch (_) {
-      // Conservamos la copia local cuando el proveedor no responde.
-    }
   }
 
   void _retry() {
@@ -240,8 +215,9 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
           if (_parental.enabled)
             ParentalLockButton(
               unlocked: _parental.isUnlocked,
-              hiddenCategoryCount:
-                  _parental.hiddenGroupCount(_catalogCategories),
+              hiddenCategoryCount: _parental.hiddenGroupCount(
+                _catalogCategories,
+              ),
               onPressed: () => unawaited(_toggleParentalLock()),
             ),
           const SizedBox(width: 8),
@@ -267,10 +243,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
             final message = rawError.contains('TimeoutException')
                 ? 'El servidor Xtream dejó de enviar datos durante demasiado tiempo. Reintentá la carga de Series.'
                 : rawError.replaceFirst('Exception: ', '');
-            return _SeriesError(
-              message: message,
-              onRetry: _retry,
-            );
+            return _SeriesError(message: message, onRetry: _retry);
           }
           final data = snapshot.data!;
           if (data.series.isEmpty) {
@@ -294,7 +267,8 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     final normalized = _query.trim().toLowerCase();
 
     for (final item in data.series) {
-      if (!_parental.canShowItem(name: item.name, group: item.category)) continue;
+      if (!_parental.canShowItem(name: item.name, group: item.category))
+        continue;
       visibleTotal++;
       final category = item.category?.trim();
       if (category != null && category.isNotEmpty) {
@@ -316,14 +290,14 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         final gridColumns = width >= 1500
             ? 7
             : width >= 1200
-                ? 6
-                : width >= 950
-                    ? 5
-                    : width >= 700
-                        ? 4
-                        : width >= 480
-                            ? 3
-                            : 2;
+            ? 6
+            : width >= 950
+            ? 5
+            : width >= 700
+            ? 4
+            : width >= 480
+            ? 3
+            : 2;
 
         Widget grid() => visible.isEmpty
             ? const Center(child: Text('No hay resultados.'))
@@ -373,8 +347,9 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                   onHorizontalDragUpdate: _sidebarCollapsed
                       ? null
                       : (details) => _resizeSidebar(details.delta.dx),
-                  onHorizontalDragEnd:
-                      _sidebarCollapsed ? null : (_) => _persistSidebar(),
+                  onHorizontalDragEnd: _sidebarCollapsed
+                      ? null
+                      : (_) => _persistSidebar(),
                   child: Container(
                     width: 9,
                     alignment: Alignment.center,
@@ -431,7 +406,10 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                       ...categories.map(
                         (category) => DropdownMenuItem<String?>(
                           value: category,
-                          child: Text(category, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            category,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ),
                     ],
@@ -446,9 +424,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
       },
     );
   }
-
 }
-
 
 class _SeriesCatalogToolbar extends StatelessWidget {
   final String query;
@@ -479,16 +455,16 @@ class _SeriesCatalogToolbar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      ),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '$visibleCount series',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white60,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.white60),
                 ),
               ],
             ),
@@ -501,7 +477,9 @@ class _SeriesCatalogToolbar extends StatelessWidget {
                 hintText: 'Buscar en series…',
                 prefixIcon: const Icon(Icons.search_rounded),
                 filled: true,
-                fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+                fillColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
@@ -554,8 +532,9 @@ class _SeriesCategorySidebar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Column(
-          crossAxisAlignment:
-              collapsed ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+          crossAxisAlignment: collapsed
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -579,15 +558,16 @@ class _SeriesCategorySidebar extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Series',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                     ),
                     IconButton(
                       tooltip: 'Achicar categorías',
                       onPressed: onToggleCollapsed,
-                      icon: const Icon(Icons.keyboard_double_arrow_left_rounded),
+                      icon: const Icon(
+                        Icons.keyboard_double_arrow_left_rounded,
+                      ),
                     ),
                   ],
                 ],
@@ -608,14 +588,15 @@ class _SeriesCategorySidebar extends StatelessWidget {
                       child: Text(
                         'CATEGORÍAS',
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              color: Colors.white54,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.1,
-                            ),
+                          color: Colors.white54,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                        ),
                       ),
                     ),
                     const Tooltip(
-                      message: 'Arrastrá el borde derecho para cambiar el ancho',
+                      message:
+                          'Arrastrá el borde derecho para cambiar el ancho',
                       child: Icon(
                         Icons.drag_indicator_rounded,
                         color: Colors.white30,
@@ -649,10 +630,9 @@ class _SeriesCategorySidebar extends StatelessWidget {
                         message: '$label · $count',
                         child: Material(
                           color: selected
-                              ? Theme.of(context)
-                                  .colorScheme
-                                  .primary
-                                  .withValues(alpha: 0.20)
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.primary.withValues(alpha: 0.20)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(14),
                           child: InkWell(
@@ -687,10 +667,9 @@ class _SeriesCategorySidebar extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        selectedTileColor: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: 0.20),
+                        selectedTileColor: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.20),
                         leading: Icon(
                           category == null
                               ? Icons.grid_view_rounded
@@ -705,8 +684,9 @@ class _SeriesCategorySidebar extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontWeight:
-                                selected ? FontWeight.w800 : FontWeight.w600,
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
                           ),
                         ),
                         trailing: Container(
@@ -736,7 +716,6 @@ class _SeriesCategorySidebar extends StatelessWidget {
     );
   }
 }
-
 
 class XtreamSeriesDetailScreen extends StatefulWidget {
   final XtreamConnectionResult connection;
@@ -778,7 +757,9 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
     if (mounted) setState(() {});
   }
 
-  bool get _blocked => _parental.isLocked && _parental.isProtectedItem(
+  bool get _blocked =>
+      _parental.isLocked &&
+      _parental.isProtectedItem(
         name: widget.summary.name,
         group: widget.summary.category,
       );
@@ -789,11 +770,11 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
   }
 
   void _retry() => setState(() {
-        _future = XtreamSeriesService.fetchDetails(
-          widget.connection,
-          widget.summary,
-        );
-      });
+    _future = XtreamSeriesService.fetchDetails(
+      widget.connection,
+      widget.summary,
+    );
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -811,42 +792,47 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
               onUnlock: () => unawaited(requestParentalUnlock(context)),
             )
           : FutureBuilder<XtreamSeriesDetails>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 14),
-                  Text('Cargando temporadas y episodios…'),
-                ],
-              ),
-            );
-          }
-          if (snapshot.hasError) {
-            return _SeriesError(
-              message: snapshot.error.toString().replaceFirst('Exception: ', ''),
-              onRetry: _retry,
-            );
-          }
-          final details = snapshot.data!;
-          final seasons = details.seasonNumbers;
-          final season = _selectedSeason != null && seasons.contains(_selectedSeason)
-              ? _selectedSeason!
-              : seasons.first;
-          final episodes = details.seasons[season] ?? const <XtreamSeriesEpisode>[];
-          return LayoutBuilder(
-            builder: (context, constraints) {
-              if (constraints.maxWidth >= 980) {
-                return _buildWide(details, season, episodes);
-              }
-              return _buildCompact(details, season, episodes);
-            },
-          );
-        },
-      ),
+              future: _future,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState != ConnectionState.done) {
+                  return const Center(
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        CircularProgressIndicator(),
+                        SizedBox(height: 14),
+                        Text('Cargando temporadas y episodios…'),
+                      ],
+                    ),
+                  );
+                }
+                if (snapshot.hasError) {
+                  return _SeriesError(
+                    message: snapshot.error.toString().replaceFirst(
+                      'Exception: ',
+                      '',
+                    ),
+                    onRetry: _retry,
+                  );
+                }
+                final details = snapshot.data!;
+                final seasons = details.seasonNumbers;
+                final season =
+                    _selectedSeason != null && seasons.contains(_selectedSeason)
+                    ? _selectedSeason!
+                    : seasons.first;
+                final episodes =
+                    details.seasons[season] ?? const <XtreamSeriesEpisode>[];
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    if (constraints.maxWidth >= 980) {
+                      return _buildWide(details, season, episodes);
+                    }
+                    return _buildCompact(details, season, episodes);
+                  },
+                );
+              },
+            ),
     );
   }
 
@@ -864,10 +850,7 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
             width: 285,
             child: Column(
               children: [
-                Expanded(
-                  flex: 5,
-                  child: _Poster(series: details.series),
-                ),
+                Expanded(flex: 5, child: _Poster(series: details.series)),
                 const SizedBox(height: 12),
                 Expanded(
                   flex: 4,
@@ -922,8 +905,9 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
           details: details,
           season: season,
           episodes: episodes,
-          onPlayFirst:
-              episodes.isEmpty ? null : () => _play(details, season, episodes.first),
+          onPlayFirst: episodes.isEmpty
+              ? null
+              : () => _play(details, season, episodes.first),
         ),
         const SizedBox(height: 14),
         _SeasonList(
@@ -1047,6 +1031,7 @@ class _SeriesPosterCard extends StatelessWidget {
               child: CachedArtworkImage(
                 url: series.cover,
                 fit: BoxFit.cover,
+                cacheWidth: 420,
                 fallback: const ColoredBox(
                   color: Color(0xFF111C2C),
                   child: Center(
@@ -1116,50 +1101,58 @@ class _SeasonList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final children = details.seasonNumbers.map((season) {
-      final count = details.seasons[season]?.length ?? 0;
-      final selected = season == selectedSeason;
-      return Padding(
-        padding: EdgeInsets.only(
-          right: compact ? 8 : 0,
-          bottom: compact ? 0 : 8,
-        ),
-        child: Material(
-          color: selected
-              ? Theme.of(context).colorScheme.primary
-              : Theme.of(context).colorScheme.surfaceContainerHigh,
-          borderRadius: BorderRadius.circular(12),
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => onSelected(season),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    'Temporada $season',
-                    style: TextStyle(
-                      fontWeight: FontWeight.w900,
-                      color: selected ? Colors.white : null,
-                    ),
+    final children = details.seasonNumbers
+        .map((season) {
+          final count = details.seasons[season]?.length ?? 0;
+          final selected = season == selectedSeason;
+          return Padding(
+            padding: EdgeInsets.only(
+              right: compact ? 8 : 0,
+              bottom: compact ? 0 : 8,
+            ),
+            child: Material(
+              color: selected
+                  ? Theme.of(context).colorScheme.primary
+                  : Theme.of(context).colorScheme.surfaceContainerHigh,
+              borderRadius: BorderRadius.circular(12),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onSelected(season),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 14,
+                    vertical: 12,
                   ),
-                  const SizedBox(width: 10),
-                  Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.35),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Text('$count Eps'),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Temporada $season',
+                        style: TextStyle(
+                          fontWeight: FontWeight.w900,
+                          color: selected ? Colors.white : null,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text('$count Eps'),
+                      ),
+                    ],
                   ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-      );
-    }).toList(growable: false);
+          );
+        })
+        .toList(growable: false);
 
     if (compact) {
       return SizedBox(
@@ -1197,9 +1190,9 @@ class _EpisodePanel extends StatelessWidget {
               '${series.name} · Temporada $season',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
             ),
           ),
           const Divider(height: 1),
@@ -1210,7 +1203,9 @@ class _EpisodePanel extends StatelessWidget {
               separatorBuilder: (_, __) => const SizedBox(height: 7),
               itemBuilder: (context, index) {
                 final episode = episodes[index];
-                final episodeNumber = episode.number > 0 ? episode.number : index + 1;
+                final episodeNumber = episode.number > 0
+                    ? episode.number
+                    : index + 1;
                 return Material(
                   color: Theme.of(context).colorScheme.surfaceContainerHigh,
                   borderRadius: BorderRadius.circular(12),
@@ -1272,7 +1267,9 @@ class _SeriesInfoPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final series = details.series;
-    final backdrop = series.backdrops.isNotEmpty ? series.backdrops.first : series.cover;
+    final backdrop = series.backdrops.isNotEmpty
+        ? series.backdrops.first
+        : series.cover;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: SingleChildScrollView(
@@ -1290,7 +1287,10 @@ class _SeriesInfoPanel extends StatelessWidget {
                     fallback: const ColoredBox(
                       color: Colors.black,
                       child: Center(
-                        child: Icon(Icons.play_circle_outline_rounded, size: 82),
+                        child: Icon(
+                          Icons.play_circle_outline_rounded,
+                          size: 82,
+                        ),
                       ),
                     ),
                   ),
@@ -1322,8 +1322,8 @@ class _SeriesInfoPanel extends StatelessWidget {
                   Text(
                     series.name,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                          fontWeight: FontWeight.w900,
-                        ),
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
                   const SizedBox(height: 12),
                   _InfoLine(label: 'Estreno', value: series.releaseDate),

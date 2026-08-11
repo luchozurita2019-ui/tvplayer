@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
+import '../services/artwork_cache_service.dart';
 import '../services/content_classifier.dart';
 import 'channel_list_screen.dart';
 import 'xtream_live_screen.dart';
@@ -65,8 +66,8 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
           final columns = constraints.maxWidth >= 1250
               ? 4
               : constraints.maxWidth >= 760
-                  ? 2
-                  : 1;
+              ? 2
+              : 1;
 
           return ListView(
             padding: EdgeInsets.symmetric(
@@ -77,15 +78,15 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
               Text(
                 '¿Qué querés ver?',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
+                  fontWeight: FontWeight.w900,
+                ),
               ),
               const SizedBox(height: 6),
               Text(
                 'Contenido organizado automáticamente por TV FULL.',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.white70,
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodyLarge?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 28),
               GridView.count(
@@ -100,8 +101,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.live_tv_rounded,
                     title: 'TV en vivo',
                     count: _buckets.count(IptvContentKind.live),
-                    subtitleOverride:
-                        nativeXtream ? 'TV Xtream nativa rápida' : null,
+                    subtitleOverride: nativeXtream
+                        ? 'TV Xtream nativa rápida'
+                        : null,
                     enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF1677FF),
                     onTap: () => _openKind(context, IptvContentKind.live),
@@ -110,8 +112,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.movie_creation_rounded,
                     title: 'Películas',
                     count: _buckets.count(IptvContentKind.movies),
-                    subtitleOverride:
-                        nativeXtream ? 'Catálogo Xtream con fichas' : null,
+                    subtitleOverride: nativeXtream
+                        ? 'Catálogo Xtream con fichas'
+                        : null,
                     enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF4C9DFF),
                     onTap: () => _openKind(context, IptvContentKind.movies),
@@ -120,8 +123,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.video_library_rounded,
                     title: 'Series',
                     count: _buckets.count(IptvContentKind.series),
-                    subtitleOverride:
-                        nativeXtream ? 'Catálogo Xtream nativo' : null,
+                    subtitleOverride: nativeXtream
+                        ? 'Catálogo Xtream nativo'
+                        : null,
                     enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF2D6DFF),
                     onTap: () => _openKind(context, IptvContentKind.series),
@@ -163,6 +167,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   }
 
   void _openKind(BuildContext context, IptvContentKind kind) {
+    ArtworkCacheService.instance.clearBrowsingSession();
     if (playlist.sourceType == PlaylistSourceType.xtream) {
       if (kind == IptvContentKind.live) {
         Navigator.of(context).push(
@@ -193,7 +198,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
     final channels = _buckets.forKind(kind);
     if (channels.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('No hay ${kind.label.toLowerCase()} en esta lista.')),
+        SnackBar(
+          content: Text('No hay ${kind.label.toLowerCase()} en esta lista.'),
+        ),
       );
       return;
     }
@@ -209,9 +216,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
     );
 
     Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => ChannelListScreen(playlist: filtered),
-      ),
+      MaterialPageRoute(builder: (_) => ChannelListScreen(playlist: filtered)),
     );
   }
 }
@@ -270,17 +275,17 @@ class _ContentCard extends StatelessWidget {
                 title,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: enabled ? Colors.white : Colors.white38,
-                      fontWeight: FontWeight.w900,
-                    ),
+                  color: enabled ? Colors.white : Colors.white38,
+                  fontWeight: FontWeight.w900,
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 subtitle,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: enabled ? Colors.white70 : Colors.white30,
-                    ),
+                  color: enabled ? Colors.white70 : Colors.white30,
+                ),
               ),
             ],
           ),

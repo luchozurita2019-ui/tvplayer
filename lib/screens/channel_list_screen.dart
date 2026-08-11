@@ -17,25 +17,25 @@ enum _CatalogMode { live, movies, series, radios }
 
 extension on _CatalogMode {
   String get title => switch (this) {
-        _CatalogMode.live => 'TV en vivo',
-        _CatalogMode.movies => 'Películas',
-        _CatalogMode.series => 'Series',
-        _CatalogMode.radios => 'Radios',
-      };
+    _CatalogMode.live => 'TV en vivo',
+    _CatalogMode.movies => 'Películas',
+    _CatalogMode.series => 'Series',
+    _CatalogMode.radios => 'Radios',
+  };
 
   String get itemLabel => switch (this) {
-        _CatalogMode.live => 'canales',
-        _CatalogMode.movies => 'películas',
-        _CatalogMode.series => 'series',
-        _CatalogMode.radios => 'radios',
-      };
+    _CatalogMode.live => 'canales',
+    _CatalogMode.movies => 'películas',
+    _CatalogMode.series => 'series',
+    _CatalogMode.radios => 'radios',
+  };
 
   IconData get icon => switch (this) {
-        _CatalogMode.live => Icons.live_tv_rounded,
-        _CatalogMode.movies => Icons.movie_creation_rounded,
-        _CatalogMode.series => Icons.video_library_rounded,
-        _CatalogMode.radios => Icons.radio_rounded,
-      };
+    _CatalogMode.live => Icons.live_tv_rounded,
+    _CatalogMode.movies => Icons.movie_creation_rounded,
+    _CatalogMode.series => Icons.video_library_rounded,
+    _CatalogMode.radios => Icons.radio_rounded,
+  };
 
   bool get usesPoster =>
       this == _CatalogMode.movies || this == _CatalogMode.series;
@@ -55,7 +55,6 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   String _query = '';
   late List<String> _groups;
   late Map<String, int> _groupCounts;
-  bool _initialArtworkReady = false;
 
   final ParentalControlService _parental = ParentalControlService.instance;
   double _sidebarWidth = 320;
@@ -80,7 +79,6 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     _parental.addListener(_onParentalChanged);
     _rebuildCategoryCache(widget.playlist);
     unawaited(_initializeCatalogPreferences());
-    unawaited(_prepareInitialArtwork());
   }
 
   @override
@@ -95,7 +93,9 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     if (!mounted) return;
     final width = prefs.getDouble(_sidebarWidthKey) ?? 320;
     setState(() {
-      _sidebarWidth = width.clamp(_sidebarMinWidth, _sidebarMaxWidth).toDouble();
+      _sidebarWidth = width
+          .clamp(_sidebarMinWidth, _sidebarMaxWidth)
+          .toDouble();
       _sidebarCollapsed = prefs.getBool(_sidebarCollapsedKey) ?? false;
     });
   }
@@ -154,20 +154,11 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     _groupCounts = Map.unmodifiable(counts);
   }
 
-  Future<void> _prepareInitialArtwork() async {
-    final limit = _mode.usesPoster ? 12 : 24;
-    await ArtworkCacheService.instance.warmSection(
-      widget.playlist.channels,
-      limit: limit,
-    );
-    if (!mounted) return;
-    setState(() => _initialArtworkReady = true);
-  }
-
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
-    final playlist = provider.playlistById(widget.playlist.id) ?? widget.playlist;
+    final playlist =
+        provider.playlistById(widget.playlist.id) ?? widget.playlist;
     final channels = _filteredChannels(playlist);
     final mode = _mode;
     final visibleGroups = _parental.visibleGroups(_groups);
@@ -184,10 +175,9 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary
-                    .withValues(alpha: 0.14),
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -231,26 +221,15 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               tooltip: 'Actualizar lista',
               onPressed: provider.loading
                   ? null
-                  : () => context
-                      .read<IptvProvider>()
-                      .refreshPlaylist(playlist.id),
+                  : () => context.read<IptvProvider>().refreshPlaylist(
+                      playlist.id,
+                    ),
             ),
           const SizedBox(width: 8),
         ],
       ),
-      body: !_initialArtworkReady
-          ? const Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  CircularProgressIndicator(),
-                  SizedBox(height: 14),
-                  Text('Preparando logos y portadas…'),
-                ],
-              ),
-            )
-          : LayoutBuilder(
-              builder: (context, constraints) {
+      body: LayoutBuilder(
+        builder: (context, constraints) {
           if (constraints.maxWidth >= 900) {
             return _DesktopCatalogLayout(
               mode: mode,
@@ -270,12 +249,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               onSidebarToggle: _toggleSidebar,
               onGroupSelected: (group) => unawaited(_selectGroup(group)),
               onQueryChanged: (value) => setState(() => _query = value),
-              onPlay: (channel) => _openChannel(
-                context,
-                channels,
-                channel,
-                provider,
-              ),
+              onPlay: (channel) =>
+                  _openChannel(context, channels, channel, provider),
               onFavoriteToggle: provider.toggleFavorite,
               isFavorite: provider.isFavorite,
             );
@@ -289,12 +264,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
             query: _query,
             onGroupSelected: (group) => unawaited(_selectGroup(group)),
             onQueryChanged: (value) => setState(() => _query = value),
-            onPlay: (channel) => _openChannel(
-              context,
-              channels,
-              channel,
-              provider,
-            ),
+            onPlay: (channel) =>
+                _openChannel(context, channels, channel, provider),
             onFavoriteToggle: provider.toggleFavorite,
             isFavorite: provider.isFavorite,
           );
@@ -345,7 +316,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
             child: const Text('Desbloquear'),
           ),
         ],
@@ -370,17 +342,20 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
       return playlist.channels;
     }
 
-    return playlist.channels.where((channel) {
-      if (!_parental.canShowChannel(channel)) return false;
-      if (_selectedGroup != null && channel.group?.trim() != _selectedGroup) {
-        return false;
-      }
-      if (normalized.isEmpty) return true;
+    return playlist.channels
+        .where((channel) {
+          if (!_parental.canShowChannel(channel)) return false;
+          if (_selectedGroup != null &&
+              channel.group?.trim() != _selectedGroup) {
+            return false;
+          }
+          if (normalized.isEmpty) return true;
 
-      final name = channel.name.toLowerCase();
-      final group = channel.group?.toLowerCase() ?? '';
-      return name.contains(normalized) || group.contains(normalized);
-    }).toList(growable: false);
+          final name = channel.name.toLowerCase();
+          final group = channel.group?.toLowerCase() ?? '';
+          return name.contains(normalized) || group.contains(normalized);
+        })
+        .toList(growable: false);
   }
 
   Future<void> _openChannel(
@@ -482,8 +457,9 @@ class _DesktopCatalogLayout extends StatelessWidget {
             onHorizontalDragUpdate: sidebarCollapsed
                 ? null
                 : (details) => onSidebarResize(details.delta.dx),
-            onHorizontalDragEnd:
-                sidebarCollapsed ? null : (_) => onSidebarResizeEnd(),
+            onHorizontalDragEnd: sidebarCollapsed
+                ? null
+                : (_) => onSidebarResizeEnd(),
             child: Container(
               width: 9,
               alignment: Alignment.center,
@@ -550,16 +526,16 @@ class _CatalogToolbar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      ),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '$visibleCount ${mode.itemLabel}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white60,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.white60),
                 ),
               ],
             ),
@@ -572,8 +548,9 @@ class _CatalogToolbar extends StatelessWidget {
                 hintText: 'Buscar en ${mode.title.toLowerCase()}…',
                 prefixIcon: const Icon(Icons.search_rounded),
                 filled: true,
-                fillColor:
-                    Theme.of(context).colorScheme.surfaceContainerHighest,
+                fillColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
@@ -632,8 +609,9 @@ class _CategorySidebar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Column(
-          crossAxisAlignment:
-              collapsed ? CrossAxisAlignment.center : CrossAxisAlignment.start,
+          crossAxisAlignment: collapsed
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -659,9 +637,8 @@ class _CategorySidebar extends StatelessWidget {
                         mode.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w900,
-                            ),
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                     ),
                   ],
@@ -669,7 +646,9 @@ class _CategorySidebar extends StatelessWidget {
                     IconButton(
                       tooltip: 'Achicar categorías',
                       onPressed: onToggleCollapsed,
-                      icon: const Icon(Icons.keyboard_double_arrow_left_rounded),
+                      icon: const Icon(
+                        Icons.keyboard_double_arrow_left_rounded,
+                      ),
                     ),
                 ],
               ),
@@ -689,14 +668,15 @@ class _CategorySidebar extends StatelessWidget {
                       child: Text(
                         'CATEGORÍAS',
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                              color: Colors.white54,
-                              fontWeight: FontWeight.w800,
-                              letterSpacing: 1.1,
-                            ),
+                          color: Colors.white54,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                        ),
                       ),
                     ),
                     const Tooltip(
-                      message: 'Arrastrá el borde derecho para cambiar el ancho',
+                      message:
+                          'Arrastrá el borde derecho para cambiar el ancho',
                       child: Icon(
                         Icons.drag_indicator_rounded,
                         color: Colors.white30,
@@ -708,26 +688,37 @@ class _CategorySidebar extends StatelessWidget {
               ),
             Expanded(
               child: ListView.builder(
-                padding: EdgeInsets.fromLTRB(collapsed ? 8 : 10, 0, collapsed ? 8 : 10, 20),
+                padding: EdgeInsets.fromLTRB(
+                  collapsed ? 8 : 10,
+                  0,
+                  collapsed ? 8 : 10,
+                  20,
+                ),
                 itemCount: groups.length + 1,
                 itemBuilder: (context, index) {
                   final group = index == 0 ? null : groups[index - 1];
                   final label = group ?? 'Todos';
                   final selected = group == selectedGroup;
-                  final count = group == null ? totalCount : (groupCounts[group] ?? 0);
-                  final locked = group != null && parentalLocked && isProtectedGroup(group);
+                  final count = group == null
+                      ? totalCount
+                      : (groupCounts[group] ?? 0);
+                  final locked =
+                      group != null &&
+                      parentalLocked &&
+                      isProtectedGroup(group);
 
                   if (collapsed) {
                     return Padding(
                       padding: const EdgeInsets.symmetric(vertical: 3),
                       child: Tooltip(
-                        message: locked ? '$label · Bloqueada con PIN' : '$label · $count',
+                        message: locked
+                            ? '$label · Bloqueada con PIN'
+                            : '$label · $count',
                         child: Material(
                           color: selected
-                              ? Theme.of(context)
-                                  .colorScheme
-                                  .primary
-                                  .withValues(alpha: 0.20)
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.primary.withValues(alpha: 0.20)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(14),
                           child: InkWell(
@@ -777,10 +768,9 @@ class _CategorySidebar extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        selectedTileColor: Theme.of(context)
-                            .colorScheme
-                            .primary
-                            .withValues(alpha: 0.20),
+                        selectedTileColor: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.20),
                         leading: Icon(
                           group == null
                               ? Icons.grid_view_rounded
@@ -795,8 +785,9 @@ class _CategorySidebar extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontWeight:
-                                selected ? FontWeight.w800 : FontWeight.w600,
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
                           ),
                         ),
                         trailing: Row(
@@ -878,19 +869,19 @@ class _CatalogGrid extends StatelessWidget {
         final width = constraints.maxWidth;
         final columns = mode.usesPoster
             ? (width >= 1500
-                ? 7
-                : width >= 1250
-                    ? 6
-                    : width >= 1000
-                        ? 5
-                        : 4)
+                  ? 7
+                  : width >= 1250
+                  ? 6
+                  : width >= 1000
+                  ? 5
+                  : 4)
             : (width >= 1500
-                ? 6
-                : width >= 1250
-                    ? 5
-                    : width >= 1000
-                        ? 4
-                        : 3);
+                  ? 6
+                  : width >= 1250
+                  ? 5
+                  : width >= 1000
+                  ? 4
+                  : 3);
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(28, 8, 28, 34),
@@ -991,9 +982,9 @@ class _CompactCatalogLayout extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
           child: Text(
             selectedGroup ?? mode.title.toUpperCase(),
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
           ),
         ),
         Expanded(
@@ -1124,11 +1115,7 @@ class _LiveCardBody extends StatelessWidget {
               color: const Color(0xFF071526),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: _Artwork(
-              channel: channel,
-              mode: mode,
-              fit: BoxFit.contain,
-            ),
+            child: _Artwork(channel: channel, mode: mode, fit: BoxFit.contain),
           ),
         ),
         Padding(
@@ -1198,21 +1185,13 @@ class _PosterCardBody extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        _Artwork(
-          channel: channel,
-          mode: mode,
-          fit: BoxFit.cover,
-        ),
+        _Artwork(channel: channel, mode: mode, fit: BoxFit.cover),
         const DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [
-                Color(0x12000000),
-                Color(0x30000000),
-                Color(0xE9000000),
-              ],
+              colors: [Color(0x12000000), Color(0x30000000), Color(0xE9000000)],
               stops: [0, 0.55, 1],
             ),
           ),
@@ -1254,16 +1233,14 @@ class _PosterCardBody extends StatelessWidget {
                   height: 1.1,
                 ),
               ),
-              if (channel.group != null && channel.group!.trim().isNotEmpty) ...[
+              if (channel.group != null &&
+                  channel.group!.trim().isNotEmpty) ...[
                 const SizedBox(height: 5),
                 Text(
                   channel.group!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
                 ),
               ],
             ],
