@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../services/content_classifier.dart';
@@ -61,13 +62,13 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     }
   }
 
-  Playlist _playlistFromChannels(List channels) {
+  Playlist _playlistFromChannels(List<Channel> channels) {
     return Playlist(
       id: '${widget.playlist.id}::live',
       name: '${widget.playlist.name} · TV en vivo',
       source: widget.playlist.source,
       isRemote: false,
-      channels: List.unmodifiable(channels),
+      channels: List<Channel>.unmodifiable(channels),
       lastUpdated: DateTime.now(),
       sourceType: PlaylistSourceType.xtream,
     );
@@ -109,8 +110,14 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               title: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text('TV en vivo', style: TextStyle(fontWeight: FontWeight.w900)),
-                  Text(widget.playlist.name, style: Theme.of(context).textTheme.bodySmall),
+                  const Text(
+                    'TV en vivo',
+                    style: TextStyle(fontWeight: FontWeight.w900),
+                  ),
+                  Text(
+                    widget.playlist.name,
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
                 ],
               ),
             ),
