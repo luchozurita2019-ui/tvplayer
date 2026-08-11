@@ -1,0 +1,337 @@
+name: Apply parental autohide patch
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - .github/workflows/parental-autohide-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout branch
+        uses: actions/checkout@v4
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+          fetch-depth: 0
+
+      - name: Apply automatic parental hiding and lock counters
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          def replace_once(path, old, new):
+              file = Path(path)
+              text = file.read_text()
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f'{path}: expected one match, found {count}')
+              file.write_text(text.replace(old, new, 1))
+
+          service = 'lib/services/parental_control_service.dart'
+          replace_once(
+              service,
+              """  List<String> visibleGroups(Iterable<String> groups) {
+    if (!_enabled || isUnlocked || !_hideAdult) {
+      return groups.toList(growable: false);
+    }
+    return groups
+        .where((group) => !isProtectedGroup(group))
+        .toList(growable: false);
+  }
+""",
+              """  List<String> visibleGroups(Iterable<String> groups) {
+    final all = groups.toList(growable: false);
+    if (!_enabled || isUnlocked) return all;
+    return all
+        .where((group) => !isProtectedGroup(group))
+        .toList(growable: false);
+  }
+
+  int hiddenGroupCount(Iterable<String> groups) {
+    if (!_enabled || isUnlocked) return 0;
+    var hidden = 0;
+    for (final group in groups) {
+      if (isProtectedGroup(group)) hidden++;
+    }
+    return hidden;
+  }
+""",
+          )
+
+          settings = 'lib/screens/parental_control_screen.dart'
+          replace_once(
+              settings,
+              """          SwitchListTile(
+            secondary: const Icon(Icons.visibility_off_rounded),
+            title: const Text('Ocultar categorías adultas'),
+            subtitle: const Text(
+              'Cuando está bloqueado, las categorías adultas desaparecen por completo de la lista.',
+            ),
+            value: _parental.hideAdult,
+            onChanged: _parental.enabled
+                ? (value) => unawaited(_parental.setHideAdult(value))
+                : null,
+          ),
+""",
+              """          ListTile(
+            leading: const Icon(Icons.visibility_off_rounded),
+            title: const Text('Ocultamiento automático'),
+            subtitle: const Text(
+              'Con el candado cerrado, TV FULL oculta automáticamente las categorías protegidas. Al desbloquear, vuelven a aparecer.',
+            ),
+            trailing: const Icon(Icons.check_circle_rounded),
+            enabled: _parental.enabled,
+          ),
+""",
+          )
+
+          widget = Path('lib/widgets/parental_lock_button.dart')
+          widget.write_text("""import 'package:flutter/material.dart';
+
+class ParentalLockButton extends StatelessWidget {
+  final bool unlocked;
+  final int hiddenCategoryCount;
+  final VoidCallback onPressed;
+
+  const ParentalLockButton({
+    super.key,
+    required this.unlocked,
+    required this.hiddenCategoryCount,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final hidden = unlocked ? 0 : hiddenCategoryCount;
+    final hiddenLabel = hidden == 1
+        ? '1 categoría oculta'
+        : '$hidden categorías ocultas';
+
+    return IconButton(
+      tooltip: unlocked
+          ? 'Bloquear contenido protegido'
+          : hidden > 0
+              ? 'Desbloquear · $hiddenLabel'
+              : 'Desbloquear contenido protegido',
+      onPressed: onPressed,
+      icon: SizedBox(
+        width: 34,
+        height: 32,
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            Icon(
+              unlocked ? Icons.lock_open_rounded : Icons.lock_rounded,
+            ),
+            if (hidden > 0)
+              Positioned(
+                right: 0,
+                top: 0,
+                child: Container(
+                  constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                  padding: const EdgeInsets.symmetric(horizontal: 4),
+                  alignment: Alignment.center,
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.error,
+                    borderRadius: BorderRadius.circular(999),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.surface,
+                      width: 1.5,
+                    ),
+                  ),
+                  child: Text(
+                    hidden > 99 ? '99+' : '$hidden',
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onError,
+                      fontSize: 9,
+                      fontWeight: FontWeight.w900,
+                      height: 1,
+                    ),
+                  ),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+""")
+
+          channel = 'lib/screens/channel_list_screen.dart'
+          replace_once(
+              channel,
+              "import '../widgets/cached_artwork_image.dart';\n",
+              "import '../widgets/cached_artwork_image.dart';\nimport '../widgets/parental_lock_button.dart';\n",
+          )
+          replace_once(
+              channel,
+              """          if (_parental.enabled)
+            IconButton(
+              icon: Icon(
+                _parental.isUnlocked
+                    ? Icons.lock_open_rounded
+                    : Icons.lock_rounded,
+              ),
+              tooltip: _parental.isUnlocked
+                  ? 'Bloquear contenido protegido'
+                  : 'Desbloquear contenido protegido',
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+""",
+              """          if (_parental.enabled)
+            ParentalLockButton(
+              unlocked: _parental.isUnlocked,
+              hiddenCategoryCount: _parental.hiddenGroupCount(_groups),
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+""",
+          )
+
+          movies = 'lib/screens/xtream_movies_screen.dart'
+          replace_once(
+              movies,
+              "import '../widgets/cached_artwork_image.dart';\nimport '../widgets/parental_unlock_dialog.dart';\n",
+              "import '../widgets/cached_artwork_image.dart';\nimport '../widgets/parental_lock_button.dart';\nimport '../widgets/parental_unlock_dialog.dart';\n",
+          )
+          replace_once(
+              movies,
+              """  bool _sidebarCollapsed = false;
+  final ParentalControlService _parental = ParentalControlService.instance;
+""",
+              """  bool _sidebarCollapsed = false;
+  final ParentalControlService _parental = ParentalControlService.instance;
+  List<String> _catalogCategories = const <String>[];
+""",
+          )
+          replace_once(
+              movies,
+              """    final movies = await XtreamVodService.fetchCatalog(connection);
+    return _MovieCatalogData(connection: connection, movies: movies);
+""",
+              """    final movies = await XtreamVodService.fetchCatalog(connection);
+    final categories = movies
+        .map((item) => item.category)
+        .whereType<String>()
+        .where((value) => value.trim().isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    if (mounted) {
+      setState(() => _catalogCategories = List.unmodifiable(categories));
+    } else {
+      _catalogCategories = List.unmodifiable(categories);
+    }
+    return _MovieCatalogData(connection: connection, movies: movies);
+""",
+          )
+          replace_once(
+              movies,
+              """          if (_parental.enabled)
+            IconButton(
+              icon: Icon(
+                _parental.isUnlocked
+                    ? Icons.lock_open_rounded
+                    : Icons.lock_rounded,
+              ),
+              tooltip: _parental.isUnlocked
+                  ? 'Bloquear contenido protegido'
+                  : 'Desbloquear contenido protegido',
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+""",
+              """          if (_parental.enabled)
+            ParentalLockButton(
+              unlocked: _parental.isUnlocked,
+              hiddenCategoryCount:
+                  _parental.hiddenGroupCount(_catalogCategories),
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+""",
+          )
+
+          series = 'lib/screens/xtream_series_screen.dart'
+          replace_once(
+              series,
+              "import '../widgets/cached_artwork_image.dart';\nimport '../widgets/parental_unlock_dialog.dart';\n",
+              "import '../widgets/cached_artwork_image.dart';\nimport '../widgets/parental_lock_button.dart';\nimport '../widgets/parental_unlock_dialog.dart';\n",
+          )
+          replace_once(
+              series,
+              """  bool _sidebarCollapsed = false;
+  final ParentalControlService _parental = ParentalControlService.instance;
+""",
+              """  bool _sidebarCollapsed = false;
+  final ParentalControlService _parental = ParentalControlService.instance;
+  List<String> _catalogCategories = const <String>[];
+""",
+          )
+          replace_once(
+              series,
+              """    final series = await XtreamSeriesService.fetchCatalog(connection);
+    return _SeriesCatalogData(connection: connection, series: series);
+""",
+              """    final series = await XtreamSeriesService.fetchCatalog(connection);
+    final categories = series
+        .map((item) => item.category)
+        .whereType<String>()
+        .where((value) => value.trim().isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    if (mounted) {
+      setState(() => _catalogCategories = List.unmodifiable(categories));
+    } else {
+      _catalogCategories = List.unmodifiable(categories);
+    }
+    return _SeriesCatalogData(connection: connection, series: series);
+""",
+          )
+          replace_once(
+              series,
+              """          if (_parental.enabled)
+            IconButton(
+              icon: Icon(
+                _parental.isUnlocked
+                    ? Icons.lock_open_rounded
+                    : Icons.lock_rounded,
+              ),
+              tooltip: _parental.isUnlocked
+                  ? 'Bloquear contenido protegido'
+                  : 'Desbloquear contenido protegido',
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+""",
+              """          if (_parental.enabled)
+            ParentalLockButton(
+              unlocked: _parental.isUnlocked,
+              hiddenCategoryCount:
+                  _parental.hiddenGroupCount(_catalogCategories),
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+""",
+          )
+          PY
+
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/services/parental_control_service.dart \
+                  lib/screens/parental_control_screen.dart \
+                  lib/screens/channel_list_screen.dart \
+                  lib/screens/xtream_movies_screen.dart \
+                  lib/screens/xtream_series_screen.dart \
+                  lib/widgets/parental_lock_button.dart
+          git diff --cached --check
+          git diff --cached --quiet && exit 0
+          git commit -m "Make parental category hiding automatic"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
