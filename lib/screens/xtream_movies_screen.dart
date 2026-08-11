@@ -134,8 +134,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   Future<void> _openMovie(
     XtreamConnectionResult connection,
-    XtreamVodSummary movie,
-  ) async {
+    XtreamVodSummary movie, {
+    required bool artworkAvailable,
+  }) async {
     if (_parental.isLocked &&
         _parental.isProtectedItem(name: movie.name, group: movie.category)) {
       final unlocked = await requestParentalUnlock(context);
@@ -149,7 +150,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         timeout: const Duration(seconds: 12),
       );
       if (!mounted) return;
-      if (!details.hasPresentationMedia) {
+      // No abrimos una ficha vacía por una URL de imagen rota. La ficha se
+      // conserva sólo si la tarjeta cargó una carátula real o existe tráiler.
+      if (!artworkAvailable && details.trailerChannel() == null) {
         await _playMovieDirect(connection, movie, details: details);
         return;
       }
@@ -226,8 +229,12 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
             );
           }
           if (snapshot.hasError) {
+            final rawError = snapshot.error.toString();
+            final message = rawError.contains('TimeoutException')
+                ? 'El servidor Xtream dejó de enviar datos durante demasiado tiempo. Reintentá la carga de Películas.'
+                : rawError.replaceFirst('Exception: ', '');
             return _MovieError(
-              message: snapshot.error.toString().replaceFirst('Exception: ', ''),
+              message: message,
               onRetry: _retry,
             );
           }
@@ -307,8 +314,13 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                   final movie = visible[index];
                   return _MoviePosterCard(
                     movie: movie,
-                    onTap: () =>
-                        unawaited(_openMovie(data.connection, movie)),
+                    onTap: (artworkAvailable) => unawaited(
+                      _openMovie(
+                        data.connection,
+                        movie,
+                        artworkAvailable: artworkAvailable,
+                      ),
+                    ),
                   );
                 },
               );
@@ -637,18 +649,26 @@ class _MovieCatalogData {
   const _MovieCatalogData({required this.connection, required this.movies});
 }
 
-class _MoviePosterCard extends StatelessWidget {
+class _MoviePosterCard extends StatefulWidget {
   final XtreamVodSummary movie;
-  final VoidCallback onTap;
+  final ValueChanged<bool> onTap;
 
   const _MoviePosterCard({required this.movie, required this.onTap});
 
   @override
+  State<_MoviePosterCard> createState() => _MoviePosterCardState();
+}
+
+class _MoviePosterCardState extends State<_MoviePosterCard> {
+  bool _artworkAvailable = false;
+
+  @override
   Widget build(BuildContext context) {
+    final movie = widget.movie;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
-        onTap: onTap,
+        onTap: () => widget.onTap(_artworkAvailable),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -659,6 +679,9 @@ class _MoviePosterCard extends StatelessWidget {
                   CachedArtworkImage(
                     url: movie.cover,
                     fit: BoxFit.cover,
+                    onAvailabilityChanged: (available) {
+                      _artworkAvailable = available;
+                    },
                     fallback: const ColoredBox(
                       color: Color(0xFF111C2C),
                       child: Center(child: Icon(Icons.movie_rounded, size: 46)),

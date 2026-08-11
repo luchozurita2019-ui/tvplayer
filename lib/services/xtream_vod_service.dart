@@ -248,11 +248,20 @@ class XtreamVodService {
       'password': connection.password,
       'action': action,
     });
-    final response = await _client.get(uri, headers: _headers).timeout(timeout);
+    final request = http.Request('GET', uri)..headers.addAll(_headers);
+    final response = await _client.send(request).timeout(timeout);
     if (response.statusCode != 200) {
       throw Exception('Xtream $action respondió HTTP ${response.statusCode}.');
     }
-    final decoded = jsonDecode(response.body);
+
+    // El timeout se reinicia cada vez que llega un fragmento del cuerpo.
+    // Así un catálogo grande puede tardar más que [timeout] en total siempre
+    // que el servidor continúe enviando datos. Sólo falla si queda inactivo.
+    final body = await response.stream
+        .transform(utf8.decoder)
+        .timeout(timeout)
+        .join();
+    final decoded = jsonDecode(body);
     return decoded is List ? decoded : const <dynamic>[];
   }
 

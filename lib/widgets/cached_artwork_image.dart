@@ -11,6 +11,7 @@ class CachedArtworkImage extends StatefulWidget {
   final bool allowNetwork;
   final int? cacheWidth;
   final int? cacheHeight;
+  final ValueChanged<bool>? onAvailabilityChanged;
 
   const CachedArtworkImage({
     super.key,
@@ -20,6 +21,7 @@ class CachedArtworkImage extends StatefulWidget {
     this.allowNetwork = true,
     this.cacheWidth,
     this.cacheHeight,
+    this.onAvailabilityChanged,
   });
 
   @override
@@ -45,10 +47,17 @@ class _CachedArtworkImageState extends State<CachedArtworkImage> {
   }
 
   void _reload() {
-    _future = ArtworkCacheService.instance.resolve(
+    final future = ArtworkCacheService.instance.resolve(
       widget.url,
       allowNetwork: widget.allowNetwork,
     );
+    _future = future;
+    final callback = widget.onAvailabilityChanged;
+    if (callback != null) {
+      future.then((file) {
+        if (mounted) callback(file != null);
+      });
+    }
   }
 
   @override
