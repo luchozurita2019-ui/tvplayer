@@ -1,8 +1,10 @@
 import 'package:flutter/material.dart';
 
 import '../models/playlist.dart';
+import '../models/playlist_source_type.dart';
 import '../services/content_classifier.dart';
 import 'channel_list_screen.dart';
+import 'xtream_series_screen.dart';
 
 class SourceContentScreen extends StatefulWidget {
   final Playlist playlist;
@@ -35,6 +37,8 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final nativeXtreamSeries = playlist.sourceType == PlaylistSourceType.xtream;
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -108,6 +112,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.video_library_rounded,
                     title: 'Series',
                     count: _buckets.count(IptvContentKind.series),
+                    subtitleOverride:
+                        nativeXtreamSeries ? 'Catálogo Xtream nativo' : null,
+                    enabledOverride: nativeXtreamSeries ? true : null,
                     accent: const Color(0xFF2D6DFF),
                     onTap: () => _openKind(context, IptvContentKind.series),
                   ),
@@ -130,7 +137,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          'TV FULL mantiene en TV en vivo los canales lineales aunque su categoría se llame Películas, Cine o Series. Sólo separa VOD/Series cuando la estructura del stream lo identifica como tal.',
+                          nativeXtreamSeries
+                              ? 'En fuentes Xtream, TV FULL carga Series directamente desde get_series/get_series_info y organiza temporadas y episodios. La M3U queda como respaldo para otros contenidos.'
+                              : 'TV FULL mantiene en TV en vivo los canales lineales aunque su categoría se llame Películas, Cine o Series. Sólo separa VOD/Series cuando la estructura del stream lo identifica como tal.',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
                       ),
@@ -146,6 +155,16 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   }
 
   void _openKind(BuildContext context, IptvContentKind kind) {
+    if (kind == IptvContentKind.series &&
+        playlist.sourceType == PlaylistSourceType.xtream) {
+      Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => XtreamSeriesScreen(playlist: playlist),
+        ),
+      );
+      return;
+    }
+
     final channels = _buckets.forKind(kind);
     if (channels.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -176,6 +195,8 @@ class _ContentCard extends StatelessWidget {
   final IconData icon;
   final String title;
   final int count;
+  final String? subtitleOverride;
+  final bool? enabledOverride;
   final Color accent;
   final VoidCallback onTap;
 
@@ -183,13 +204,17 @@ class _ContentCard extends StatelessWidget {
     required this.icon,
     required this.title,
     required this.count,
+    this.subtitleOverride,
+    this.enabledOverride,
     required this.accent,
     required this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    final enabled = count > 0;
+    final enabled = enabledOverride ?? count > 0;
+    final subtitle =
+        subtitleOverride ?? (count == 1 ? '1 elemento' : '$count elementos');
 
     return Card(
       clipBehavior: Clip.antiAlias,
@@ -226,7 +251,8 @@ class _ContentCard extends StatelessWidget {
               ),
               const SizedBox(height: 8),
               Text(
-                count == 1 ? '1 elemento' : '$count elementos',
+                subtitle,
+                textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.bodyMedium?.copyWith(
                       color: enabled ? Colors.white70 : Colors.white30,
                     ),
