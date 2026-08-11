@@ -10,6 +10,7 @@ import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/parental_control_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/parental_lock_button.dart';
 import 'player_screen.dart';
 
 enum _CatalogMode { live, movies, series, radios }
@@ -219,15 +220,9 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
         ),
         actions: [
           if (_parental.enabled)
-            IconButton(
-              icon: Icon(
-                _parental.isUnlocked
-                    ? Icons.lock_open_rounded
-                    : Icons.lock_rounded,
-              ),
-              tooltip: _parental.isUnlocked
-                  ? 'Bloquear contenido protegido'
-                  : 'Desbloquear contenido protegido',
+            ParentalLockButton(
+              unlocked: _parental.isUnlocked,
+              hiddenCategoryCount: _parental.hiddenGroupCount(_groups),
               onPressed: () => unawaited(_toggleParentalLock()),
             ),
           if (playlist.isRemote)

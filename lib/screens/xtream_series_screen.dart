@@ -11,6 +11,7 @@ import '../services/parental_control_service.dart';
 import '../services/xtream_series_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/parental_lock_button.dart';
 import '../widgets/parental_unlock_dialog.dart';
 import 'player_screen.dart';
 
@@ -30,6 +31,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   double _sidebarWidth = 320;
   bool _sidebarCollapsed = false;
   final ParentalControlService _parental = ParentalControlService.instance;
+  List<String> _catalogCategories = const <String>[];
 
   static const double _sidebarMinWidth = 230;
   static const double _sidebarMaxWidth = 480;
@@ -134,6 +136,18 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     final connection =
         await XtreamService.reconnectFromPlaylistUrl(widget.playlist.source);
     final series = await XtreamSeriesService.fetchCatalog(connection);
+    final categories = series
+        .map((item) => item.category)
+        .whereType<String>()
+        .where((value) => value.trim().isNotEmpty)
+        .toSet()
+        .toList()
+      ..sort();
+    if (mounted) {
+      setState(() => _catalogCategories = List.unmodifiable(categories));
+    } else {
+      _catalogCategories = List.unmodifiable(categories);
+    }
     return _SeriesCatalogData(connection: connection, series: series);
   }
 
@@ -155,15 +169,10 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         ),
         actions: [
           if (_parental.enabled)
-            IconButton(
-              icon: Icon(
-                _parental.isUnlocked
-                    ? Icons.lock_open_rounded
-                    : Icons.lock_rounded,
-              ),
-              tooltip: _parental.isUnlocked
-                  ? 'Bloquear contenido protegido'
-                  : 'Desbloquear contenido protegido',
+            ParentalLockButton(
+              unlocked: _parental.isUnlocked,
+              hiddenCategoryCount:
+                  _parental.hiddenGroupCount(_catalogCategories),
               onPressed: () => unawaited(_toggleParentalLock()),
             ),
           const SizedBox(width: 8),

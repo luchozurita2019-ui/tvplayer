@@ -168,16 +168,14 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
             onChanged: (value) => unawaited(_parental.setEnabled(value)),
           ),
           const Divider(height: 1),
-          SwitchListTile(
-            secondary: const Icon(Icons.visibility_off_rounded),
-            title: const Text('Ocultar categorías adultas'),
+          ListTile(
+            leading: const Icon(Icons.visibility_off_rounded),
+            title: const Text('Ocultamiento automático'),
             subtitle: const Text(
-              'Cuando está bloqueado, las categorías adultas desaparecen por completo de la lista.',
+              'Con el candado cerrado, TV FULL oculta automáticamente las categorías protegidas. Al desbloquear, vuelven a aparecer.',
             ),
-            value: _parental.hideAdult,
-            onChanged: _parental.enabled
-                ? (value) => unawaited(_parental.setHideAdult(value))
-                : null,
+            trailing: const Icon(Icons.check_circle_rounded),
+            enabled: _parental.enabled,
           ),
           const Divider(height: 1),
           ListTile(

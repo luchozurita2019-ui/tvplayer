@@ -162,12 +162,20 @@ class ParentalControlService extends ChangeNotifier {
   }
 
   List<String> visibleGroups(Iterable<String> groups) {
-    if (!_enabled || isUnlocked || !_hideAdult) {
-      return groups.toList(growable: false);
-    }
-    return groups
+    final all = groups.toList(growable: false);
+    if (!_enabled || isUnlocked) return all;
+    return all
         .where((group) => !isProtectedGroup(group))
         .toList(growable: false);
+  }
+
+  int hiddenGroupCount(Iterable<String> groups) {
+    if (!_enabled || isUnlocked) return 0;
+    var hidden = 0;
+    for (final group in groups) {
+      if (isProtectedGroup(group)) hidden++;
+    }
+    return hidden;
   }
 
   Future<void> setGroupProtected(String group, bool protected) async {
