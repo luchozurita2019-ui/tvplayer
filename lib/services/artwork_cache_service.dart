@@ -279,7 +279,7 @@ class ArtworkCacheService {
     final previous = _lastTouch[url];
     if (previous != null && now.difference(previous) < _touchInterval) return;
     _lastTouch[url] = now;
-    unawaited(file.setLastModified(now).catchError((_) => file));
+    unawaited(file.setLastModified(now).catchError((_) {}));
   }
 
   void _schedulePrune() {
