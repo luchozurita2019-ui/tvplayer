@@ -4,6 +4,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../services/content_classifier.dart';
 import 'channel_list_screen.dart';
+import 'xtream_live_screen.dart';
 import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
 
@@ -99,6 +100,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.live_tv_rounded,
                     title: 'TV en vivo',
                     count: _buckets.count(IptvContentKind.live),
+                    subtitleOverride:
+                        nativeXtream ? 'TV Xtream nativa rápida' : null,
+                    enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF1677FF),
                     onTap: () => _openKind(context, IptvContentKind.live),
                   ),
@@ -142,7 +146,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                       Expanded(
                         child: Text(
                           nativeXtream
-                              ? 'En fuentes Xtream, Películas usa get_vod_streams/get_vod_info para mostrar ficha, reproducción y tráiler cuando el servidor entrega un video directo. Series usa get_series/get_series_info y organiza temporadas y episodios.'
+                              ? 'En fuentes Xtream, TV en vivo usa get_live_categories/get_live_streams con carga nativa rápida. Películas usa get_vod_streams/get_vod_info para fichas y reproducción. Series usa get_series/get_series_info y organiza temporadas y episodios.'
                               : 'TV FULL mantiene en TV en vivo los canales lineales aunque su categoría se llame Películas, Cine o Series. Sólo separa VOD/Series cuando la estructura del stream lo identifica como tal.',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
@@ -160,6 +164,14 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
 
   void _openKind(BuildContext context, IptvContentKind kind) {
     if (playlist.sourceType == PlaylistSourceType.xtream) {
+      if (kind == IptvContentKind.live) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => XtreamLiveScreen(playlist: playlist),
+          ),
+        );
+        return;
+      }
       if (kind == IptvContentKind.movies) {
         Navigator.of(context).push(
           MaterialPageRoute(
