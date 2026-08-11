@@ -34,7 +34,9 @@ class XtreamCatalogProgress {
 
   String get label {
     final kb = receivedBytes / 1024;
-    final size = receivedBytes <= 0 ? '' : ' (${kb.toStringAsFixed(kb < 10 ? 2 : 1)} KB)';
+    final size = receivedBytes <= 0
+        ? ''
+        : ' (${kb.toStringAsFixed(kb < 10 ? 2 : 1)} KB)';
     return '$phase $section… $step/$totalSteps$size';
   }
 }
@@ -76,7 +78,10 @@ class XtreamSeriesCatalogSnapshot {
 ///
 /// Principios:
 /// - la autenticación Xtream se conserva en memoria durante la sesión;
-/// - categorías y contenido reutilizan un mismo cliente HTTP keep-alive;
+/// - Películas mantiene el flujo probado actual;
+/// - Series puede comenzar directamente desde la URL get.php ya guardada, sin
+///   esperar una autenticación extra sólo para mostrar el catálogo;
+/// - categorías y Series se descargan en paralelo;
 /// - el cuerpo se recibe como stream con timeout por inactividad;
 /// - jsonDecode, normalización y ordenamiento se ejecutan en un isolate;
 /// - el catálogo normalizado se guarda en disco para apertura inmediata;
@@ -122,6 +127,24 @@ class XtreamFastCatalogService {
         _pendingSessions.remove(key);
       }
     }
+  }
+
+  /// Para listar Series no necesitamos esperar player_api.php sin action.
+  /// La URL get.php ya contiene host/puerto/usuario/contraseña suficientes para
+  /// pedir get_series y get_series_categories. La conexión completa se vuelve a
+  /// validar al abrir una serie antes de pedir get_series_info/reproducir.
+  Future<XtreamConnectionResult> _connectionForSeriesCatalog(
+    String playlistUrl, {
+    bool forceRefresh = false,
+  }) async {
+    final key = playlistUrl.trim();
+    if (!forceRefresh) {
+      final cached = _sessions[key];
+      if (cached != null) return cached;
+      final provisional = _provisionalConnectionFromPlaylistUrl(key);
+      if (provisional != null) return provisional;
+    }
+    return connectionForPlaylist(key, forceRefresh: forceRefresh);
   }
 
   void rememberConnection(XtreamConnectionResult connection) {
@@ -170,7 +193,11 @@ class XtreamFastCatalogService {
       if (payload['version'] != _cacheVersion || payload['kind'] != 'series') {
         return null;
       }
-      final connection = _connectionFromMap(payload['connection']);
+      // Un catálogo local no debe quedar inutilizable sólo porque el bloque de
+      // conexión viejo sea incompleto. get.php alcanza para reconstruir una
+      // conexión provisional y la ficha valida la conexión real al abrirse.
+      final connection = _connectionFromMap(payload['connection']) ??
+          _provisionalConnectionFromPlaylistUrl(playlistUrl);
       if (connection == null) return null;
       final series = _seriesListFromPrepared(payload['items']);
       if (series.isEmpty) return null;
@@ -235,7 +262,7 @@ class XtreamFastCatalogService {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
-    var connection = await connectionForPlaylist(
+    var connection = await _connectionForSeriesCatalog(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
@@ -243,6 +270,8 @@ class XtreamFastCatalogService {
     try {
       return await _fetchSeries(connection, playlistUrl, onProgress);
     } on _XtreamHttpException catch (error) {
+      // Si el acceso directo basado en get.php fue rechazado, recién aquí
+      // pagamos el costo de autenticar/resolver player_api.php completamente.
       if (error.statusCode != 401 && error.statusCode != 403) rethrow;
       invalidateSession(playlistUrl);
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
@@ -365,23 +394,13 @@ class XtreamFastCatalogService {
       totalSteps: 2,
     ));
 
-    String categoriesBody = '[]';
-    try {
-      categoriesBody = await _downloadActionBody(
-        connection,
-        'get_series_categories',
-        _categoryTimeout,
-        onBytes: (bytes) => onProgress?.call(XtreamCatalogProgress(
-          section: 'SERIES',
-          phase: 'Cargando categorías',
-          step: 1,
-          totalSteps: 2,
-          receivedBytes: bytes,
-        )),
-      );
-    } catch (_) {
-      categoriesBody = '[]';
-    }
+    // Las categorías son pequeñas y opcionales. Las arrancamos a la vez que la
+    // lista pesada para que nunca retrasen el inicio de get_series.
+    final categoriesFuture = _downloadActionBody(
+      connection,
+      'get_series_categories',
+      _categoryTimeout,
+    ).catchError((_) => '[]');
 
     onProgress?.call(const XtreamCatalogProgress(
       section: 'SERIES',
@@ -389,7 +408,7 @@ class XtreamFastCatalogService {
       step: 2,
       totalSteps: 2,
     ));
-    final itemsBody = await _downloadActionBody(
+    final itemsFuture = _downloadActionBody(
       connection,
       'get_series',
       _seriesTimeout,
@@ -401,6 +420,13 @@ class XtreamFastCatalogService {
         receivedBytes: bytes,
       )),
     );
+
+    final bodies = await Future.wait<String>([
+      categoriesFuture,
+      itemsFuture,
+    ]);
+    final categoriesBody = bodies[0];
+    final itemsBody = bodies[1];
 
     onProgress?.call(const XtreamCatalogProgress(
       section: 'SERIES',
@@ -424,7 +450,14 @@ class XtreamFastCatalogService {
       savedAt: DateTime.now(),
       fromCache: false,
     );
-    rememberConnection(connection);
+
+    // Sólo una conexión autenticada/resuelta se comparte con las otras
+    // secciones. La provisional existe únicamente para acelerar el catálogo.
+    if (connection.serverName != null ||
+        connection.status != null ||
+        connection.expiration != null) {
+      rememberConnection(connection);
+    }
     unawaited(_writePreparedCache(
       playlistUrl,
       'series',
@@ -615,8 +648,9 @@ Map<String, dynamic> _prepareMovieCatalog(Map<String, String> input) {
     });
   }
 
-  items.sort((a, b) =>
-      (a['name'] as String).toLowerCase().compareTo((b['name'] as String).toLowerCase()));
+  items.sort((a, b) => (a['name'] as String)
+      .toLowerCase()
+      .compareTo((b['name'] as String).toLowerCase()));
   final categoryList = foundCategories.toList()..sort();
   return <String, dynamic>{
     'items': items,
@@ -644,26 +678,27 @@ Map<String, dynamic> _prepareSeriesCatalog(Map<String, String> input) {
         : categories[categoryId] ?? fallbackCategory;
     if (category != null) foundCategories.add(category);
 
+    // Para la grilla inicial sólo conservamos lo que realmente se muestra o se
+    // usa para buscar. Plot/cast/director/backdrops se obtienen con
+    // get_series_info al abrir la ficha. Esto reduce mucho el objeto preparado,
+    // la copia entre isolates y el tamaño del caché local.
     items.add(<String, dynamic>{
       'id': id,
       'name': name,
       'cover': _cleanText(item['cover']),
       'category': category,
-      'plot': _cleanText(item['plot']),
-      'cast': _cleanText(item['cast']),
-      'director': _cleanText(item['director']),
       'genre': _cleanText(item['genre']),
       'releaseDate': _firstText(
         item,
         const <String>['releaseDate', 'release_date'],
       ),
       'rating': _firstText(item, const <String>['rating', 'rating_5based']),
-      'backdrops': _stringListDynamic(item['backdrop_path']),
     });
   }
 
-  items.sort((a, b) =>
-      (a['name'] as String).toLowerCase().compareTo((b['name'] as String).toLowerCase()));
+  items.sort((a, b) => (a['name'] as String)
+      .toLowerCase()
+      .compareTo((b['name'] as String).toLowerCase()));
   final categoryList = foundCategories.toList()..sort();
   return <String, dynamic>{
     'items': items,
@@ -813,6 +848,40 @@ XtreamConnectionResult? _connectionFromMap(dynamic raw) {
     serverName: _cleanText(map['serverName']),
     status: _cleanText(map['status']),
     expiration: _dateFromMillis(map['expiration']),
+  );
+}
+
+XtreamConnectionResult? _provisionalConnectionFromPlaylistUrl(String raw) {
+  final uri = Uri.tryParse(raw.trim());
+  if (uri == null ||
+      !(uri.scheme == 'http' || uri.scheme == 'https') ||
+      uri.host.isEmpty) {
+    return null;
+  }
+  final username = uri.queryParameters['username']?.trim() ?? '';
+  final password = uri.queryParameters['password']?.trim() ?? '';
+  if (username.isEmpty || password.isEmpty) return null;
+
+  var path = uri.path;
+  final lower = path.toLowerCase();
+  if (lower.endsWith('/get.php')) {
+    path = path.substring(0, path.length - '/get.php'.length);
+  } else if (lower.endsWith('get.php')) {
+    path = path.substring(0, path.length - 'get.php'.length);
+    if (path.endsWith('/')) path = path.substring(0, path.length - 1);
+  }
+
+  final server = uri.replace(
+    path: path.isEmpty ? '/' : path,
+    query: '',
+    fragment: '',
+  );
+  return XtreamConnectionResult(
+    playlistUrl: raw.trim(),
+    apiServer: server,
+    streamServer: server,
+    username: username,
+    password: password,
   );
 }
 
