@@ -4,6 +4,7 @@ import '../models/channel.dart';
 import '../models/playback_settings.dart';
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
+import '../services/content_classifier.dart';
 import '../services/m3u_fetcher.dart';
 import '../services/m3u_parser.dart';
 import '../services/playback_settings_service.dart';
@@ -92,12 +93,7 @@ class IptvProvider extends ChangeNotifier {
         username: username,
         password: password,
       );
-
-      // Xtream puede exponer todo el catálogo como M3U Plus. Reutilizar el
-      // parser actual conserva logos, group-title, tvg-id y headers sin crear
-      // dos pipelines distintos para el mismo contenido.
-      final content = await M3uFetcher.fetch(connection.playlistUrl);
-      final channels = await compute(parseM3uInBackground, content);
+      final channels = await _loadXtreamChannels(connection);
       if (channels.isEmpty) {
         throw Exception(
           'Xtream autenticó correctamente, pero no devolvió contenido reproducible.',
@@ -107,6 +103,8 @@ class IptvProvider extends ChangeNotifier {
       final playlist = Playlist(
         id: DateTime.now().millisecondsSinceEpoch.toString(),
         name: name.trim().isEmpty ? 'Xtream Codes' : name.trim(),
+        // Conservamos get.php como referencia persistente para que listas ya
+        // guardadas, Editar y Actualizar sigan siendo compatibles.
         source: connection.playlistUrl,
         isRemote: true,
         channels: channels,
@@ -122,6 +120,56 @@ class IptvProvider extends ChangeNotifier {
     } finally {
       _setLoading(false);
     }
+  }
+
+  /// TV en vivo y VOD se obtienen directamente de player_api.php para no
+  /// depender de la URL serializada por get.php. Series y radios continúan
+  /// viniendo de M3U como complemento hasta que tengan carga Xtream perezosa.
+  Future<List<Channel>> _loadXtreamChannels(
+    XtreamConnectionResult connection,
+  ) async {
+    XtreamNativeCatalog nativeCatalog;
+    try {
+      nativeCatalog = await XtreamService.fetchNativeCatalog(connection);
+    } catch (_) {
+      nativeCatalog = const XtreamNativeCatalog(live: [], vod: []);
+    }
+
+    List<Channel> m3uChannels = const [];
+    try {
+      final content = await M3uFetcher.fetch(connection.playlistUrl);
+      m3uChannels = await compute(parseM3uInBackground, content);
+    } catch (_) {
+      // Si el panel permite API nativa pero bloquea get.php, todavía podemos
+      // ofrecer TV/VOD. Sólo fallamos si tampoco llegó catálogo nativo.
+    }
+
+    final nativeBuckets = ContentClassifier.partition([
+      ...nativeCatalog.live,
+      ...nativeCatalog.vod,
+    ]);
+    final m3uBuckets = ContentClassifier.partition(m3uChannels);
+
+    final merged = <Channel>[
+      ...(nativeBuckets.live.isNotEmpty
+          ? nativeBuckets.live
+          : m3uBuckets.live),
+      ...(nativeBuckets.movies.isNotEmpty
+          ? nativeBuckets.movies
+          : m3uBuckets.movies),
+      ...m3uBuckets.series,
+      ...(nativeBuckets.radios.isNotEmpty
+          ? nativeBuckets.radios
+          : m3uBuckets.radios),
+    ];
+
+    // Evita duplicados en paneles que publican una misma entrada en más de una
+    // sección. uniqueKey incluye URL, por lo que variantes reales se conservan.
+    final unique = <String, Channel>{};
+    for (final channel in merged) {
+      unique.putIfAbsent(channel.uniqueKey, () => channel);
+    }
+    return unique.values.toList(growable: false);
   }
 
   Future<void> renamePlaylist(String playlistId, String name) async {
@@ -195,8 +243,7 @@ class IptvProvider extends ChangeNotifier {
         username: username,
         password: password,
       );
-      final content = await M3uFetcher.fetch(connection.playlistUrl);
-      final channels = await compute(parseM3uInBackground, content);
+      final channels = await _loadXtreamChannels(connection);
       if (channels.isEmpty) {
         throw Exception(
           'Xtream autenticó correctamente, pero no devolvió contenido reproducible.',
@@ -257,8 +304,19 @@ class IptvProvider extends ChangeNotifier {
 
     _setLoading(true);
     try {
-      final content = await M3uFetcher.fetch(playlist.source);
-      final channels = await compute(parseM3uInBackground, content);
+      final List<Channel> channels;
+      if (playlist.sourceType == PlaylistSourceType.xtream) {
+        final connection =
+            await XtreamService.reconnectFromPlaylistUrl(playlist.source);
+        channels = await _loadXtreamChannels(connection);
+      } else {
+        final content = await M3uFetcher.fetch(playlist.source);
+        channels = await compute(parseM3uInBackground, content);
+      }
+
+      if (channels.isEmpty) {
+        throw Exception('El proveedor no devolvió contenido reproducible.');
+      }
       final updated = playlist.copyWith(
         channels: channels,
         lastUpdated: DateTime.now(),
