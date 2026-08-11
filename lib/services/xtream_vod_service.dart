@@ -150,7 +150,8 @@ class XtreamVodService {
               : categories[categoryId] ??
                   _firstText(item, const ['category_name', 'category']),
           rating: _firstText(item, const ['rating', 'rating_5based']),
-          releaseDate: _firstText(item, const ['releasedate', 'releaseDate', 'year']),
+          releaseDate:
+              _firstText(item, const ['releasedate', 'releaseDate', 'year']),
           genre: _firstText(item, const ['genre']),
           directSource: _firstText(item, const ['direct_source']),
         ),
@@ -165,62 +166,115 @@ class XtreamVodService {
     XtreamVodSummary summary, {
     Duration timeout = const Duration(seconds: 16),
   }) async {
-    final uri = _endpoint(connection.apiServer, <String, String>{
-      'username': connection.username,
-      'password': connection.password,
-      'action': 'get_vod_info',
-      'vod_id': summary.id,
-    });
-    final response = await _client.get(uri, headers: _headers).timeout(timeout);
-    if (response.statusCode != 200) {
-      throw Exception('Xtream get_vod_info respondió HTTP ${response.statusCode}.');
-    }
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map) {
-      throw Exception('El servidor no devolvió una ficha válida para esta película.');
-    }
-    final root = Map<String, dynamic>.from(decoded);
-    final info = root['info'] is Map
-        ? Map<String, dynamic>.from(root['info'] as Map)
-        : <String, dynamic>{};
-    final movieData = root['movie_data'] is Map
-        ? Map<String, dynamic>.from(root['movie_data'] as Map)
-        : <String, dynamic>{};
+    // Si entramos al catálogo desde la copia local puede haber todavía un
+    // get_vod_streams de actualización detrás. Cortarlo antes de PLAY evita que
+    // varios MB de JSON compitan con el arranque de mpv/FFmpeg.
+    XtreamHttpClient.cancelBrowsingRequests();
 
-    String? pick(List<String> keys) =>
-        _firstText(info, keys) ?? _firstText(movieData, keys);
-    final backdrop = _firstImage(
-          info['backdrop_path'] ?? info['backdrop'] ?? info['backdrops'],
-        ) ??
-        pick(const ['backdrop_path', 'backdrop', 'cover_big']);
-    final trailer = _playableTrailer(
-      _firstText(info, const ['trailer_url', 'trailer', 'youtube_trailer']) ??
-          _firstText(movieData, const ['trailer_url', 'trailer', 'youtube_trailer']),
-    );
-    final extension = _cleanExtension(
-      _firstText(movieData, const ['container_extension', 'extension']) ??
-          _firstText(info, const ['container_extension', 'extension']) ??
-          summary.extension,
-      fallback: summary.extension,
-    );
+    // No confiamos ciegamente en streamServer guardado en el catálogo local.
+    // player_api.php puede devolver otro host/protocolo/puerto en una sesión
+    // posterior. Validamos una conexión pequeña justo antes de abrir la ficha.
+    var activeConnection = connection;
+    try {
+      activeConnection = await XtreamService.reconnectFromPlaylistUrl(
+        connection.playlistUrl,
+        timeout: const Duration(seconds: 8),
+      );
+    } catch (_) {
+      // Si la validación puntual falla, todavía podemos intentar con la sesión
+      // que ya permitió cargar el catálogo.
+    }
 
-    return XtreamVodDetails(
-      movie: summary,
-      extension: extension,
-      plot: pick(const ['plot', 'description', 'overview']),
-      cast: pick(const ['cast', 'actors']),
-      director: pick(const ['director']),
-      genre: pick(const ['genre']) ?? summary.genre,
-      releaseDate: pick(const ['releasedate', 'releaseDate', 'release_date', 'year']) ??
-          summary.releaseDate,
-      rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
-      duration: pick(const ['duration', 'duration_secs']),
-      country: pick(const ['country']),
-      backdrop: backdrop,
-      trailerUrl: trailer,
-      directSource: _firstText(movieData, const ['direct_source']) ??
-          _firstText(info, const ['direct_source']),
-    );
+    final catalogPlayableUrl =
+        _resolveDirect(activeConnection.streamServer, summary.directSource) ??
+            _movieUrl(activeConnection, summary.id, summary.extension);
+
+    try {
+      final uri = _endpoint(activeConnection.apiServer, <String, String>{
+        'username': activeConnection.username,
+        'password': activeConnection.password,
+        'action': 'get_vod_info',
+        'vod_id': summary.id,
+      });
+      final response = await _client.get(uri, headers: _headers).timeout(timeout);
+      if (response.statusCode != 200) {
+        throw Exception(
+          'Xtream get_vod_info respondió HTTP ${response.statusCode}.',
+        );
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) {
+        throw const FormatException('Ficha VOD no válida.');
+      }
+      final root = Map<String, dynamic>.from(decoded);
+      final info = root['info'] is Map
+          ? Map<String, dynamic>.from(root['info'] as Map)
+          : <String, dynamic>{};
+      final movieData = root['movie_data'] is Map
+          ? Map<String, dynamic>.from(root['movie_data'] as Map)
+          : <String, dynamic>{};
+
+      String? pick(List<String> keys) =>
+          _firstText(info, keys) ?? _firstText(movieData, keys);
+      final backdrop = _firstImage(
+            info['backdrop_path'] ?? info['backdrop'] ?? info['backdrops'],
+          ) ??
+          pick(const ['backdrop_path', 'backdrop', 'cover_big']);
+      final trailer = _playableTrailer(
+        _firstText(info, const ['trailer_url', 'trailer', 'youtube_trailer']) ??
+            _firstText(
+              movieData,
+              const ['trailer_url', 'trailer', 'youtube_trailer'],
+            ),
+      );
+      final extension = _cleanExtension(
+        _firstText(movieData, const ['container_extension', 'extension']) ??
+            _firstText(info, const ['container_extension', 'extension']) ??
+            summary.extension,
+        fallback: summary.extension,
+      );
+      final rawDirect = _firstText(movieData, const ['direct_source']) ??
+          _firstText(info, const ['direct_source']);
+      final playableUrl =
+          _resolveDirect(activeConnection.streamServer, rawDirect) ??
+              _resolveDirect(
+                activeConnection.streamServer,
+                summary.directSource,
+              ) ??
+              _movieUrl(activeConnection, summary.id, extension);
+
+      return XtreamVodDetails(
+        movie: summary,
+        extension: extension,
+        plot: pick(const ['plot', 'description', 'overview']),
+        cast: pick(const ['cast', 'actors']),
+        director: pick(const ['director']),
+        genre: pick(const ['genre']) ?? summary.genre,
+        releaseDate:
+            pick(const ['releasedate', 'releaseDate', 'release_date', 'year']) ??
+                summary.releaseDate,
+        rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
+        duration: pick(const ['duration', 'duration_secs']),
+        country: pick(const ['country']),
+        backdrop: backdrop,
+        trailerUrl: trailer,
+        // Guardamos una URL absoluta validada. Así, aunque la pantalla haya
+        // nacido desde un snapshot local con streamServer viejo, PLAY usa el
+        // host recién resuelto.
+        directSource: playableUrl,
+      );
+    } catch (_) {
+      // get_vod_info es metadata opcional. Si el panel lo implementa mal, una
+      // película válida no debe dejar de reproducirse por eso.
+      return XtreamVodDetails(
+        movie: summary,
+        extension: summary.extension,
+        genre: summary.genre,
+        releaseDate: summary.releaseDate,
+        rating: summary.rating,
+        directSource: catalogPlayableUrl,
+      );
+    }
   }
 
   static Future<List<dynamic>> _safeActionList(
