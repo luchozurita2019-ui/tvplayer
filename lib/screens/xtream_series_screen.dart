@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
@@ -5,9 +7,11 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
+import '../services/parental_control_service.dart';
 import '../services/xtream_series_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/parental_unlock_dialog.dart';
 import 'player_screen.dart';
 
 class XtreamSeriesScreen extends StatefulWidget {
@@ -25,6 +29,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   String? _category;
   double _sidebarWidth = 320;
   bool _sidebarCollapsed = false;
+  final ParentalControlService _parental = ParentalControlService.instance;
 
   static const double _sidebarMinWidth = 230;
   static const double _sidebarMaxWidth = 480;
@@ -36,8 +41,25 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
     _future = _load();
     _loadSidebarPreferences();
+  }
+
+  @override
+  void dispose() {
+    _parental.removeListener(_onParentalChanged);
+    super.dispose();
+  }
+
+  void _onParentalChanged() {
+    if (!mounted) return;
+    if (_category != null &&
+        _parental.isLocked &&
+        _parental.isProtectedGroup(_category)) {
+      _category = null;
+    }
+    setState(() {});
   }
 
   Future<void> _loadSidebarPreferences() async {
@@ -70,7 +92,45 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     _persistSidebar();
   }
 
+  Future<void> _selectCategory(String? category) async {
+    if (category != null &&
+        _parental.isLocked &&
+        _parental.isProtectedGroup(category)) {
+      final unlocked = await requestParentalUnlock(context);
+      if (!unlocked || !mounted) return;
+    }
+    setState(() => _category = category);
+  }
+
+  Future<void> _toggleParentalLock() async {
+    if (_parental.isUnlocked) {
+      _parental.lockNow();
+      return;
+    }
+    await requestParentalUnlock(context);
+  }
+
+  Future<void> _openSeries(
+    XtreamConnectionResult connection,
+    XtreamSeriesSummary series,
+  ) async {
+    if (_parental.isLocked &&
+        _parental.isProtectedItem(name: series.name, group: series.category)) {
+      final unlocked = await requestParentalUnlock(context);
+      if (!unlocked || !mounted) return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => XtreamSeriesDetailScreen(
+          connection: connection,
+          summary: series,
+        ),
+      ),
+    );
+  }
+
   Future<_SeriesCatalogData> _load() async {
+    await _parental.init();
     final connection =
         await XtreamService.reconnectFromPlaylistUrl(widget.playlist.source);
     final series = await XtreamSeriesService.fetchCatalog(connection);
@@ -93,6 +153,21 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
             ),
           ],
         ),
+        actions: [
+          if (_parental.enabled)
+            IconButton(
+              icon: Icon(
+                _parental.isUnlocked
+                    ? Icons.lock_open_rounded
+                    : Icons.lock_rounded,
+              ),
+              tooltip: _parental.isUnlocked
+                  ? 'Bloquear contenido protegido'
+                  : 'Desbloquear contenido protegido',
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: FutureBuilder<_SeriesCatalogData>(
         future: _future,
@@ -130,22 +205,31 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   }
 
   Widget _buildCatalog(BuildContext context, _SeriesCatalogData data) {
-    final categories = data.series
+    final allCategories = data.series
         .map((item) => item.category)
         .whereType<String>()
         .where((value) => value.trim().isNotEmpty)
         .toSet()
         .toList()
       ..sort();
+    final categories = _parental.visibleGroups(allCategories);
     final categoryCounts = <String, int>{};
     for (final item in data.series) {
+      if (!_parental.canShowItem(name: item.name, group: item.category)) continue;
       final category = item.category?.trim();
       if (category == null || category.isEmpty) continue;
       categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
     }
+    final visibleTotal = data.series
+        .where((item) =>
+            _parental.canShowItem(name: item.name, group: item.category))
+        .length;
 
     final normalized = _query.trim().toLowerCase();
     final visible = data.series.where((item) {
+      if (!_parental.canShowItem(name: item.name, group: item.category)) {
+        return false;
+      }
       if (_category != null && item.category != _category) return false;
       if (normalized.isEmpty) return true;
       return item.name.toLowerCase().contains(normalized) ||
@@ -183,14 +267,8 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                   final series = visible[index];
                   return _SeriesPosterCard(
                     series: series,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => XtreamSeriesDetailScreen(
-                          connection: data.connection,
-                          summary: series,
-                        ),
-                      ),
-                    ),
+                    onTap: () =>
+                        unawaited(_openSeries(data.connection, series)),
                   );
                 },
               );
@@ -203,14 +281,14 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
               SizedBox(
                 width: _sidebarCollapsed ? 72 : _sidebarWidth,
                 child: _SeriesCategorySidebar(
-                  totalCount: data.series.length,
+                  totalCount: visibleTotal,
                   categories: categories,
                   categoryCounts: categoryCounts,
                   selectedCategory: _category,
                   collapsed: _sidebarCollapsed,
                   onToggleCollapsed: _toggleSidebar,
                   onCategorySelected: (value) =>
-                      setState(() => _category = value),
+                      unawaited(_selectCategory(value)),
                 ),
               ),
               MouseRegion(
@@ -284,7 +362,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                         ),
                       ),
                     ],
-                    onChanged: (value) => setState(() => _category = value),
+                    onChanged: (value) => unawaited(_selectCategory(value)),
                   ),
                 ],
               ),
@@ -605,14 +683,36 @@ class XtreamSeriesDetailScreen extends StatefulWidget {
 class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
   late Future<XtreamSeriesDetails> _future;
   int? _selectedSeason;
+  final ParentalControlService _parental = ParentalControlService.instance;
 
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
     _future = XtreamSeriesService.fetchDetails(
       widget.connection,
       widget.summary,
     );
+  }
+
+  @override
+  void dispose() {
+    _parental.removeListener(_onParentalChanged);
+    super.dispose();
+  }
+
+  void _onParentalChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _blocked => _parental.isLocked && _parental.isProtectedItem(
+        name: widget.summary.name,
+        group: widget.summary.category,
+      );
+
+  Future<bool> _ensureParentalAccess() async {
+    if (!_blocked) return true;
+    return requestParentalUnlock(context);
   }
 
   void _retry() => setState(() {
@@ -633,7 +733,11 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ),
-      body: FutureBuilder<XtreamSeriesDetails>(
+      body: _blocked
+          ? _SeriesParentalBlockedView(
+              onUnlock: () => unawaited(requestParentalUnlock(context)),
+            )
+          : FutureBuilder<XtreamSeriesDetails>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -774,6 +878,7 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
     int season,
     XtreamSeriesEpisode episode,
   ) async {
+    if (!await _ensureParentalAccess() || !mounted) return;
     final episodes = details.seasons[season] ?? const <XtreamSeriesEpisode>[];
     final channels = episodes
         .map(
@@ -794,6 +899,49 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
           initialIndex: index,
           settings: provider.playbackSettings,
           isLiveContent: false,
+        ),
+      ),
+    );
+  }
+}
+
+class _SeriesParentalBlockedView extends StatelessWidget {
+  final VoidCallback onUnlock;
+
+  const _SeriesParentalBlockedView({required this.onUnlock});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Card(
+          margin: const EdgeInsets.all(24),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_rounded, size: 54),
+                const SizedBox(height: 16),
+                const Text(
+                  'Contenido protegido',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 8),
+                const Text(
+                  'Ingresá el PIN parental para acceder a esta serie.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: onUnlock,
+                  icon: const Icon(Icons.lock_open_rounded),
+                  label: const Text('Desbloquear'),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

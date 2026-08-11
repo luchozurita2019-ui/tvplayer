@@ -1,12 +1,16 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
+import '../services/parental_control_service.dart';
 import '../services/xtream_service.dart';
 import '../services/xtream_vod_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/parental_unlock_dialog.dart';
 import 'player_screen.dart';
 
 class XtreamMoviesScreen extends StatefulWidget {
@@ -24,6 +28,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   String? _category;
   double _sidebarWidth = 320;
   bool _sidebarCollapsed = false;
+  final ParentalControlService _parental = ParentalControlService.instance;
 
   static const double _sidebarMinWidth = 230;
   static const double _sidebarMaxWidth = 480;
@@ -33,11 +38,29 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
     _future = _load();
     _loadSidebarPreferences();
   }
 
+  @override
+  void dispose() {
+    _parental.removeListener(_onParentalChanged);
+    super.dispose();
+  }
+
+  void _onParentalChanged() {
+    if (!mounted) return;
+    if (_category != null &&
+        _parental.isLocked &&
+        _parental.isProtectedGroup(_category)) {
+      _category = null;
+    }
+    setState(() {});
+  }
+
   Future<_MovieCatalogData> _load() async {
+    await _parental.init();
     final connection =
         await XtreamService.reconnectFromPlaylistUrl(widget.playlist.source);
     final movies = await XtreamVodService.fetchCatalog(connection);
@@ -77,6 +100,43 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     });
   }
 
+  Future<void> _selectCategory(String? category) async {
+    if (category != null &&
+        _parental.isLocked &&
+        _parental.isProtectedGroup(category)) {
+      final unlocked = await requestParentalUnlock(context);
+      if (!unlocked || !mounted) return;
+    }
+    setState(() => _category = category);
+  }
+
+  Future<void> _toggleParentalLock() async {
+    if (_parental.isUnlocked) {
+      _parental.lockNow();
+      return;
+    }
+    await requestParentalUnlock(context);
+  }
+
+  Future<void> _openMovie(
+    XtreamConnectionResult connection,
+    XtreamVodSummary movie,
+  ) async {
+    if (_parental.isLocked &&
+        _parental.isProtectedItem(name: movie.name, group: movie.category)) {
+      final unlocked = await requestParentalUnlock(context);
+      if (!unlocked || !mounted) return;
+    }
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => XtreamMovieDetailScreen(
+          connection: connection,
+          movie: movie,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -88,6 +148,21 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
             Text(widget.playlist.name, style: Theme.of(context).textTheme.bodySmall),
           ],
         ),
+        actions: [
+          if (_parental.enabled)
+            IconButton(
+              icon: Icon(
+                _parental.isUnlocked
+                    ? Icons.lock_open_rounded
+                    : Icons.lock_rounded,
+              ),
+              tooltip: _parental.isUnlocked
+                  ? 'Bloquear contenido protegido'
+                  : 'Desbloquear contenido protegido',
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
+          const SizedBox(width: 8),
+        ],
       ),
       body: FutureBuilder<_MovieCatalogData>(
         future: _future,
@@ -124,22 +199,31 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   }
 
   Widget _buildCatalog(_MovieCatalogData data) {
-    final categories = data.movies
+    final allCategories = data.movies
         .map((item) => item.category)
         .whereType<String>()
         .where((value) => value.trim().isNotEmpty)
         .toSet()
         .toList()
       ..sort();
+    final categories = _parental.visibleGroups(allCategories);
     final categoryCounts = <String, int>{};
     for (final item in data.movies) {
+      if (!_parental.canShowItem(name: item.name, group: item.category)) continue;
       final category = item.category?.trim();
       if (category == null || category.isEmpty) continue;
       categoryCounts[category] = (categoryCounts[category] ?? 0) + 1;
     }
+    final visibleTotal = data.movies
+        .where((item) =>
+            _parental.canShowItem(name: item.name, group: item.category))
+        .length;
 
     final normalized = _query.trim().toLowerCase();
     final visible = data.movies.where((item) {
+      if (!_parental.canShowItem(name: item.name, group: item.category)) {
+        return false;
+      }
       if (_category != null && item.category != _category) return false;
       if (normalized.isEmpty) return true;
       return item.name.toLowerCase().contains(normalized) ||
@@ -177,14 +261,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                   final movie = visible[index];
                   return _MoviePosterCard(
                     movie: movie,
-                    onTap: () => Navigator.of(context).push(
-                      MaterialPageRoute(
-                        builder: (_) => XtreamMovieDetailScreen(
-                          connection: data.connection,
-                          movie: movie,
-                        ),
-                      ),
-                    ),
+                    onTap: () =>
+                        unawaited(_openMovie(data.connection, movie)),
                   );
                 },
               );
@@ -195,13 +273,14 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
               SizedBox(
                 width: _sidebarCollapsed ? 72 : _sidebarWidth,
                 child: _MovieCategorySidebar(
-                  totalCount: data.movies.length,
+                  totalCount: visibleTotal,
                   categories: categories,
                   categoryCounts: categoryCounts,
                   selectedCategory: _category,
                   collapsed: _sidebarCollapsed,
                   onToggleCollapsed: _toggleSidebar,
-                  onCategorySelected: (value) => setState(() => _category = value),
+                  onCategorySelected: (value) =>
+                      unawaited(_selectCategory(value)),
                 ),
               ),
               MouseRegion(
@@ -268,7 +347,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                         ),
                       ),
                     ],
-                    onChanged: (value) => setState(() => _category = value),
+                    onChanged: (value) => unawaited(_selectCategory(value)),
                   ),
                 ],
               ),
@@ -297,11 +376,33 @@ class XtreamMovieDetailScreen extends StatefulWidget {
 
 class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
   late Future<XtreamVodDetails> _future;
+  final ParentalControlService _parental = ParentalControlService.instance;
 
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
     _future = XtreamVodService.fetchDetails(widget.connection, widget.movie);
+  }
+
+  @override
+  void dispose() {
+    _parental.removeListener(_onParentalChanged);
+    super.dispose();
+  }
+
+  void _onParentalChanged() {
+    if (mounted) setState(() {});
+  }
+
+  bool get _blocked => _parental.isLocked && _parental.isProtectedItem(
+        name: widget.movie.name,
+        group: widget.movie.category,
+      );
+
+  Future<bool> _ensureParentalAccess() async {
+    if (!_blocked) return true;
+    return requestParentalUnlock(context);
   }
 
   void _retry() => setState(() {
@@ -319,7 +420,12 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
           style: const TextStyle(fontWeight: FontWeight.w900),
         ),
       ),
-      body: FutureBuilder<XtreamVodDetails>(
+      body: _blocked
+          ? _NativeParentalBlockedView(
+              label: 'película',
+              onUnlock: () => unawaited(requestParentalUnlock(context)),
+            )
+          : FutureBuilder<XtreamVodDetails>(
         future: _future,
         builder: (context, snapshot) {
           if (snapshot.connectionState != ConnectionState.done) {
@@ -392,6 +498,7 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
   }
 
   Future<void> _play(XtreamVodDetails details) async {
+    if (!await _ensureParentalAccess() || !mounted) return;
     final channel = details.toChannel(widget.connection);
     final provider = context.read<IptvProvider>();
     await Navigator.of(context).push(
@@ -408,6 +515,7 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
   }
 
   Future<void> _playTrailer(XtreamVodDetails details) async {
+    if (!await _ensureParentalAccess() || !mounted) return;
     final trailer = details.trailerChannel();
     if (trailer == null) return;
     final provider = context.read<IptvProvider>();
@@ -419,6 +527,53 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
           initialIndex: 0,
           settings: provider.playbackSettings,
           isLiveContent: false,
+        ),
+      ),
+    );
+  }
+}
+
+class _NativeParentalBlockedView extends StatelessWidget {
+  final String label;
+  final VoidCallback onUnlock;
+
+  const _NativeParentalBlockedView({
+    required this.label,
+    required this.onUnlock,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: Card(
+          margin: const EdgeInsets.all(24),
+          child: Padding(
+            padding: const EdgeInsets.all(28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_rounded, size: 54),
+                const SizedBox(height: 16),
+                const Text(
+                  'Contenido protegido',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'Ingresá el PIN parental para acceder a esta $label.',
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 18),
+                FilledButton.icon(
+                  onPressed: onUnlock,
+                  icon: const Icon(Icons.lock_open_rounded),
+                  label: const Text('Desbloquear'),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );
