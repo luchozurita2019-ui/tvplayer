@@ -108,15 +108,23 @@ class _CachedArtworkImageState extends State<CachedArtworkImage> {
   void _evaluateVisibility() {
     final url = widget.url?.trim();
     if (url == null || url.isEmpty) {
-      _releaseInterest();
+      _cancelCurrentInterest();
       return;
     }
 
     if (_isNearViewport()) {
       unawaited(_ensureResolved());
     } else {
-      _releaseInterest();
+      _cancelCurrentInterest();
     }
+  }
+
+  void _cancelCurrentInterest() {
+    if (_loading) {
+      _requestGeneration++;
+      _loading = false;
+    }
+    _releaseInterest();
   }
 
   bool _isNearViewport() {
