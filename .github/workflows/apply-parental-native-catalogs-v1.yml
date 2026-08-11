@@ -1,0 +1,31 @@
+name: Apply parental native catalogs v1
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - tooling/apply_parental_native_catalogs_v1.py
+      - .github/workflows/apply-parental-native-catalogs-v1.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+      - name: Apply parental integration
+        run: python3 tooling/apply_parental_native_catalogs_v1.py
+      - name: Commit patch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/xtream_movies_screen.dart lib/screens/xtream_series_screen.dart
+          git diff --cached --quiet && exit 0
+          git commit -m "fix: enforce parental controls in native catalogs"
+          git push
