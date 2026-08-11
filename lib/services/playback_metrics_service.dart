@@ -175,7 +175,6 @@ class PlaybackMetricsService {
         .toList()
       ..sort((a, b) => b.lastUpdatedEpochMs.compareTo(a.lastUpdatedEpochMs));
 
-    // Evitamos que las métricas crezcan sin límite.
     final compact = values.take(100).map((e) => e.toJson()).toList();
     await prefs.setString(_storageKey, jsonEncode(compact));
   }
@@ -249,7 +248,6 @@ class PlaybackMetricsService {
     final stats = await statsForUrl(url);
     final average = stats.averageStartupMs;
 
-    // Con pocas muestras no hacemos suposiciones fuertes.
     if (stats.startupCount < 3) {
       return AdaptivePlaybackTuning(
         settings: PlaybackSettings.auto,
@@ -317,6 +315,7 @@ class PlaybackMetricsService {
       BufferProfile.ultraFast => 'Ultra rápido',
       BufferProfile.balanced => 'Equilibrado',
       BufferProfile.stable => 'Estable',
+      BufferProfile.slowConnection => 'Conexión lenta',
       BufferProfile.custom => 'Personalizado',
     };
   }
