@@ -33,6 +33,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         BufferProfile.ultraFast => PlaybackSettings.ultraFast,
         BufferProfile.balanced => PlaybackSettings.balanced,
         BufferProfile.stable => PlaybackSettings.stable,
+        BufferProfile.slowConnection => PlaybackSettings.slowConnection,
         BufferProfile.custom => _draft.copyWith(profile: BufferProfile.custom),
       };
     });
@@ -170,6 +171,43 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                 _speedGuidance(result.downloadMbps),
                 style: const TextStyle(fontWeight: FontWeight.w600),
               ),
+              if (result.downloadMbps < 15) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: 0.30),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.wifi_tethering_error_rounded),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Para esta velocidad conviene probar Conexión lenta. TV FULL reservará más video por adelantado y será más paciente ante microcortes.',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton(
+                        onPressed: () =>
+                            _applyPreset(BufferProfile.slowConnection),
+                        child: const Text('Activar'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ],
           ],
         ),
@@ -287,6 +325,12 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                 onTap: () => _applyPreset(BufferProfile.stable),
               ),
               _ProfileChip(
+                label: 'Conexión lenta',
+                icon: Icons.wifi_tethering_error_rounded,
+                selected: _draft.profile == BufferProfile.slowConnection,
+                onTap: () => _applyPreset(BufferProfile.slowConnection),
+              ),
+              _ProfileChip(
                 label: 'Personalizado',
                 icon: Icons.settings,
                 selected: _draft.profile == BufferProfile.custom,
@@ -323,6 +367,40 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                       onPressed: _showLearnedStats,
                       icon: const Icon(Icons.query_stats),
                       label: const Text('Ver diagnóstico aprendido'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (_draft.profile == BufferProfile.slowConnection) ...[
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.wifi_tethering_error_rounded),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Modo conexión lenta',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Prioriza continuidad sobre velocidad de arranque. En TV en vivo usa una reserva moderada para no alejarse demasiado del directo; en Películas y Series anticipa más datos. Durante la reproducción, TV FULL mantiene pausadas las descargas de portadas y logos.',
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'No reduce automáticamente la calidad y no puede compensar un stream cuyo bitrate sea permanentemente mayor que la velocidad disponible.',
+                      style: TextStyle(color: Colors.white60, fontSize: 12),
                     ),
                   ],
                 ),
@@ -401,7 +479,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             child: Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Ultra rápido prioriza el zapping. Estable usa más margen para redes irregulares. Automático aprende por servidor. Si movés cualquier control manual, el perfil cambia a Personalizado.',
+                'Ultra rápido prioriza el zapping. Estable usa más margen para redes irregulares. Conexión lenta aumenta la reserva y la tolerancia a microcortes. Automático aprende por servidor. Si movés cualquier control manual, el perfil cambia a Personalizado.',
               ),
             ),
           ),

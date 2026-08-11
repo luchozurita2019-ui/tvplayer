@@ -453,28 +453,56 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted || session != _sessionId) return false;
 
     final tunedSettings = tuning.settings;
+    final slowConnection =
+        widget.settings.profile == BufferProfile.slowConnection;
     final applyLiveStabilityFloor =
         widget.isLiveContent && widget.settings.profile == BufferProfile.auto;
-    _effectiveSettings = applyLiveStabilityFloor
-        ? tunedSettings.copyWith(
-            bufferMb: tunedSettings.bufferMb < 16 ? 16 : tunedSettings.bufferMb,
-            readaheadSeconds: tunedSettings.readaheadSeconds < 2.5
-                ? 2.5
-                : tunedSettings.readaheadSeconds,
-            recoveryBufferSeconds: tunedSettings.recoveryBufferSeconds < 1.5
-                ? 1.5
-                : tunedSettings.recoveryBufferSeconds,
-            connectTimeoutSeconds: tunedSettings.connectTimeoutSeconds < 8
-                ? 8
-                : tunedSettings.connectTimeoutSeconds,
-            stallThresholdSeconds: tunedSettings.stallThresholdSeconds < 12
-                ? 12
-                : tunedSettings.stallThresholdSeconds,
-          )
-        : tunedSettings;
-    _tuningLabel = applyLiveStabilityFloor
-        ? '${tuning.label} · Live estable'
-        : tuning.label;
+
+    if (slowConnection) {
+      // Live necesita reserva, pero no queremos acumular un retraso enorme.
+      // VOD puede anticipar mucho más porque no existe borde en vivo.
+      _effectiveSettings = widget.isLiveContent
+          ? tunedSettings.copyWith(
+              bufferMb: 48,
+              readaheadSeconds: 6.0,
+              recoveryBufferSeconds: 4.0,
+              connectTimeoutSeconds: 15,
+              maxRetries: 5,
+              stallThresholdSeconds: 18,
+            )
+          : tunedSettings.copyWith(
+              bufferMb: 96,
+              readaheadSeconds: 12.0,
+              recoveryBufferSeconds: 5.0,
+              connectTimeoutSeconds: 15,
+              maxRetries: 5,
+              stallThresholdSeconds: 18,
+            );
+      _tuningLabel = widget.isLiveContent
+          ? 'Conexión lenta · Live protegido'
+          : 'Conexión lenta · VOD reforzado';
+    } else {
+      _effectiveSettings = applyLiveStabilityFloor
+          ? tunedSettings.copyWith(
+              bufferMb: tunedSettings.bufferMb < 16 ? 16 : tunedSettings.bufferMb,
+              readaheadSeconds: tunedSettings.readaheadSeconds < 2.5
+                  ? 2.5
+                  : tunedSettings.readaheadSeconds,
+              recoveryBufferSeconds: tunedSettings.recoveryBufferSeconds < 1.5
+                  ? 1.5
+                  : tunedSettings.recoveryBufferSeconds,
+              connectTimeoutSeconds: tunedSettings.connectTimeoutSeconds < 8
+                  ? 8
+                  : tunedSettings.connectTimeoutSeconds,
+              stallThresholdSeconds: tunedSettings.stallThresholdSeconds < 12
+                  ? 12
+                  : tunedSettings.stallThresholdSeconds,
+            )
+          : tunedSettings;
+      _tuningLabel = applyLiveStabilityFloor
+          ? '${tuning.label} · Live estable'
+          : tuning.label;
+    }
     _useFastProbe = tuning.useFastProbe;
     final modeNeedsNormalProbe =
         _compatibilityMode == ServerCompatibilityMode.compatible ||
@@ -625,23 +653,35 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // HotPlayer deja que FFmpeg intente recuperar segmentos antes de
     // reconstruir la reproducción. En live damos ese mismo margen: un microcorte
     // no debe convertirse en stop/open del Media.
+    final slowConnection =
+        widget.settings.profile == BufferProfile.slowConnection;
     final liveGrace = widget.isLiveContent
         ? Duration(
-            seconds: _stallThreshold.inSeconds < 30
-                ? 30
-                : _stallThreshold.inSeconds,
-          )
-        : _stallThreshold;
-    final bufferingGrace = widget.isLiveContent
-        ? Duration(
-            seconds: _stallThreshold.inSeconds + 20 < 45
+            seconds: slowConnection
                 ? 45
-                : _stallThreshold.inSeconds + 20,
+                : (_stallThreshold.inSeconds < 30
+                    ? 30
+                    : _stallThreshold.inSeconds),
           )
         : Duration(
-            seconds: _stallThreshold.inSeconds < 8
-                ? 12
-                : _stallThreshold.inSeconds + 4,
+            seconds: slowConnection
+                ? 30
+                : _stallThreshold.inSeconds,
+          );
+    final bufferingGrace = widget.isLiveContent
+        ? Duration(
+            seconds: slowConnection
+                ? 60
+                : (_stallThreshold.inSeconds + 20 < 45
+                    ? 45
+                    : _stallThreshold.inSeconds + 20),
+          )
+        : Duration(
+            seconds: slowConnection
+                ? 30
+                : (_stallThreshold.inSeconds < 8
+                    ? 12
+                    : _stallThreshold.inSeconds + 4),
           );
     final effectiveStallThreshold =
         _isBuffering ? bufferingGrace : liveGrace;
@@ -1723,6 +1763,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
       BufferProfile.ultraFast => 'Ultra rápido',
       BufferProfile.balanced => 'Equilibrado',
       BufferProfile.stable => 'Estable',
+      BufferProfile.slowConnection => 'Conexión lenta',
       BufferProfile.custom => 'Personalizado',
     };
     final average = stats.averageStartupMs;
