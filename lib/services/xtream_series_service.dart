@@ -45,6 +45,7 @@ class XtreamSeriesEpisode {
   final int number;
   final String title;
   final String extension;
+  final String? directSource;
   final String? plot;
   final String? duration;
   final String? image;
@@ -56,6 +57,7 @@ class XtreamSeriesEpisode {
     required this.number,
     required this.title,
     required this.extension,
+    this.directSource,
     this.plot,
     this.duration,
     this.image,
@@ -63,10 +65,18 @@ class XtreamSeriesEpisode {
   });
 
   Channel toChannel(XtreamConnectionResult connection, {String? group}) {
+    // Algunos paneles Xtream entregan una URL exacta por episodio. Si existe,
+    // es más fiable que reconstruir /series/... porque puede apuntar a otro
+    // host, CDN, puerto o contenedor.
+    final direct = _resolvedEpisodeDirectSource(
+      connection.streamServer,
+      directSource,
+    );
+
     final prefix = connection.streamServer.pathSegments
         .where((segment) => segment.trim().isNotEmpty)
         .toList(growable: false);
-    final url = connection.streamServer
+    final generated = connection.streamServer
         .replace(
           pathSegments: [
             ...prefix,
@@ -82,10 +92,25 @@ class XtreamSeriesEpisode {
 
     return Channel(
       name: title,
-      url: url,
+      url: direct ?? generated,
       logoUrl: image,
       group: group,
     );
+  }
+
+  static String? _resolvedEpisodeDirectSource(Uri base, String? raw) {
+    final value = raw?.trim() ?? '';
+    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
+      return null;
+    }
+    final parsed = Uri.tryParse(value);
+    if (parsed != null &&
+        (parsed.scheme == 'http' || parsed.scheme == 'https') &&
+        parsed.host.isNotEmpty) {
+      return parsed.toString();
+    }
+    if (value.startsWith('/')) return base.resolve(value).toString();
+    return null;
   }
 }
 
@@ -264,7 +289,22 @@ class XtreamSeriesService {
     final title = _cleanText(item['title']) ??
         _cleanText(info['name']) ??
         'S${season.toString().padLeft(2, '0')} · Episodio ${number > 0 ? number : id}';
-    final extension = _cleanExtension(item['container_extension']?.toString());
+    final directSource = _firstText(
+      item,
+      const ['direct_source', 'directSource', 'stream_source'],
+    ) ?? _firstText(info, const ['direct_source', 'directSource', 'stream_source']);
+
+    // En clones/paneles Xtream la extensión puede vivir en el episodio o en
+    // info. También la inferimos de direct_source antes de usar un fallback.
+    final extension = _firstValidExtension([
+      item['container_extension'],
+      item['containerExtension'],
+      item['extension'],
+      info['container_extension'],
+      info['containerExtension'],
+      info['extension'],
+      _extensionFromUrl(directSource),
+    ]);
 
     return XtreamSeriesEpisode(
       id: id,
@@ -272,6 +312,7 @@ class XtreamSeriesService {
       number: number <= 0 ? 1 : number,
       title: title,
       extension: extension,
+      directSource: directSource,
       plot: _cleanText(info['plot']),
       duration: _cleanText(info['duration']),
       image: _firstText(info, const ['movie_image', 'cover_big', 'cover']),
@@ -312,12 +353,28 @@ class XtreamSeriesService {
     return base.replace(path: path, queryParameters: query, fragment: '');
   }
 
-  static String _cleanExtension(String? raw) {
-    final value = (raw ?? '').trim().toLowerCase().replaceFirst('.', '');
-    if (value.isEmpty || !RegExp(r'^[a-z0-9]{2,6}$').hasMatch(value)) {
-      return 'mp4';
+  static String _firstValidExtension(Iterable<dynamic> candidates) {
+    for (final candidate in candidates) {
+      final value = candidate?.toString().trim().toLowerCase().replaceFirst('.', '') ?? '';
+      if (value.isNotEmpty && RegExp(r'^[a-z0-9]{2,6}$').hasMatch(value)) {
+        return value;
+      }
     }
-    return value;
+    // mp4 sigue siendo el último fallback, pero ya no se usa si el panel
+    // declaró el contenedor en otro campo o dentro de direct_source.
+    return 'mp4';
+  }
+
+  static String? _extensionFromUrl(String? raw) {
+    final value = raw?.trim() ?? '';
+    if (value.isEmpty) return null;
+    final uri = Uri.tryParse(value);
+    final path = uri?.path ?? value;
+    final slash = path.lastIndexOf('/');
+    final file = slash >= 0 ? path.substring(slash + 1) : path;
+    final dot = file.lastIndexOf('.');
+    if (dot < 0 || dot == file.length - 1) return null;
+    return file.substring(dot + 1);
   }
 
   static String? _cleanText(dynamic value) {
