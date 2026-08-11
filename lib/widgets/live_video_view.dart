@@ -63,6 +63,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   StreamSubscription<bool>? _playingSub;
   StreamSubscription<bool>? _bufferingSub;
   StreamSubscription<double>? _volumeSub;
+  StreamSubscription<Tracks>? _tracksSub;
+  StreamSubscription<Track>? _trackSub;
   Timer? _statusTimer;
   Timer? _overlayTimer;
 
@@ -72,6 +74,10 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   bool _buffering = true;
   bool _hasStarted = false;
   double _volume = 100;
+  List<AudioTrack> _audioTracks = const [];
+  List<SubtitleTrack> _subtitleTracks = const [];
+  late AudioTrack _selectedAudioTrack;
+  late SubtitleTrack _selectedSubtitleTrack;
   bool _overlayVisible = true;
   DateTime _lastProgressAt = DateTime.now();
   BoxFit _videoFit = BoxFit.contain;
@@ -86,6 +92,10 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     _playing = widget.player.state.playing;
     _buffering = widget.player.state.buffering;
     _volume = widget.player.state.volume;
+    _audioTracks = widget.player.state.tracks.audio;
+    _subtitleTracks = widget.player.state.tracks.subtitle;
+    _selectedAudioTrack = widget.player.state.track.audio;
+    _selectedSubtitleTrack = widget.player.state.track.subtitle;
 
     _positionSub = widget.player.stream.position.listen((value) {
       if (!mounted) return;
@@ -129,6 +139,24 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     _volumeSub = widget.player.stream.volume.listen((value) {
       if (!mounted) return;
       setState(() => _volume = value.clamp(0, 100).toDouble());
+    });
+
+    // Películas y series pueden traer varias pistas de audio y subtítulos.
+    // Escuchamos la lista real que detecta mpv/FFmpeg para no inventar idiomas.
+    _tracksSub = widget.player.stream.tracks.listen((value) {
+      if (!mounted || widget.isLiveContent) return;
+      setState(() {
+        _audioTracks = value.audio;
+        _subtitleTracks = value.subtitle;
+      });
+    });
+
+    _trackSub = widget.player.stream.track.listen((value) {
+      if (!mounted || widget.isLiveContent) return;
+      setState(() {
+        _selectedAudioTrack = value.audio;
+        _selectedSubtitleTrack = value.subtitle;
+      });
     });
 
     _statusTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
@@ -224,6 +252,253 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     unawaited(widget.player.seek(target));
   }
 
+  List<AudioTrack> get _selectableAudioTracks => _audioTracks
+      .where((track) => track.id != 'auto' && track.id != 'no')
+      .toList(growable: false);
+
+  List<SubtitleTrack> get _selectableSubtitleTracks => _subtitleTracks
+      .where((track) => track.id != 'auto' && track.id != 'no')
+      .toList(growable: false);
+
+  String? _languageName(String? raw) {
+    final value = raw?.trim().toLowerCase();
+    if (value == null || value.isEmpty || value == 'und') return null;
+    final normalized = value.split(RegExp(r'[-_]')).first;
+    return switch (normalized) {
+      'es' || 'spa' => 'Español',
+      'en' || 'eng' => 'Inglés',
+      'pt' || 'por' => 'Portugués',
+      'fr' || 'fra' || 'fre' => 'Francés',
+      'it' || 'ita' => 'Italiano',
+      'de' || 'deu' || 'ger' => 'Alemán',
+      'ja' || 'jpn' => 'Japonés',
+      'ko' || 'kor' => 'Coreano',
+      'zh' || 'zho' || 'chi' => 'Chino',
+      'ru' || 'rus' => 'Ruso',
+      'ar' || 'ara' => 'Árabe',
+      _ => raw!.trim().toUpperCase(),
+    };
+  }
+
+  String _trackDescription(
+    String? title,
+    String? language,
+    String fallback,
+  ) {
+    final lang = _languageName(language);
+    final cleanTitle = title?.trim();
+    if (lang != null && cleanTitle != null && cleanTitle.isNotEmpty) {
+      final titleLower = cleanTitle.toLowerCase();
+      final langLower = lang.toLowerCase();
+      if (!titleLower.contains(langLower)) return '$lang · $cleanTitle';
+    }
+    if (lang != null) return lang;
+    if (cleanTitle != null && cleanTitle.isNotEmpty) return cleanTitle;
+    return fallback;
+  }
+
+  String get _audioButtonLabel {
+    final track = _selectedAudioTrack;
+    if (track.id == 'auto') return 'Audio: Auto';
+    if (track.id == 'no') return 'Audio: Off';
+    final label = _languageName(track.language) ??
+        (track.title?.trim().isNotEmpty == true ? track.title!.trim() : 'Pista');
+    return 'Audio: $label';
+  }
+
+  String get _subtitleButtonLabel {
+    final track = _selectedSubtitleTrack;
+    if (track.id == 'no') return 'Subtítulos: Off';
+    if (track.id == 'auto') return 'Subtítulos: Auto';
+    final label = _languageName(track.language) ??
+        (track.title?.trim().isNotEmpty == true ? track.title!.trim() : 'Pista');
+    return 'Subs: $label';
+  }
+
+  Future<void> _showAudioTrackPicker() async {
+    if (widget.isLiveContent) return;
+    _showOverlay(scheduleHide: false);
+    final tracks = _selectableAudioTracks;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      backgroundColor: const Color(0xFF101A26),
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 520),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                leading: Icon(Icons.language_rounded, color: Color(0xFF58A6FF)),
+                title: Text(
+                  'Idioma / pista de audio',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                subtitle: Text('Disponible sólo cuando el contenido incluye varias pistas.'),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.auto_awesome_rounded),
+                      title: const Text('Automático'),
+                      subtitle: const Text('Dejar que el reproductor elija la pista predeterminada'),
+                      trailing: _selectedAudioTrack.id == 'auto'
+                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                          : null,
+                      onTap: () async {
+                        await widget.player.setAudioTrack(AudioTrack.auto());
+                        if (sheetContext.mounted) Navigator.pop(sheetContext);
+                      },
+                    ),
+                    if (tracks.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(22, 12, 22, 22),
+                        child: Text(
+                          'Este contenido no informa pistas de audio adicionales.',
+                          style: TextStyle(color: Colors.white60),
+                        ),
+                      )
+                    else
+                      ...tracks.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final track = entry.value;
+                        final selected = _selectedAudioTrack.id == track.id;
+                        final details = <String>[
+                          if (track.codec?.trim().isNotEmpty == true) track.codec!.toUpperCase(),
+                          if (track.channels?.trim().isNotEmpty == true) track.channels!,
+                          if (track.isDefault == true) 'Predeterminada',
+                        ];
+                        return ListTile(
+                          leading: const Icon(Icons.audiotrack_rounded),
+                          title: Text(_trackDescription(
+                            track.title,
+                            track.language,
+                            'Pista ${index + 1}',
+                          )),
+                          subtitle: details.isEmpty ? null : Text(details.join(' · ')),
+                          trailing: selected
+                              ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                              : null,
+                          onTap: () async {
+                            await widget.player.setAudioTrack(track);
+                            if (sheetContext.mounted) Navigator.pop(sheetContext);
+                          },
+                        );
+                      }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (mounted) _scheduleOverlayHide();
+  }
+
+  Future<void> _showSubtitleTrackPicker() async {
+    if (widget.isLiveContent) return;
+    _showOverlay(scheduleHide: false);
+    final tracks = _selectableSubtitleTracks;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      useRootNavigator: true,
+      backgroundColor: const Color(0xFF101A26),
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxHeight: 560),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const ListTile(
+                leading: Icon(Icons.subtitles_rounded, color: Color(0xFF58A6FF)),
+                title: Text(
+                  'Subtítulos',
+                  style: TextStyle(fontWeight: FontWeight.w900),
+                ),
+                subtitle: Text('Elegí una pista incluida por el proveedor o desactivalos.'),
+              ),
+              const Divider(height: 1),
+              Flexible(
+                child: ListView(
+                  shrinkWrap: true,
+                  children: [
+                    ListTile(
+                      leading: const Icon(Icons.subtitles_off_rounded),
+                      title: const Text('Desactivados'),
+                      trailing: _selectedSubtitleTrack.id == 'no'
+                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                          : null,
+                      onTap: () async {
+                        await widget.player.setSubtitleTrack(SubtitleTrack.no());
+                        if (sheetContext.mounted) Navigator.pop(sheetContext);
+                      },
+                    ),
+                    ListTile(
+                      leading: const Icon(Icons.auto_awesome_rounded),
+                      title: const Text('Automático'),
+                      subtitle: const Text('Usar la pista de subtítulos predeterminada'),
+                      trailing: _selectedSubtitleTrack.id == 'auto'
+                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                          : null,
+                      onTap: () async {
+                        await widget.player.setSubtitleTrack(SubtitleTrack.auto());
+                        if (sheetContext.mounted) Navigator.pop(sheetContext);
+                      },
+                    ),
+                    if (tracks.isEmpty)
+                      const Padding(
+                        padding: EdgeInsets.fromLTRB(22, 12, 22, 22),
+                        child: Text(
+                          'Este contenido no informa pistas de subtítulos adicionales.',
+                          style: TextStyle(color: Colors.white60),
+                        ),
+                      )
+                    else
+                      ...tracks.asMap().entries.map((entry) {
+                        final index = entry.key;
+                        final track = entry.value;
+                        final selected = _selectedSubtitleTrack.id == track.id;
+                        final details = <String>[
+                          if (track.codec?.trim().isNotEmpty == true) track.codec!.toUpperCase(),
+                          if (track.isDefault == true) 'Predeterminada',
+                        ];
+                        return ListTile(
+                          leading: const Icon(Icons.closed_caption_rounded),
+                          title: Text(_trackDescription(
+                            track.title,
+                            track.language,
+                            'Subtítulo ${index + 1}',
+                          )),
+                          subtitle: details.isEmpty ? null : Text(details.join(' · ')),
+                          trailing: selected
+                              ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                              : null,
+                          onTap: () async {
+                            await widget.player.setSubtitleTrack(track);
+                            if (sheetContext.mounted) Navigator.pop(sheetContext);
+                          },
+                        );
+                      }),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    if (mounted) _scheduleOverlayHide();
+  }
+
   @override
   void dispose() {
     _positionSub?.cancel();
@@ -231,6 +506,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     _playingSub?.cancel();
     _bufferingSub?.cancel();
     _volumeSub?.cancel();
+    _tracksSub?.cancel();
+    _trackSub?.cancel();
     _statusTimer?.cancel();
     _overlayTimer?.cancel();
     super.dispose();
@@ -601,9 +878,37 @@ class _LiveVideoViewState extends State<LiveVideoView> {
           const SizedBox(width: 10),
           _textPill(
             icon: Icons.view_list_rounded,
-            label: 'Canales',
+            label: widget.isLiveContent ? 'Canales' : 'Contenido',
             onTap: () => unawaited(_handleChannelList(videoState)),
           ),
+        ],
+        if (!widget.isLiveContent) ...[
+          const SizedBox(width: 10),
+          if (compact)
+            _iconPill(
+              icon: Icons.language_rounded,
+              tooltip: _audioButtonLabel,
+              onTap: () => unawaited(_showAudioTrackPicker()),
+            )
+          else
+            _textPill(
+              icon: Icons.language_rounded,
+              label: _audioButtonLabel,
+              onTap: () => unawaited(_showAudioTrackPicker()),
+            ),
+          const SizedBox(width: 8),
+          if (compact)
+            _iconPill(
+              icon: Icons.subtitles_rounded,
+              tooltip: _subtitleButtonLabel,
+              onTap: () => unawaited(_showSubtitleTrackPicker()),
+            )
+          else
+            _textPill(
+              icon: Icons.subtitles_rounded,
+              label: _subtitleButtonLabel,
+              onTap: () => unawaited(_showSubtitleTrackPicker()),
+            ),
         ],
         const Spacer(),
         _volumePill(compact),
