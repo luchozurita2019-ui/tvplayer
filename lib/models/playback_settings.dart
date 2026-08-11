@@ -3,6 +3,7 @@ enum BufferProfile {
   ultraFast,
   balanced,
   stable,
+  slowConnection,
   custom,
 }
 
@@ -68,6 +69,19 @@ class PlaybackSettings {
     stallThresholdSeconds: 12,
   );
 
+  /// Perfil pensado para conexiones de poco ancho de banda o Wi-Fi irregular.
+  /// No intenta "tomar" Internet del sistema: reserva más datos por adelantado,
+  /// espera más a mpv/FFmpeg y evita reconstruir la sesión ante microcortes.
+  static const slowConnection = PlaybackSettings(
+    profile: BufferProfile.slowConnection,
+    bufferMb: 64,
+    readaheadSeconds: 8.0,
+    recoveryBufferSeconds: 4.0,
+    connectTimeoutSeconds: 15,
+    maxRetries: 5,
+    stallThresholdSeconds: 18,
+  );
+
   int get bufferBytes => bufferMb * 1024 * 1024;
 
   PlaybackSettings copyWith({
@@ -110,7 +124,14 @@ class PlaybackSettings {
       orElse: () => BufferProfile.balanced,
     );
 
-    final defaults = profile == BufferProfile.auto ? auto : balanced;
+    final defaults = switch (profile) {
+      BufferProfile.auto => auto,
+      BufferProfile.ultraFast => ultraFast,
+      BufferProfile.balanced => balanced,
+      BufferProfile.stable => stable,
+      BufferProfile.slowConnection => slowConnection,
+      BufferProfile.custom => balanced,
+    };
     return PlaybackSettings(
       profile: profile,
       bufferMb: (json['bufferMb'] as num?)?.toInt() ?? defaults.bufferMb,
