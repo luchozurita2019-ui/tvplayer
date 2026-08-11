@@ -4,6 +4,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../services/content_classifier.dart';
 import 'channel_list_screen.dart';
+import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
 
 class SourceContentScreen extends StatefulWidget {
@@ -37,7 +38,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final nativeXtreamSeries = playlist.sourceType == PlaylistSourceType.xtream;
+    final nativeXtream = playlist.sourceType == PlaylistSourceType.xtream;
 
     return Scaffold(
       appBar: AppBar(
@@ -105,6 +106,9 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.movie_creation_rounded,
                     title: 'Películas',
                     count: _buckets.count(IptvContentKind.movies),
+                    subtitleOverride:
+                        nativeXtream ? 'Catálogo Xtream con fichas' : null,
+                    enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF4C9DFF),
                     onTap: () => _openKind(context, IptvContentKind.movies),
                   ),
@@ -113,8 +117,8 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     title: 'Series',
                     count: _buckets.count(IptvContentKind.series),
                     subtitleOverride:
-                        nativeXtreamSeries ? 'Catálogo Xtream nativo' : null,
-                    enabledOverride: nativeXtreamSeries ? true : null,
+                        nativeXtream ? 'Catálogo Xtream nativo' : null,
+                    enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF2D6DFF),
                     onTap: () => _openKind(context, IptvContentKind.series),
                   ),
@@ -137,8 +141,8 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                       const SizedBox(width: 12),
                       Expanded(
                         child: Text(
-                          nativeXtreamSeries
-                              ? 'En fuentes Xtream, TV FULL carga Series directamente desde get_series/get_series_info y organiza temporadas y episodios. La M3U queda como respaldo para otros contenidos.'
+                          nativeXtream
+                              ? 'En fuentes Xtream, Películas usa get_vod_streams/get_vod_info para mostrar ficha, reproducción y tráiler cuando el servidor entrega un video directo. Series usa get_series/get_series_info y organiza temporadas y episodios.'
                               : 'TV FULL mantiene en TV en vivo los canales lineales aunque su categoría se llame Películas, Cine o Series. Sólo separa VOD/Series cuando la estructura del stream lo identifica como tal.',
                           style: Theme.of(context).textTheme.bodyMedium,
                         ),
@@ -155,14 +159,23 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   }
 
   void _openKind(BuildContext context, IptvContentKind kind) {
-    if (kind == IptvContentKind.series &&
-        playlist.sourceType == PlaylistSourceType.xtream) {
-      Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => XtreamSeriesScreen(playlist: playlist),
-        ),
-      );
-      return;
+    if (playlist.sourceType == PlaylistSourceType.xtream) {
+      if (kind == IptvContentKind.movies) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => XtreamMoviesScreen(playlist: playlist),
+          ),
+        );
+        return;
+      }
+      if (kind == IptvContentKind.series) {
+        Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => XtreamSeriesScreen(playlist: playlist),
+          ),
+        );
+        return;
+      }
     }
 
     final channels = _buckets.forKind(kind);
