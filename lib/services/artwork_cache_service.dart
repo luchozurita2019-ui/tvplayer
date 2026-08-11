@@ -8,17 +8,16 @@ import 'package:path_provider/path_provider.dart';
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
-import 'content_classifier.dart';
-import 'parental_control_service.dart';
 
-/// Cache de arte orientado a IPTV.
+/// Cache de logos y carátulas orientado a IPTV.
 ///
-/// Objetivos:
-/// - precargar solo el primer bloque de logos/posters antes de mostrar la grilla;
-/// - limitar la concurrencia para no competir con el stream;
-/// - guardar imágenes en disco para no descargarlas otra vez;
-/// - cancelar la cola del proveedor anterior al cambiar de lista;
-/// - detener toda descarga de arte mientras hay reproducción activa.
+/// El catálogo nunca espera imágenes. Cada [CachedArtworkImage] mantiene interés
+/// solamente mientras está visible (o muy cerca del viewport), de modo que la
+/// red se usa para lo que el usuario está mirando en ese momento.
+///
+/// Las imágenes ya descargadas se conservan en disco para volver a mostrarlas
+/// instantáneamente, pero el caché tiene un presupuesto global y poda LRU para
+/// que no crezca indefinidamente.
 class ArtworkCacheService {
   ArtworkCacheService._();
 
@@ -26,8 +25,12 @@ class ArtworkCacheService {
 
   static const int _maxConcurrent = 3;
   static const int _maxArtworkBytes = 3 * 1024 * 1024;
+  static const int _maxDiskCacheBytes = 128 * 1024 * 1024;
+  static const int _trimDiskCacheToBytes = 96 * 1024 * 1024;
+  static const int _pruneEveryDownloads = 24;
   static const Duration _connectTimeout = Duration(seconds: 8);
   static const Duration _chunkTimeout = Duration(seconds: 6);
+  static const Duration _touchInterval = Duration(minutes: 15);
   static const String _userAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -36,16 +39,22 @@ class ArtworkCacheService {
   final Queue<_ArtworkRequest> _queue = Queue<_ArtworkRequest>();
   final Map<String, Future<File?>> _inFlight = <String, Future<File?>>{};
   final Map<String, File> _knownFiles = <String, File>{};
+  final Map<String, int> _interest = <String, int>{};
+  final Map<String, DateTime> _lastTouch = <String, DateTime>{};
 
   Directory? _cacheDirectory;
   http.Client? _client;
   String? _providerId;
   int _generation = 0;
   int _active = 0;
+  int _downloadsSincePrune = 0;
   bool _pausedForPlayback = false;
+  bool _pruneRunning = false;
 
   bool get pausedForPlayback => _pausedForPlayback;
 
+  /// Cambiar de proveedor cancela cualquier arte pendiente del proveedor
+  /// anterior. No se realiza ninguna precarga de imágenes.
   Future<void> switchProvider(String providerId) async {
     if (_providerId == providerId && !_pausedForPlayback) {
       await _ensureCacheDirectory();
@@ -57,72 +66,47 @@ class ArtworkCacheService {
     _cancelNetworkWork();
     _client = http.Client();
     await _ensureCacheDirectory();
+    _schedulePrune();
   }
 
-  Future<void> warmProvider(Playlist playlist) async {
-    await switchProvider(playlist.id);
-    final parental = ParentalControlService.instance;
-    await parental.init();
+  /// Compatibilidad con el flujo anterior: sólo prepara el proveedor. Antes
+  /// esta función descargaba logos/posters y podía retrasar la apertura.
+  Future<void> warmProvider(Playlist playlist) => switchProvider(playlist.id);
 
-    final buckets = ContentClassifier.partition(playlist.channels);
-    final urls = <String>[];
-    final seen = <String>{};
-
-    void addFrom(List<Channel> channels, int limit) {
-      var added = 0;
-      for (final channel in channels) {
-        if (!parental.canShowChannel(channel)) continue;
-        final url = _validArtworkUrl(channel.logoUrl);
-        if (url == null || !seen.add(url)) continue;
-        urls.add(url);
-        added++;
-        if (added >= limit) break;
-      }
-    }
-
-    // TV en vivo prioriza más logos porque son pequeños y son la forma más
-    // rápida de reconocer un canal. Posters VOD se precargan en un bloque menor.
-    addFrom(buckets.forKind(IptvContentKind.live), 20);
-    addFrom(buckets.forKind(IptvContentKind.movies), 5);
-    addFrom(buckets.forKind(IptvContentKind.series), 5);
-    addFrom(buckets.forKind(IptvContentKind.radios), 4);
-
-    await warmUrls(urls, maxWait: const Duration(milliseconds: 2400));
-  }
-
+  /// Ya no precalentamos secciones. Las tarjetas visibles solicitan su propia
+  /// imagen mediante [retain] + [resolve].
   Future<void> warmSection(
     List<Channel> channels, {
     required int limit,
     Duration maxWait = const Duration(milliseconds: 1800),
-  }) async {
-    final parental = ParentalControlService.instance;
-    await parental.init();
-    final urls = <String>[];
-    final seen = <String>{};
-    for (final channel in channels) {
-      if (!parental.canShowChannel(channel)) continue;
-      final url = _validArtworkUrl(channel.logoUrl);
-      if (url == null || !seen.add(url)) continue;
-      urls.add(url);
-      if (urls.length >= limit) break;
-    }
-    await warmUrls(urls, maxWait: maxWait);
-  }
+  }) async {}
 
+  /// Se conserva la API para no romper llamadores antiguos, pero el modelo
+  /// actual es estrictamente bajo demanda/viewport.
   Future<void> warmUrls(
     Iterable<String> urls, {
     Duration maxWait = const Duration(seconds: 2),
-  }) async {
-    if (_pausedForPlayback) return;
-    final futures = urls
-        .map((url) => resolve(url, allowNetwork: true))
-        .toList(growable: false);
-    if (futures.isEmpty) return;
+  }) async {}
 
-    await Future.any<void>([
-      Future.wait(futures).then((_) {}),
-      Future<void>.delayed(maxWait),
-    ]);
+  /// Registra que una tarjeta visible necesita esta imagen. Las solicitudes
+  /// demand-driven sin consumidores son descartadas/canceladas.
+  void retain(String? rawUrl) {
+    final url = _validArtworkUrl(rawUrl);
+    if (url == null) return;
+    _interest[url] = (_interest[url] ?? 0) + 1;
+  }
+
+  /// Libera el interés de una tarjeta que dejó el viewport o fue destruida.
+  void release(String? rawUrl) {
+    final url = _validArtworkUrl(rawUrl);
+    if (url == null) return;
+    final current = _interest[url] ?? 0;
+    if (current <= 1) {
+      _interest.remove(url);
+      _discardUnneededQueuedRequests(url);
+    } else {
+      _interest[url] = current - 1;
+    }
   }
 
   void pauseForPlayback() {
@@ -141,21 +125,27 @@ class ArtworkCacheService {
   Future<File?> resolve(
     String? rawUrl, {
     bool allowNetwork = true,
+    bool demandDriven = false,
   }) async {
     final url = _validArtworkUrl(rawUrl);
     if (url == null) return null;
 
     final known = _knownFiles[url];
-    if (known != null && await known.exists()) return known;
+    if (known != null && await known.exists()) {
+      _touchFile(url, known);
+      return known;
+    }
 
     final directory = await _ensureCacheDirectory();
     final file = File('${directory.path}/${_fileNameFor(url)}.img');
     if (await file.exists()) {
       _knownFiles[url] = file;
+      _touchFile(url, file);
       return file;
     }
 
     if (!allowNetwork || _pausedForPlayback) return null;
+    if (demandDriven && !_hasInterest(url)) return null;
 
     final existing = _inFlight[url];
     if (existing != null) return existing;
@@ -164,6 +154,7 @@ class ArtworkCacheService {
     final request = _ArtworkRequest(
       url: url,
       generation: _generation,
+      demandDriven: demandDriven,
       completer: completer,
     );
     _queue.add(request);
@@ -186,6 +177,29 @@ class ArtworkCacheService {
     return directory;
   }
 
+  bool _hasInterest(String url) => (_interest[url] ?? 0) > 0;
+
+  bool _requestStillWanted(_ArtworkRequest request) {
+    if (request.generation != _generation || _pausedForPlayback) return false;
+    if (request.demandDriven && !_hasInterest(request.url)) return false;
+    return true;
+  }
+
+  void _discardUnneededQueuedRequests(String url) {
+    if (_queue.isEmpty) return;
+    final pending = _queue.toList(growable: false);
+    _queue.clear();
+    for (final request in pending) {
+      if (request.url == url &&
+          request.demandDriven &&
+          !_hasInterest(url)) {
+        if (!request.completer.isCompleted) request.completer.complete(null);
+      } else {
+        _queue.add(request);
+      }
+    }
+  }
+
   void _cancelNetworkWork() {
     _generation++;
     _client?.close();
@@ -200,7 +214,7 @@ class ArtworkCacheService {
     if (_pausedForPlayback) return;
     while (_active < _maxConcurrent && _queue.isNotEmpty) {
       final request = _queue.removeFirst();
-      if (request.generation != _generation) {
+      if (!_requestStillWanted(request)) {
         if (!request.completer.isCompleted) request.completer.complete(null);
         continue;
       }
@@ -217,7 +231,7 @@ class ArtworkCacheService {
   Future<void> _download(_ArtworkRequest request) async {
     File? result;
     try {
-      if (_pausedForPlayback || request.generation != _generation) return;
+      if (!_requestStillWanted(request)) return;
       final client = _client ??= http.Client();
       final httpRequest = http.Request('GET', Uri.parse(request.url))
         ..headers.addAll(const {
@@ -225,6 +239,7 @@ class ArtworkCacheService {
           'Accept': 'image/avif,image/webp,image/apng,image/*,*/*;q=0.8',
         });
       final response = await client.send(httpRequest).timeout(_connectTimeout);
+      if (!_requestStillWanted(request)) return;
       if (response.statusCode < 200 || response.statusCode >= 300) return;
 
       final expected = response.contentLength;
@@ -233,22 +248,78 @@ class ArtworkCacheService {
       final builder = BytesBuilder(copy: false);
       var total = 0;
       await for (final chunk in response.stream.timeout(_chunkTimeout)) {
-        if (_pausedForPlayback || request.generation != _generation) return;
+        if (!_requestStillWanted(request)) return;
         total += chunk.length;
         if (total > _maxArtworkBytes) return;
         builder.add(chunk);
       }
-      if (total == 0 || request.generation != _generation) return;
+      if (total == 0 || !_requestStillWanted(request)) return;
 
       final directory = await _ensureCacheDirectory();
       final file = File('${directory.path}/${_fileNameFor(request.url)}.img');
       await file.writeAsBytes(builder.takeBytes(), flush: false);
       _knownFiles[request.url] = file;
+      _lastTouch[request.url] = DateTime.now();
       result = file;
+
+      _downloadsSincePrune++;
+      if (_downloadsSincePrune >= _pruneEveryDownloads) {
+        _downloadsSincePrune = 0;
+        _schedulePrune();
+      }
     } catch (_) {
       // El arte nunca debe bloquear catálogo o reproducción.
     } finally {
       if (!request.completer.isCompleted) request.completer.complete(result);
+    }
+  }
+
+  void _touchFile(String url, File file) {
+    final now = DateTime.now();
+    final previous = _lastTouch[url];
+    if (previous != null && now.difference(previous) < _touchInterval) return;
+    _lastTouch[url] = now;
+    unawaited(file.setLastModified(now).catchError((_) => file));
+  }
+
+  void _schedulePrune() {
+    if (_pruneRunning) return;
+    _pruneRunning = true;
+    unawaited(_pruneDiskCache().whenComplete(() => _pruneRunning = false));
+  }
+
+  Future<void> _pruneDiskCache() async {
+    try {
+      final directory = await _ensureCacheDirectory();
+      final entries = <_CachedArtworkEntry>[];
+      var totalBytes = 0;
+
+      await for (final entity in directory.list(followLinks: false)) {
+        if (entity is! File || entity.path.endsWith('.tmp')) continue;
+        try {
+          final stat = await entity.stat();
+          if (stat.type != FileSystemEntityType.file) continue;
+          totalBytes += stat.size;
+          entries.add(_CachedArtworkEntry(
+            file: entity,
+            size: stat.size,
+            modified: stat.modified,
+          ));
+        } catch (_) {}
+      }
+
+      if (totalBytes <= _maxDiskCacheBytes) return;
+      entries.sort((a, b) => a.modified.compareTo(b.modified));
+      for (final entry in entries) {
+        if (totalBytes <= _trimDiskCacheToBytes) break;
+        try {
+          await entry.file.delete();
+          totalBytes -= entry.size;
+          _knownFiles.removeWhere((_, file) => file.path == entry.file.path);
+        } catch (_) {}
+      }
+    } catch (_) {
+      // La poda es mantenimiento; nunca debe afectar la navegación.
     }
   }
 
@@ -278,11 +349,25 @@ class ArtworkCacheService {
 class _ArtworkRequest {
   final String url;
   final int generation;
+  final bool demandDriven;
   final Completer<File?> completer;
 
   const _ArtworkRequest({
     required this.url,
     required this.generation,
+    required this.demandDriven,
     required this.completer,
+  });
+}
+
+class _CachedArtworkEntry {
+  final File file;
+  final int size;
+  final DateTime modified;
+
+  const _CachedArtworkEntry({
+    required this.file,
+    required this.size,
+    required this.modified,
   });
 }
