@@ -527,6 +527,7 @@ class _PerformanceView extends StatelessWidget {
         BufferProfile.ultraFast => 'Ultra rápido',
         BufferProfile.balanced => 'Equilibrado',
         BufferProfile.stable => 'Estable',
+        BufferProfile.slowConnection => 'Conexión lenta',
         BufferProfile.custom => 'Personalizado',
       };
 
