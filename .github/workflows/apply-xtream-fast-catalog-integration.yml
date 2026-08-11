@@ -1,0 +1,46 @@
+name: Apply Xtream fast catalog integration
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - .github/workflows/apply-xtream-fast-catalog-integration.yml
+
+permissions:
+  contents: write
+
+jobs:
+  integrate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: performance-engine-v38-hotplayer-baseline
+          fetch-depth: 0
+
+      - name: Apply integration
+        run: python3 .github/scripts/apply_xtream_fast_catalog_integration.py
+
+      - name: Verify scope
+        run: |
+          git diff --check
+          git diff --name-only
+          test -z "$(git diff --name-only | grep -E '^lib/screens/(player_screen|channel_list_screen)\.dart$' || true)"
+          grep -q "loadCachedMovies" lib/screens/xtream_movies_screen.dart
+          grep -q "loadCachedSeries" lib/screens/xtream_series_screen.dart
+          grep -q "XtreamHttpClient.instance" lib/services/xtream_vod_service.dart
+
+      - name: Commit integration and remove helpers
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/services/xtream_service.dart \
+                  lib/services/xtream_vod_service.dart \
+                  lib/services/xtream_series_service.dart \
+                  lib/screens/xtream_movies_screen.dart \
+                  lib/screens/xtream_series_screen.dart
+          git rm .github/scripts/apply_xtream_fast_catalog_integration.py
+          git rm .github/workflows/apply-xtream-fast-catalog-integration.yml
+          git commit -m "Integrate fast Xtream catalog pipeline"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
