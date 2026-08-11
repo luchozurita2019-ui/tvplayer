@@ -10,7 +10,6 @@ def replace_once(path, old, new):
     p.write_text(text.replace(old, new, 1))
 
 
-# 1) Xtream VOD: slow-server tolerance, optional categories, metadata/direct-play helpers.
 vod = "lib/services/xtream_vod_service.dart"
 replace_once(
     vod,
@@ -120,9 +119,6 @@ replace_once(
     XtreamConnectionResult connection, {
     Duration timeout = const Duration(seconds: 35),
   }) async {
-    // Algunos paneles responden get_vod_streams correctamente pero demoran o
-    // fallan en get_vod_categories. Las categorías enriquecen el catálogo,
-    // pero no deben impedir que las películas carguen.
     final categoriesFuture = _safeActionList(
       connection,
       'get_vod_categories',
@@ -176,7 +172,6 @@ replace_once(
 """,
 )
 
-# 2) Movies screen: detail screen only when useful; otherwise direct playback.
 movies = "lib/screens/xtream_movies_screen.dart"
 replace_once(
     movies,
@@ -209,9 +204,6 @@ replace_once(
       if (!unlocked || !mounted) return;
     }
 
-    // La ficha sólo tiene sentido cuando el proveedor entrega una carátula,
-    // backdrop o un tráiler reproducible. Si get_vod_info no responde o la
-    // película no trae ese material, reproducimos directamente.
     try {
       final details = await XtreamVodService.fetchDetails(
         connection,
@@ -261,27 +253,6 @@ replace_once(
 )
 replace_once(
     movies,
-    """          if (snapshot.hasError) {
-            return _MovieError(
-              message: snapshot.error.toString().replaceFirst('Exception: ', ''),
-              onRetry: _retry,
-            );
-          }
-""",
-    """          if (snapshot.hasError) {
-            final rawError = snapshot.error.toString();
-            final message = rawError.contains('TimeoutException')
-                ? 'El servidor Xtream tardó demasiado en responder. Reintentá; algunos servidores necesitan más tiempo para cargar Películas.'
-                : rawError.replaceFirst('Exception: ', '');
-            return _MovieError(
-              message: message,
-              onRetry: _retry,
-            );
-          }
-""",
-)
-replace_once(
-    movies,
     """class XtreamMovieDetailScreen extends StatefulWidget {
   final XtreamConnectionResult connection;
   final XtreamVodSummary movie;
@@ -317,7 +288,6 @@ replace_once(
 """,
 )
 
-# 3) Series category mapping: normalize category IDs and tolerate category endpoint failures.
 series = "lib/services/xtream_series_service.dart"
 replace_once(
     series,
@@ -407,12 +377,10 @@ checks = {
     vod: [
         "Duration timeout = const Duration(seconds: 35)",
         "bool get hasPresentationMedia",
-        "get_vod_categories",
     ],
     movies: [
         "Future<void> _playMovieDirect(",
         "initialDetails: details",
-        "El servidor Xtream tardó demasiado",
     ],
     series: [
         "final categoryId = _cleanText(item['category_id']);",
