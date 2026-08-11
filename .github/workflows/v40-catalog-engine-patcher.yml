@@ -29,12 +29,12 @@ jobs:
       - name: Guard expected baseline
         working-directory: work
         run: |
-          test "$(git rev-parse HEAD)" = "9053fc87fcc27c027eb4aeff33687c99a3319ddb" || {
+          test "$(git rev-parse HEAD)" = "eb549d45f18af84bfb5eae3fccf94ff36c116183" || {
             echo "Working branch moved unexpectedly; refusing to overwrite it."
             exit 1
           }
 
-      - name: Apply v40 engine changes
+      - name: Apply v40 cleanup
         working-directory: work
         run: python3 ../patcher/.github/scripts/apply_v40.py
 
@@ -47,31 +47,19 @@ jobs:
         working-directory: work
         run: |
           dart format \
-            lib/services/xtream_http_client.dart \
             lib/services/artwork_cache_service.dart \
-            lib/services/xtream_fast_catalog_service.dart \
-            lib/screens/home_screen.dart \
-            lib/screens/channel_list_screen.dart \
-            lib/screens/source_content_screen.dart \
-            lib/screens/xtream_movies_screen.dart \
-            lib/screens/xtream_series_screen.dart
+            lib/services/xtream_fast_catalog_service.dart
           flutter pub get
           flutter analyze --no-fatal-infos --no-fatal-warnings
           git diff --check
 
-      - name: Commit v40 to working branch
+      - name: Commit cleanup to working branch
         working-directory: work
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add \
-            lib/services/xtream_http_client.dart \
             lib/services/artwork_cache_service.dart \
-            lib/services/xtream_fast_catalog_service.dart \
-            lib/screens/home_screen.dart \
-            lib/screens/channel_list_screen.dart \
-            lib/screens/source_content_screen.dart \
-            lib/screens/xtream_movies_screen.dart \
-            lib/screens/xtream_series_screen.dart
-          git commit -m "Build v40 streaming catalog engine"
+            lib/services/xtream_fast_catalog_service.dart
+          git commit -m "Clean legacy artwork cache in v40"
           git push origin HEAD:performance-engine-v38-hotplayer-baseline
