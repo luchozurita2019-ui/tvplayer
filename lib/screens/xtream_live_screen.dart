@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/material.dart';
 
 import '../models/channel.dart';
@@ -34,32 +32,110 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   Future<Playlist> _load({bool forceNetwork = false}) async {
     final service = XtreamLiveFastService.instance;
 
-    if (!forceNetwork) {
-      final cached = await service.loadCached(widget.playlist.source);
-      if (cached != null && cached.channels.isNotEmpty) {
-        // Igual que Películas/Series: abrir con el catálogo local y refrescar
-        // silenciosamente. No reemplazamos la UI mientras el usuario navega.
-        unawaited(service.refresh(widget.playlist.source));
-        return _playlistFromChannels(cached.channels);
-      }
-    }
-
+    // Flujo normal: terminar LIVE 1/2 + 2/2 antes de entregar la pantalla.
+    // Así no dejamos get_live_streams consumiendo ancho de banda mientras el
+    // usuario ya intenta reproducir un canal.
     try {
       final fresh = await service.refresh(
         widget.playlist.source,
         forceSessionRefresh: forceNetwork,
         onProgress: _onProgress,
       );
-      return _playlistFromChannels(fresh.channels);
+      return _playlistFromChannels(_mergePlaybackChannels(fresh.channels));
     } catch (error) {
-      // Fallback inmediato al LIVE ya persistido dentro de la playlist. Esto
-      // conserva compatibilidad con paneles/clones Xtream que no implementan
-      // correctamente get_live_categories/get_live_streams.
-      final fallback = ContentClassifier.partition(widget.playlist.channels)
-          .forKind(IptvContentKind.live);
+      // El catálogo local funciona como respaldo/offline, no como disparador de
+      // una actualización pesada escondida detrás de la reproducción.
+      final cached = await service.loadCached(widget.playlist.source);
+      if (cached != null && cached.channels.isNotEmpty) {
+        return _playlistFromChannels(_mergePlaybackChannels(cached.channels));
+      }
+
+      // Último fallback: los canales que ya estaban dentro de la M3U original.
+      // Son especialmente valiosos porque conservan URL exacta y headers que
+      // algunos proveedores necesitan para autorizar determinados canales.
+      final fallback = _originalLiveChannels();
       if (fallback.isNotEmpty) return _playlistFromChannels(fallback);
       rethrow;
     }
+  }
+
+  List<Channel> _originalLiveChannels() =>
+      ContentClassifier.partition(widget.playlist.channels)
+          .forKind(IptvContentKind.live);
+
+  /// El API rápido nos da nombres/categorías/logos actuales, pero para PLAY
+  /// preferimos la URL exacta de la lista original cuando podemos identificar
+  /// el mismo stream. Esto recupera headers, CDN, puerto y variantes de URL que
+  /// se perderían al reconstruir /live/user/pass/id.ext manualmente.
+  List<Channel> _mergePlaybackChannels(List<Channel> fastChannels) {
+    final original = _originalLiveChannels();
+    if (original.isEmpty) return List<Channel>.unmodifiable(fastChannels);
+
+    final byStreamId = <String, Channel>{};
+    final byName = <String, List<Channel>>{};
+
+    for (final channel in original) {
+      final streamId = _numericStreamId(channel.url);
+      if (streamId != null) byStreamId.putIfAbsent(streamId, () => channel);
+      final key = _normalizeName(channel.name);
+      byName.putIfAbsent(key, () => <Channel>[]).add(channel);
+    }
+
+    final merged = <Channel>[];
+    for (final fast in fastChannels) {
+      Channel? compatible;
+      final streamId = _numericStreamId(fast.url);
+      if (streamId != null) compatible = byStreamId[streamId];
+
+      compatible ??= _bestNameMatch(fast, byName[_normalizeName(fast.name)]);
+      if (compatible == null) {
+        merged.add(fast);
+        continue;
+      }
+
+      merged.add(
+        Channel(
+          name: fast.name,
+          url: compatible.url,
+          logoUrl: fast.logoUrl ?? compatible.logoUrl,
+          group: fast.group ?? compatible.group,
+          tvgId: fast.tvgId ?? compatible.tvgId,
+          httpUserAgent: compatible.httpUserAgent,
+          httpReferrer: compatible.httpReferrer,
+          httpHeaders: compatible.httpHeaders,
+        ),
+      );
+    }
+    return List<Channel>.unmodifiable(merged);
+  }
+
+  Channel? _bestNameMatch(Channel fast, List<Channel>? candidates) {
+    if (candidates == null || candidates.isEmpty) return null;
+    if (candidates.length == 1) return candidates.first;
+    final fastGroup = fast.group?.trim().toLowerCase();
+    if (fastGroup != null && fastGroup.isNotEmpty) {
+      for (final candidate in candidates) {
+        if (candidate.group?.trim().toLowerCase() == fastGroup) return candidate;
+      }
+    }
+    return candidates.first;
+  }
+
+  String _normalizeName(String value) => value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ');
+
+  String? _numericStreamId(String rawUrl) {
+    final uri = Uri.tryParse(rawUrl.trim());
+    final path = uri?.path ?? rawUrl;
+    if (path.isEmpty) return null;
+    final segments = path.split('/').where((value) => value.isNotEmpty).toList();
+    if (segments.isEmpty) return null;
+    var file = segments.last;
+    final dot = file.lastIndexOf('.');
+    if (dot > 0) file = file.substring(0, dot);
+    return RegExp(r'^\d+$').hasMatch(file) ? file : null;
   }
 
   Playlist _playlistFromChannels(List<Channel> channels) {
