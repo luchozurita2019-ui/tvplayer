@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:http/http.dart' as http;
@@ -31,6 +32,17 @@ class XtreamVodSummary {
     this.genre,
     this.directSource,
   });
+
+  Channel toChannel(XtreamConnectionResult connection) {
+    final url = _resolveDirect(connection.streamServer, directSource) ??
+        _movieUrl(connection, id, extension);
+    return Channel(
+      name: name,
+      url: url,
+      logoUrl: cover,
+      group: category,
+    );
+  }
 }
 
 class XtreamVodDetails {
@@ -63,6 +75,12 @@ class XtreamVodDetails {
     this.trailerUrl,
     this.directSource,
   });
+
+  bool get hasPresentationMedia {
+    final hasArtwork = (backdrop?.trim().isNotEmpty ?? false) ||
+        (movie.cover?.trim().isNotEmpty ?? false);
+    return hasArtwork || trailerChannel() != null;
+  }
 
   Channel toChannel(XtreamConnectionResult connection) {
     final url = _resolveDirect(connection.streamServer, directSource) ??
@@ -100,15 +118,17 @@ class XtreamVodService {
 
   static Future<List<XtreamVodSummary>> fetchCatalog(
     XtreamConnectionResult connection, {
-    Duration timeout = const Duration(seconds: 18),
+    Duration timeout = const Duration(seconds: 35),
   }) async {
-    final results = await Future.wait<List<dynamic>>([
-      _actionList(connection, 'get_vod_categories', timeout),
-      _actionList(connection, 'get_vod_streams', timeout),
-    ]);
-    final categories = _categoryMap(results[0]);
+    final categoriesFuture = _safeActionList(
+      connection,
+      'get_vod_categories',
+      const Duration(seconds: 12),
+    );
+    final streams = await _actionList(connection, 'get_vod_streams', timeout);
+    final categories = _categoryMap(await categoriesFuture);
     final movies = <XtreamVodSummary>[];
-    for (final raw in results[1]) {
+    for (final raw in streams) {
       if (raw is! Map) continue;
       final item = Map<String, dynamic>.from(raw);
       final id = _text(item['stream_id']);
@@ -124,7 +144,10 @@ class XtreamVodService {
             fallback: 'mp4',
           ),
           cover: _firstText(item, const ['stream_icon', 'movie_image', 'cover']),
-          category: categoryId == null ? null : categories[categoryId],
+          category: categoryId == null
+              ? _firstText(item, const ['category_name', 'category'])
+              : categories[categoryId] ??
+                  _firstText(item, const ['category_name', 'category']),
           rating: _firstText(item, const ['rating', 'rating_5based']),
           releaseDate: _firstText(item, const ['releasedate', 'releaseDate', 'year']),
           genre: _firstText(item, const ['genre']),
@@ -197,6 +220,22 @@ class XtreamVodService {
       directSource: _firstText(movieData, const ['direct_source']) ??
           _firstText(info, const ['direct_source']),
     );
+  }
+
+  static Future<List<dynamic>> _safeActionList(
+    XtreamConnectionResult connection,
+    String action,
+    Duration timeout,
+  ) async {
+    try {
+      return await _actionList(connection, action, timeout);
+    } on TimeoutException {
+      return const <dynamic>[];
+    } on FormatException {
+      return const <dynamic>[];
+    } catch (_) {
+      return const <dynamic>[];
+    }
   }
 
   static Future<List<dynamic>> _actionList(

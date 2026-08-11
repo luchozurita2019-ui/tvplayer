@@ -141,11 +141,48 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
       final unlocked = await requestParentalUnlock(context);
       if (!unlocked || !mounted) return;
     }
+
+    try {
+      final details = await XtreamVodService.fetchDetails(
+        connection,
+        movie,
+        timeout: const Duration(seconds: 12),
+      );
+      if (!mounted) return;
+      if (!details.hasPresentationMedia) {
+        await _playMovieDirect(connection, movie, details: details);
+        return;
+      }
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => XtreamMovieDetailScreen(
+            connection: connection,
+            movie: movie,
+            initialDetails: details,
+          ),
+        ),
+      );
+    } catch (_) {
+      if (!mounted) return;
+      await _playMovieDirect(connection, movie);
+    }
+  }
+
+  Future<void> _playMovieDirect(
+    XtreamConnectionResult connection,
+    XtreamVodSummary movie, {
+    XtreamVodDetails? details,
+  }) async {
+    final channel = details?.toChannel(connection) ?? movie.toChannel(connection);
+    final provider = context.read<IptvProvider>();
     await Navigator.of(context).push(
       MaterialPageRoute(
-        builder: (_) => XtreamMovieDetailScreen(
-          connection: connection,
-          movie: movie,
+        builder: (_) => PlayerScreen(
+          channel: channel,
+          playlist: [channel],
+          initialIndex: 0,
+          settings: provider.playbackSettings,
+          isLiveContent: false,
         ),
       ),
     );
@@ -372,11 +409,13 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 class XtreamMovieDetailScreen extends StatefulWidget {
   final XtreamConnectionResult connection;
   final XtreamVodSummary movie;
+  final XtreamVodDetails? initialDetails;
 
   const XtreamMovieDetailScreen({
     super.key,
     required this.connection,
     required this.movie,
+    this.initialDetails,
   });
 
   @override
@@ -391,7 +430,9 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
   void initState() {
     super.initState();
     _parental.addListener(_onParentalChanged);
-    _future = XtreamVodService.fetchDetails(widget.connection, widget.movie);
+    _future = widget.initialDetails != null
+        ? Future<XtreamVodDetails>.value(widget.initialDetails!)
+        : XtreamVodService.fetchDetails(widget.connection, widget.movie);
   }
 
   @override

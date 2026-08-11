@@ -144,13 +144,16 @@ class XtreamSeriesService {
     XtreamConnectionResult connection, {
     Duration timeout = const Duration(seconds: 18),
   }) async {
-    final results = await Future.wait<List<dynamic>>([
-      _actionList(connection, 'get_series_categories', timeout),
-      _actionList(connection, 'get_series', timeout),
-    ]);
+    final categoriesFuture = _safeActionList(
+      connection,
+      'get_series_categories',
+      const Duration(seconds: 12),
+    );
+    final rawSeries = await _actionList(connection, 'get_series', timeout);
+    final rawCategories = await categoriesFuture;
 
     final categories = <String, String>{};
-    for (final raw in results[0]) {
+    for (final raw in rawCategories) {
       if (raw is! Map) continue;
       final item = Map<String, dynamic>.from(raw);
       final id = item['category_id']?.toString().trim() ?? '';
@@ -159,19 +162,25 @@ class XtreamSeriesService {
     }
 
     final series = <XtreamSeriesSummary>[];
-    for (final raw in results[1]) {
+    for (final raw in rawSeries) {
       if (raw is! Map) continue;
       final item = Map<String, dynamic>.from(raw);
       final id = item['series_id']?.toString().trim() ?? '';
       final name = item['name']?.toString().trim() ?? '';
       if (id.isEmpty || name.isEmpty) continue;
-      final categoryId = item['category_id']?.toString();
+      final categoryId = _cleanText(item['category_id']);
+      final categoryName = _firstText(
+        item,
+        const ['category_name', 'category'],
+      );
       series.add(
         XtreamSeriesSummary(
           id: id,
           name: name,
           cover: _cleanText(item['cover']),
-          category: categoryId == null ? null : categories[categoryId],
+          category: categoryId == null
+              ? categoryName
+              : categories[categoryId] ?? categoryName,
           plot: _cleanText(item['plot']),
           cast: _cleanText(item['cast']),
           director: _cleanText(item['director']),
@@ -318,6 +327,20 @@ class XtreamSeriesService {
       image: _firstText(info, const ['movie_image', 'cover_big', 'cover']),
       rating: _firstText(info, const ['rating', 'rating_5based']),
     );
+  }
+
+  static Future<List<dynamic>> _safeActionList(
+    XtreamConnectionResult connection,
+    String action,
+    Duration timeout,
+  ) async {
+    try {
+      return await _actionList(connection, action, timeout);
+    } on TimeoutException {
+      return const <dynamic>[];
+    } catch (_) {
+      return const <dynamic>[];
+    }
   }
 
   static Future<List<dynamic>> _actionList(
