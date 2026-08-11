@@ -1,0 +1,1 @@
+Trigger validation for Xtream catalog resilience changes.
