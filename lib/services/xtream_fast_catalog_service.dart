@@ -96,6 +96,13 @@ class XtreamFastCatalogService {
   static const Duration _movieTimeout = Duration(seconds: 35);
   static const Duration _seriesTimeout = Duration(seconds: 35);
 
+  // Build temporal de diagnóstico: Series siempre mide una carga fresca de red.
+  // El caché existente no se borra, simplemente no se usa como atajo durante la prueba.
+  static const bool _seriesTimingDiagnosticMode = true;
+  String? _lastSeriesDiagnostics;
+
+  String? get lastSeriesDiagnostics => _lastSeriesDiagnostics;
+
   final Map<String, XtreamConnectionResult> _sessions =
       <String, XtreamConnectionResult>{};
   final Map<String, Future<XtreamConnectionResult>> _pendingSessions =
@@ -186,6 +193,7 @@ class XtreamFastCatalogService {
   Future<XtreamSeriesCatalogSnapshot?> loadCachedSeries(
     String playlistUrl,
   ) async {
+    if (_seriesTimingDiagnosticMode) return null;
     final raw = await _readCache(playlistUrl, 'series');
     if (raw == null) return null;
     try {
@@ -262,37 +270,67 @@ class XtreamFastCatalogService {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
+    final totalWatch = Stopwatch()..start();
+    final connectionWatch = Stopwatch()..start();
     var connection = await _connectionForSeriesCatalog(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
+    connectionWatch.stop();
+    var connectionElapsed = connectionWatch.elapsed;
 
     try {
-      return await _fetchSeries(connection, playlistUrl, onProgress);
+      return await _fetchSeries(
+        connection,
+        playlistUrl,
+        onProgress,
+        totalWatch: totalWatch,
+        connectionElapsed: connectionElapsed,
+      );
     } on _XtreamHttpException catch (error) {
-      // Si el acceso directo basado en get.php fue rechazado, recién aquí
-      // pagamos el costo de autenticar/resolver player_api.php completamente.
       if (error.statusCode != 401 && error.statusCode != 403) rethrow;
       invalidateSession(playlistUrl);
+      final authWatch = Stopwatch()..start();
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
-      return _fetchSeries(connection, playlistUrl, onProgress);
+      authWatch.stop();
+      connectionElapsed += authWatch.elapsed;
+      return _fetchSeries(
+        connection,
+        playlistUrl,
+        onProgress,
+        totalWatch: totalWatch,
+        connectionElapsed: connectionElapsed,
+      );
     } on TimeoutException {
       rethrow;
     } on SocketException {
       rethrow;
     } catch (error) {
       try {
+        final fallbackWatch = Stopwatch()..start();
         final series = await XtreamSeriesService.fetchCatalog(connection);
+        fallbackWatch.stop();
         final categories = _categoriesFromSeries(series);
-        final snapshot = XtreamSeriesCatalogSnapshot(
+        if (totalWatch.isRunning) totalWatch.stop();
+        final diagnostic = <String>[
+          'TV FULL · Diagnóstico Series',
+          'Ruta: FALLBACK XtreamSeriesService',
+          'Conexión: ${_formatDiagnosticDuration(connectionElapsed)}',
+          'Fallback catálogo: ${_formatDiagnosticDuration(fallbackWatch.elapsed)}',
+          'TOTAL: ${_formatDiagnosticDuration(totalWatch.elapsed)}',
+          'Elementos: ${series.length}',
+          'Fecha: ${DateTime.now().toIso8601String()}',
+        ].join('\n');
+        _lastSeriesDiagnostics = diagnostic;
+        debugPrint(diagnostic);
+        unawaited(_writeSeriesDiagnostic(diagnostic));
+        return XtreamSeriesCatalogSnapshot(
           connection: connection,
           series: series,
           categories: categories,
           savedAt: DateTime.now(),
           fromCache: false,
         );
-        unawaited(_writeSeriesCache(playlistUrl, snapshot));
-        return snapshot;
       } catch (_) {
         throw error;
       }
@@ -385,8 +423,10 @@ class XtreamFastCatalogService {
   Future<XtreamSeriesCatalogSnapshot> _fetchSeries(
     XtreamConnectionResult connection,
     String playlistUrl,
-    XtreamCatalogProgressCallback? onProgress,
-  ) async {
+    XtreamCatalogProgressCallback? onProgress, {
+    required Stopwatch totalWatch,
+    required Duration connectionElapsed,
+  }) async {
     onProgress?.call(const XtreamCatalogProgress(
       section: 'SERIES',
       phase: 'Cargando categorías',
@@ -394,13 +434,60 @@ class XtreamFastCatalogService {
       totalSteps: 2,
     ));
 
-    // Las categorías son pequeñas y opcionales. Las arrancamos a la vez que la
-    // lista pesada para que nunca retrasen el inicio de get_series.
-    final categoriesFuture = _downloadActionBody(
-      connection,
-      'get_series_categories',
-      _categoryTimeout,
-    ).catchError((_) => '[]');
+    Future<_SeriesTimedBody> downloadCategories() async {
+      final watch = Stopwatch()..start();
+      var bytes = 0;
+      try {
+        final body = await _downloadActionBody(
+          connection,
+          'get_series_categories',
+          _categoryTimeout,
+          onBytes: (value) => bytes = value,
+        );
+        watch.stop();
+        return _SeriesTimedBody(
+          body: body,
+          elapsed: watch.elapsed,
+          bytes: bytes,
+          success: true,
+        );
+      } catch (_) {
+        if (watch.isRunning) watch.stop();
+        return _SeriesTimedBody(
+          body: '[]',
+          elapsed: watch.elapsed,
+          bytes: bytes,
+          success: false,
+        );
+      }
+    }
+
+    Future<_SeriesTimedBody> downloadItems() async {
+      final watch = Stopwatch()..start();
+      var bytes = 0;
+      final body = await _downloadActionBody(
+        connection,
+        'get_series',
+        _seriesTimeout,
+        onBytes: (value) {
+          bytes = value;
+          onProgress?.call(XtreamCatalogProgress(
+            section: 'SERIES',
+            phase: 'Cargando lista',
+            step: 2,
+            totalSteps: 2,
+            receivedBytes: value,
+          ));
+        },
+      );
+      watch.stop();
+      return _SeriesTimedBody(
+        body: body,
+        elapsed: watch.elapsed,
+        bytes: bytes,
+        success: true,
+      );
+    }
 
     onProgress?.call(const XtreamCatalogProgress(
       section: 'SERIES',
@@ -408,25 +495,12 @@ class XtreamFastCatalogService {
       step: 2,
       totalSteps: 2,
     ));
-    final itemsFuture = _downloadActionBody(
-      connection,
-      'get_series',
-      _seriesTimeout,
-      onBytes: (bytes) => onProgress?.call(XtreamCatalogProgress(
-        section: 'SERIES',
-        phase: 'Cargando lista',
-        step: 2,
-        totalSteps: 2,
-        receivedBytes: bytes,
-      )),
-    );
-
-    final bodies = await Future.wait<String>([
-      categoriesFuture,
-      itemsFuture,
+    final bodies = await Future.wait<_SeriesTimedBody>([
+      downloadCategories(),
+      downloadItems(),
     ]);
-    final categoriesBody = bodies[0];
-    final itemsBody = bodies[1];
+    final categoriesResult = bodies[0];
+    final itemsResult = bodies[1];
 
     onProgress?.call(const XtreamCatalogProgress(
       section: 'SERIES',
@@ -434,15 +508,21 @@ class XtreamFastCatalogService {
       step: 2,
       totalSteps: 2,
     ));
+    final prepareWatch = Stopwatch()..start();
     final prepared = await compute(_prepareSeriesCatalog, <String, String>{
-      'categories': categoriesBody,
-      'items': itemsBody,
+      'categories': categoriesResult.body,
+      'items': itemsResult.body,
     });
+    prepareWatch.stop();
+
+    final materializeWatch = Stopwatch()..start();
     final series = _seriesListFromPrepared(prepared['items']);
     if (series.isEmpty) {
       throw const FormatException('Xtream no devolvió series válidas.');
     }
     final categories = _stringList(prepared['categories']);
+    materializeWatch.stop();
+
     final snapshot = XtreamSeriesCatalogSnapshot(
       connection: connection,
       series: List<XtreamSeriesSummary>.unmodifiable(series),
@@ -451,20 +531,39 @@ class XtreamFastCatalogService {
       fromCache: false,
     );
 
-    // Sólo una conexión autenticada/resuelta se comparte con las otras
-    // secciones. La provisional existe únicamente para acelerar el catálogo.
     if (connection.serverName != null ||
         connection.status != null ||
         connection.expiration != null) {
       rememberConnection(connection);
     }
-    unawaited(_writePreparedCache(
-      playlistUrl,
-      'series',
-      connection,
-      prepared,
-      snapshot.savedAt,
-    ));
+
+    if (totalWatch.isRunning) totalWatch.stop();
+    final diagnostic = <String>[
+      'TV FULL · Diagnóstico Series',
+      'Ruta: motor rápido',
+      'Conexión: ${_formatDiagnosticDuration(connectionElapsed)}',
+      'Categorías: ${_formatDiagnosticDuration(categoriesResult.elapsed)} · ${_formatDiagnosticBytes(categoriesResult.bytes)} · ${categoriesResult.success ? 'OK' : 'fallback vacío'}',
+      'get_series: ${_formatDiagnosticDuration(itemsResult.elapsed)} · ${_formatDiagnosticBytes(itemsResult.bytes)}',
+      'JSON + isolate: ${_formatDiagnosticDuration(prepareWatch.elapsed)}',
+      'Materializar objetos: ${_formatDiagnosticDuration(materializeWatch.elapsed)}',
+      'TOTAL: ${_formatDiagnosticDuration(totalWatch.elapsed)}',
+      'Series: ${series.length}',
+      'Categorías finales: ${categories.length}',
+      'Fecha: ${DateTime.now().toIso8601String()}',
+    ].join('\n');
+    _lastSeriesDiagnostics = diagnostic;
+    debugPrint(diagnostic);
+    unawaited(_writeSeriesDiagnostic(diagnostic));
+
+    if (!_seriesTimingDiagnosticMode) {
+      unawaited(_writePreparedCache(
+        playlistUrl,
+        'series',
+        connection,
+        prepared,
+        snapshot.savedAt,
+      ));
+    }
     return snapshot;
   }
 
@@ -579,6 +678,16 @@ class XtreamFastCatalogService {
     }
   }
 
+  Future<void> _writeSeriesDiagnostic(String content) async {
+    try {
+      final directory = await _ensureCacheDirectory();
+      final file = File('${directory.path}/series_diagnostic.txt');
+      await file.writeAsString(content, flush: true);
+    } catch (_) {
+      // El diagnóstico nunca debe afectar el catálogo.
+    }
+  }
+
   Future<File> _cacheFile(String playlistUrl, String kind) async {
     final directory = await _ensureCacheDirectory();
     final digest = sha256.convert(utf8.encode(playlistUrl.trim())).toString();
@@ -594,6 +703,30 @@ class XtreamFastCatalogService {
     _cacheDirectory = directory;
     return directory;
   }
+}
+
+class _SeriesTimedBody {
+  final String body;
+  final Duration elapsed;
+  final int bytes;
+  final bool success;
+
+  const _SeriesTimedBody({
+    required this.body,
+    required this.elapsed,
+    required this.bytes,
+    required this.success,
+  });
+}
+
+String _formatDiagnosticDuration(Duration value) =>
+    '${(value.inMicroseconds / 1000000).toStringAsFixed(3)} s';
+
+String _formatDiagnosticBytes(int bytes) {
+  if (bytes >= 1024 * 1024) {
+    return '${(bytes / (1024 * 1024)).toStringAsFixed(2)} MB';
+  }
+  return '${(bytes / 1024).toStringAsFixed(1)} KB';
 }
 
 class _XtreamHttpException implements Exception {
