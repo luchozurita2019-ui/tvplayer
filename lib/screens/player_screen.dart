@@ -205,55 +205,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _onBufferingStarted();
       }
 
-      if (!buffering) {
+      // IMPORTANTE: buffering=false sólo significa que mpv dejó el estado de
+      // buffering. Algunos servidores TS emiten este evento antes del primer
+      // frame real. No cancelamos el timeout ni aprendemos compatibilidad hasta
+      // confirmar progreso/salida real de audio o video.
+      if (!buffering && _hasEverPlayed) {
         _onBufferingRecovered();
-        _connectTimeoutTimer?.cancel();
-        _retryTimer?.cancel();
-        _retryTimer = null;
-        _transientLiveFailureTimer?.cancel();
-        _transientLiveFailureTimer = null;
-        _hasEverPlayed = true;
-        _retryCount = 0;
         _lastProgressAt = DateTime.now();
-        // Leemos el formato real una sola vez por canal. Esto conserva la
-        // detección de HLS para URLs sin .m3u8 sin mantener un polling técnico.
-        unawaited(_refreshContainerFormat());
       }
 
       setState(() {
         _isBuffering = buffering;
-        if (!buffering) {
+        if (!buffering && _hasEverPlayed) {
           _reconnecting = false;
         }
       });
 
-      if (!buffering &&
-          (_startupStopwatch?.isRunning ?? false) &&
-          _startupSession == _sessionId) {
-        _startupStopwatch!.stop();
-        final elapsed = _startupStopwatch!.elapsedMilliseconds;
-        final url = _startupUrl;
-
-        int? zapElapsed;
-        if ((_zapStopwatch?.isRunning ?? false) && _zapSession == _sessionId) {
-          _zapStopwatch!.stop();
-          zapElapsed = _zapStopwatch!.elapsedMilliseconds;
-          _zapSession = null;
-        }
-
-        if (mounted) {
-          setState(() {
-            _lastStartupMs = elapsed;
-            if (zapElapsed != null) _lastZapMs = zapElapsed;
-          });
-        }
-        if (url != null) {
-          unawaited(_metrics.recordStartup(url, elapsed));
-          if (zapElapsed != null) {
-            unawaited(_metrics.recordZap(url, zapElapsed));
-          }
-          unawaited(_compatibility.recordSuccess(url, _compatibilityMode));
-        }
+      if (!buffering) {
+        _tryConfirmPlaybackFromDecodedOutput();
       }
     });
 
@@ -270,7 +239,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _playingSub = _player.stream.playing.listen((playing) {
       if (!_acceptPlaybackEvents) return;
       _isPlaying = playing;
-      if (playing) _lastProgressAt = DateTime.now();
+      if (playing) {
+        _lastProgressAt = DateTime.now();
+        _tryConfirmPlaybackFromDecodedOutput();
+      }
     });
 
     _positionSub = _player.stream.position.listen((position) {
@@ -280,6 +252,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _lastProgressAt = DateTime.now();
         _transientLiveFailureTimer?.cancel();
         _transientLiveFailureTimer = null;
+        // El avance del reloj es la evidencia más fuerte de que el stream
+        // realmente empezó a reproducir, no sólo de que terminó "buffering".
+        _confirmPlaybackStarted();
       }
     });
 
@@ -298,6 +273,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _videoHeight = height;
         _pixelFormat = pixelFormat;
       });
+      _tryConfirmPlaybackFromDecodedOutput();
     });
 
     _trackSub = _player.stream.track.listen((track) {
@@ -320,6 +296,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _audioBitrate = audio.bitrate!.toDouble();
         }
       });
+      _tryConfirmPlaybackFromDecodedOutput();
     });
 
     _audioBitrateSub = _player.stream.audioBitrate.listen((bitrate) {
@@ -335,6 +312,75 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _watchdogTimer = Timer.periodic(_watchdogInterval, (_) => _checkStall());
 
     unawaited(_initializeAndPlay());
+  }
+
+  void _tryConfirmPlaybackFromDecodedOutput() {
+    if (_hasEverPlayed ||
+        !_acceptPlaybackEvents ||
+        _opening ||
+        !_isPlaying ||
+        _isBuffering) {
+      return;
+    }
+
+    final hasVideoOutput = (_videoWidth ?? 0) > 0 && (_videoHeight ?? 0) > 0;
+    final hasAudioOutput = (_audioCodec?.trim().isNotEmpty ?? false);
+    if (hasVideoOutput || hasAudioOutput) {
+      _confirmPlaybackStarted();
+    }
+  }
+
+  void _confirmPlaybackStarted() {
+    if (!mounted ||
+        _hasEverPlayed ||
+        !_acceptPlaybackEvents ||
+        _opening ||
+        _startupSession != _sessionId) {
+      return;
+    }
+
+    _hasEverPlayed = true;
+    _retryCount = 0;
+    _lastProgressAt = DateTime.now();
+    _connectTimeoutTimer?.cancel();
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _transientLiveFailureTimer?.cancel();
+    _transientLiveFailureTimer = null;
+
+    // Leemos el formato real una sola vez cuando YA existe reproducción.
+    unawaited(_refreshContainerFormat());
+
+    int? elapsed;
+    if (_startupStopwatch?.isRunning ?? false) {
+      _startupStopwatch!.stop();
+      elapsed = _startupStopwatch!.elapsedMilliseconds;
+    }
+
+    int? zapElapsed;
+    if ((_zapStopwatch?.isRunning ?? false) && _zapSession == _sessionId) {
+      _zapStopwatch!.stop();
+      zapElapsed = _zapStopwatch!.elapsedMilliseconds;
+      _zapSession = null;
+    }
+
+    final url = _startupUrl;
+    setState(() {
+      _reconnecting = false;
+      if (elapsed != null) _lastStartupMs = elapsed;
+      if (zapElapsed != null) _lastZapMs = zapElapsed;
+      _engineDiagnostic =
+          'Reproducción confirmada · ${_compatibilityMode.label}';
+    });
+
+    if (url != null && elapsed != null) {
+      unawaited(_metrics.recordStartup(url, elapsed));
+      if (zapElapsed != null) {
+        unawaited(_metrics.recordZap(url, zapElapsed));
+      }
+      // Recién ahora aprendemos que este modo funciona para el host.
+      unawaited(_compatibility.recordSuccess(url, _compatibilityMode));
+    }
   }
 
   Future<void> _initializeAndPlay() async {
@@ -1331,7 +1377,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _startNormalProbeFallback(session);
           return;
         }
-        _handleFailure('El canal tardó demasiado en responder', silent: true);
+        _handleFailure('El servidor respondió, pero no llegó el primer frame', silent: true);
       });
     } on TimeoutException {
       if (!mounted || session != _sessionId) return;
