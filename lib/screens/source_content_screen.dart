@@ -100,6 +100,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                 childAspectRatio: columns == 1 ? 2.55 : 1.35,
                 children: [
                   _ContentCard(
+                    autofocus: _androidTvBuild,
                     icon: Icons.live_tv_rounded,
                     title: 'TV en vivo',
                     count: _buckets.count(IptvContentKind.live),
@@ -224,6 +225,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
 }
 
 class _ContentCard extends StatelessWidget {
+  final bool autofocus;
   final IconData icon;
   final String title;
   final int count;
@@ -233,6 +235,7 @@ class _ContentCard extends StatelessWidget {
   final VoidCallback onTap;
 
   const _ContentCard({
+    this.autofocus = false,
     required this.icon,
     required this.title,
     required this.count,
@@ -251,6 +254,21 @@ class _ContentCard extends StatelessWidget {
     return Card(
       clipBehavior: Clip.antiAlias,
       child: InkWell(
+        autofocus: enabled && autofocus,
+        focusColor: accent.withValues(alpha: 0.30),
+        onFocusChange: (focused) {
+          if (focused && _androidTvBuild) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                Scrollable.ensureVisible(
+                  context,
+                  duration: const Duration(milliseconds: 160),
+                  alignment: 0.4,
+                );
+              }
+            });
+          }
+        },
         onTap: enabled ? onTap : null,
         child: Container(
           decoration: BoxDecoration(

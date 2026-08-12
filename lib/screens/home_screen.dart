@@ -1291,6 +1291,7 @@ class _PlaylistGrid extends StatelessWidget {
             return _PlaylistCard(
               playlist: playlist,
               isFavorite: favoriteIds.contains(playlist.id),
+              autofocus: _androidTvBuild && index == 0,
               onToggleFavorite: () => onToggleFavorite(playlist),
             );
           },
@@ -1303,11 +1304,13 @@ class _PlaylistGrid extends StatelessWidget {
 class _PlaylistCard extends StatelessWidget {
   final Playlist playlist;
   final bool isFavorite;
+  final bool autofocus;
   final VoidCallback onToggleFavorite;
 
   const _PlaylistCard({
     required this.playlist,
     required this.isFavorite,
+    required this.autofocus,
     required this.onToggleFavorite,
   });
 
@@ -1358,6 +1361,21 @@ class _PlaylistCard extends StatelessWidget {
       color: Colors.transparent,
       borderRadius: BorderRadius.circular(18),
       child: InkWell(
+        autofocus: autofocus,
+        focusColor: _proBlue.withValues(alpha: 0.24),
+        onFocusChange: (focused) {
+          if (focused && _androidTvBuild) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (context.mounted) {
+                Scrollable.ensureVisible(
+                  context,
+                  duration: const Duration(milliseconds: 180),
+                  alignment: 0.35,
+                );
+              }
+            });
+          }
+        },
         onTap: () => _openPlaylist(context),
         borderRadius: BorderRadius.circular(18),
         child: Ink(

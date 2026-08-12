@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 import 'package:media_kit/media_kit.dart';
 
@@ -32,6 +33,23 @@ class IptvPlayerApp extends StatelessWidget {
       child: MaterialApp(
         title: 'TV FULL',
         debugShowCheckedModeBanner: false,
+        builder: (context, child) {
+          if (!_androidTvBuild || child == null) {
+            return child ?? const SizedBox.shrink();
+          }
+          return Shortcuts(
+            shortcuts: const <ShortcutActivator, Intent>{
+              SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),
+              SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),
+            },
+            child: FocusTraversalGroup(
+              policy: ReadingOrderTraversalPolicy(),
+              child: child,
+            ),
+          );
+        },
         theme: ThemeData(
           useMaterial3: true,
           brightness: Brightness.dark,

@@ -221,6 +221,15 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     if (!_androidTvBuild || event is! KeyDownEvent) {
       return KeyEventResult.ignored;
     }
+    final key = event.logicalKey;
+    final isCenter =
+        key == LogicalKeyboardKey.select ||
+        key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter;
+    if (isCenter && !_overlayVisible) {
+      _showOverlay();
+      return KeyEventResult.handled;
+    }
     _showOverlay();
     return KeyEventResult.ignored;
   }

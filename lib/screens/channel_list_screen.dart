@@ -919,6 +919,7 @@ class _CatalogGrid extends StatelessWidget {
               mode: mode,
               channel: channel,
               isFavorite: isFavorite(channel),
+              autofocus: _androidTvBuild && index == 0,
               onFavoriteToggle: () => onFavoriteToggle(channel),
               onTap: () => onPlay(channel),
             );
@@ -1029,6 +1030,7 @@ class _CompactCatalogLayout extends StatelessWidget {
                           mode: mode,
                           channel: channel,
                           isFavorite: isFavorite(channel),
+                          autofocus: _androidTvBuild && index == 0,
                           onFavoriteToggle: () => onFavoriteToggle(channel),
                           onTap: () => onPlay(channel),
                         );
@@ -1046,6 +1048,7 @@ class _CatalogCard extends StatefulWidget {
   final _CatalogMode mode;
   final Channel channel;
   final bool isFavorite;
+  final bool autofocus;
   final VoidCallback onFavoriteToggle;
   final VoidCallback onTap;
 
@@ -1053,6 +1056,7 @@ class _CatalogCard extends StatefulWidget {
     required this.mode,
     required this.channel,
     required this.isFavorite,
+    required this.autofocus,
     required this.onFavoriteToggle,
     required this.onTap,
   });
@@ -1089,10 +1093,22 @@ class _CatalogCardState extends State<_CatalogCard> {
             ),
           ),
           child: InkWell(
+            autofocus: widget.autofocus,
             onFocusChange: (value) {
               if (mounted) setState(() => _focused = value);
+              if (value && _androidTvBuild) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (mounted) {
+                    Scrollable.ensureVisible(
+                      context,
+                      duration: const Duration(milliseconds: 150),
+                      alignment: 0.35,
+                    );
+                  }
+                });
+              }
             },
-            focusColor: primary.withValues(alpha: 0.18),
+            focusColor: primary.withValues(alpha: 0.24),
             onTap: widget.onTap,
             child: widget.mode.usesPoster
                 ? _PosterCardBody(
