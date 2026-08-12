@@ -1,4 +1,4 @@
-name: Apply Android Test 2 fixes
+name: Build Android Test 2
 
 on:
   push:
@@ -7,26 +7,21 @@ on:
     paths:
       - '.github/workflows/apply-android-test2-fixes.yml'
 
-permissions:
-  contents: write
-
 jobs:
-  patch-and-build:
+  build-android-test2:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout patcher
-        uses: actions/checkout@v4
-        with:
-          ref: android-test2-fixes-patcher
-          path: patcher
-
       - name: Checkout working branch
         uses: actions/checkout@v4
         with:
           ref: performance-engine-v38-hotplayer-baseline
-          fetch-depth: 0
-          path: app
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
@@ -34,61 +29,16 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Apply Android Test 2 fixes
-        working-directory: app
-        run: python3 ../patcher/.github/scripts/apply_android_test2_fixes.py
-
-      - name: Format changed Dart files
-        working-directory: app
-        run: |
-          dart format \
-            lib/screens/source_content_screen.dart \
-            lib/widgets/live_video_view.dart \
-            lib/screens/player_screen.dart \
-            lib/services/xtream_service.dart \
-            lib/providers/iptv_provider.dart
-
       - name: Get dependencies
-        working-directory: app
         run: flutter pub get
 
-      - name: Analyze existing project
-        working-directory: app
+      - name: Analyze current source
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Verify surgical diff
-        working-directory: app
-        shell: bash
-        run: |
-          git diff --name-only
-          unexpected=$(git diff --name-only | grep -vE '^(lib/screens/source_content_screen.dart|lib/widgets/live_video_view.dart|lib/screens/player_screen.dart|lib/services/xtream_service.dart|lib/providers/iptv_provider.dart)$' || true)
-          if [ -n "$unexpected" ]; then
-            echo "Unexpected files changed:"
-            echo "$unexpected"
-            exit 1
-          fi
-
-      - name: Commit fixes to working branch
-        working-directory: app
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add \
-            lib/screens/source_content_screen.dart \
-            lib/widgets/live_video_view.dart \
-            lib/screens/player_screen.dart \
-            lib/services/xtream_service.dart \
-            lib/providers/iptv_provider.dart
-          git commit -m "Improve Android UI and transient streaming compatibility"
-          git push origin HEAD:performance-engine-v38-hotplayer-baseline
-
       - name: Generate Android project
-        working-directory: app
         run: flutter create --platforms=android .
 
       - name: Allow Internet and HTTP IPTV providers
-        working-directory: app
         shell: bash
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
@@ -99,12 +49,22 @@ jobs:
             sed -i 's/<application/<application android:usesCleartextTraffic="true"/' "$MANIFEST"
           fi
 
-      - name: Build Android Test 2 APK
-        working-directory: app
-        run: flutter build apk --release
+      - name: Build release APK with one network retry
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "Android build attempt $attempt"
+            if flutter build apk --release; then
+              exit 0
+            fi
+            if [ "$attempt" -eq 2 ]; then
+              exit 1
+            fi
+            echo "Transient dependency download failure; retrying in 8 seconds..."
+            sleep 8
+          done
 
       - name: Prepare artifact
-        working-directory: app
         shell: bash
         run: |
           mkdir -p dist
@@ -115,6 +75,6 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: TV-FULL-PRO-Android-Test2
-          path: app/dist/
+          path: dist/
           if-no-files-found: error
           retention-days: 30
