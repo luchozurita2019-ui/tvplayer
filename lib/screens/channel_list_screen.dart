@@ -59,6 +59,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   final ParentalControlService _parental = ParentalControlService.instance;
   double _sidebarWidth = 320;
   bool _sidebarCollapsed = false;
+  bool _openingPlayer = false;
 
   static const double _sidebarMinWidth = 230;
   static const double _sidebarMaxWidth = 480;
@@ -364,23 +365,33 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     Channel channel,
     IptvProvider provider,
   ) async {
+    // Evita que dos clics rapidos apilen dos rutas PlayerScreen. El bloqueo
+    // se activa antes del primer await, por lo que un segundo clic en el
+    // mismo frame/event loop se descarta mientras el reproductor esta abierto.
+    if (_openingPlayer) return;
+
     final index = channels.indexOf(channel);
     if (index < 0) return;
 
+    _openingPlayer = true;
     ArtworkCacheService.instance.pauseForPlayback();
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          channel: channel,
-          playlist: channels,
-          initialIndex: index,
-          settings: provider.playbackSettings,
-          isLiveContent:
-              _mode == _CatalogMode.live || _mode == _CatalogMode.radios,
+    try {
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+            channel: channel,
+            playlist: channels,
+            initialIndex: index,
+            settings: provider.playbackSettings,
+            isLiveContent:
+                _mode == _CatalogMode.live || _mode == _CatalogMode.radios,
+          ),
         ),
-      ),
-    );
-    ArtworkCacheService.instance.resumeBrowsing();
+      );
+    } finally {
+      _openingPlayer = false;
+      ArtworkCacheService.instance.resumeBrowsing();
+    }
   }
 }
 
