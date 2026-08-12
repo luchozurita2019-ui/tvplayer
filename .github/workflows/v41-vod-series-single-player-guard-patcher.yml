@@ -40,20 +40,27 @@ jobs:
           python3 - <<'PY'
           from pathlib import Path
           import re
-          files = [p for p in Path('lib/screens').glob('*.dart') if 'PlayerScreen(' in p.read_text(encoding='utf-8')]
-          if not files:
-              raise SystemExit('No PlayerScreen callers found')
-          unguarded = []
-          for p in files:
+
+          direct_player = re.compile(r'builder: \(_\) => PlayerScreen\(')
+          unguarded = re.compile(r'Navigator\.of\(context\)\.push\([\s\S]{0,220}?builder: \(_\) => PlayerScreen\(')
+          guarded = re.compile(r'PlayerRouteGuard\.push\([\s\S]{0,220}?builder: \(_\) => PlayerScreen\(')
+
+          files = []
+          total_guarded = 0
+          for p in Path('lib/screens').glob('*.dart'):
               text = p.read_text(encoding='utf-8')
-              pattern = re.compile(r'Navigator\.of\(context\)\.push\([\s\S]{0,180}?builder: \(_\) => PlayerScreen\(')
-              if pattern.search(text):
-                  unguarded.append(str(p))
+              if not direct_player.search(text):
+                  continue
+              files.append(p)
               if '../services/player_route_guard.dart' not in text:
                   raise SystemExit(f'Missing PlayerRouteGuard import: {p}')
-          if unguarded:
-              raise SystemExit('Unguarded PlayerScreen routes: ' + ', '.join(unguarded))
-          print('Todas las aperturas directas de PlayerScreen encontradas usan PlayerRouteGuard.')
+              if unguarded.search(text):
+                  raise SystemExit(f'Unguarded PlayerScreen route: {p}')
+              total_guarded += len(guarded.findall(text))
+
+          if not files or total_guarded < 3:
+              raise SystemExit(f'Expected >=3 guarded PlayerScreen routes, got {total_guarded}')
+          print(f'Rutas PlayerScreen protegidas: {total_guarded} en {len(files)} archivos.')
           PY
 
       - name: Commit and push working branch
