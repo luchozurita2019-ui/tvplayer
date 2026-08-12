@@ -5,6 +5,7 @@ on:
     branches:
       - feature-source-types-v1
       - performance-engine-v37-compatibility
+      - performance-engine-v38-hotplayer-baseline
   workflow_dispatch:
 
 jobs:

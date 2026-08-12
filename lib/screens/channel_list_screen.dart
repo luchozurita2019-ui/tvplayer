@@ -1,34 +1,42 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
+import '../services/artwork_cache_service.dart';
+import '../services/parental_control_service.dart';
+import '../widgets/cached_artwork_image.dart';
+import '../widgets/parental_lock_button.dart';
+import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
 enum _CatalogMode { live, movies, series, radios }
 
 extension on _CatalogMode {
   String get title => switch (this) {
-        _CatalogMode.live => 'TV en vivo',
-        _CatalogMode.movies => 'Películas',
-        _CatalogMode.series => 'Series',
-        _CatalogMode.radios => 'Radios',
-      };
+    _CatalogMode.live => 'TV en vivo',
+    _CatalogMode.movies => 'Películas',
+    _CatalogMode.series => 'Series',
+    _CatalogMode.radios => 'Radios',
+  };
 
   String get itemLabel => switch (this) {
-        _CatalogMode.live => 'canales',
-        _CatalogMode.movies => 'películas',
-        _CatalogMode.series => 'series',
-        _CatalogMode.radios => 'radios',
-      };
+    _CatalogMode.live => 'canales',
+    _CatalogMode.movies => 'películas',
+    _CatalogMode.series => 'series',
+    _CatalogMode.radios => 'radios',
+  };
 
   IconData get icon => switch (this) {
-        _CatalogMode.live => Icons.live_tv_rounded,
-        _CatalogMode.movies => Icons.movie_creation_rounded,
-        _CatalogMode.series => Icons.video_library_rounded,
-        _CatalogMode.radios => Icons.radio_rounded,
-      };
+    _CatalogMode.live => Icons.live_tv_rounded,
+    _CatalogMode.movies => Icons.movie_creation_rounded,
+    _CatalogMode.series => Icons.video_library_rounded,
+    _CatalogMode.radios => Icons.radio_rounded,
+  };
 
   bool get usesPoster =>
       this == _CatalogMode.movies || this == _CatalogMode.series;
@@ -49,6 +57,16 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   late List<String> _groups;
   late Map<String, int> _groupCounts;
 
+  final ParentalControlService _parental = ParentalControlService.instance;
+  double _sidebarWidth = 320;
+  bool _sidebarCollapsed = false;
+  bool _openingPlayer = false;
+
+  static const double _sidebarMinWidth = 230;
+  static const double _sidebarMaxWidth = 480;
+  static const String _sidebarWidthKey = 'catalog_sidebar_width_v1';
+  static const String _sidebarCollapsedKey = 'catalog_sidebar_collapsed_v1';
+
   _CatalogMode get _mode {
     final id = widget.playlist.id;
     if (id.endsWith('::movies')) return _CatalogMode.movies;
@@ -60,7 +78,58 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
     _rebuildCategoryCache(widget.playlist);
+    unawaited(_initializeCatalogPreferences());
+  }
+
+  @override
+  void dispose() {
+    _parental.removeListener(_onParentalChanged);
+    super.dispose();
+  }
+
+  Future<void> _initializeCatalogPreferences() async {
+    await _parental.init();
+    final prefs = await SharedPreferences.getInstance();
+    if (!mounted) return;
+    final width = prefs.getDouble(_sidebarWidthKey) ?? 320;
+    setState(() {
+      _sidebarWidth = width
+          .clamp(_sidebarMinWidth, _sidebarMaxWidth)
+          .toDouble();
+      _sidebarCollapsed = prefs.getBool(_sidebarCollapsedKey) ?? false;
+    });
+  }
+
+  void _onParentalChanged() {
+    if (!mounted) return;
+    if (_selectedGroup != null &&
+        _parental.isLocked &&
+        _parental.isProtectedGroup(_selectedGroup)) {
+      _selectedGroup = null;
+    }
+    setState(() {});
+  }
+
+  Future<void> _persistSidebar() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setDouble(_sidebarWidthKey, _sidebarWidth);
+    await prefs.setBool(_sidebarCollapsedKey, _sidebarCollapsed);
+  }
+
+  void _resizeSidebar(double delta) {
+    if (_sidebarCollapsed) return;
+    setState(() {
+      _sidebarWidth = (_sidebarWidth + delta)
+          .clamp(_sidebarMinWidth, _sidebarMaxWidth)
+          .toDouble();
+    });
+  }
+
+  void _toggleSidebar() {
+    setState(() => _sidebarCollapsed = !_sidebarCollapsed);
+    unawaited(_persistSidebar());
   }
 
   @override
@@ -90,9 +159,14 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
-    final playlist = provider.playlistById(widget.playlist.id) ?? widget.playlist;
+    final playlist =
+        provider.playlistById(widget.playlist.id) ?? widget.playlist;
     final channels = _filteredChannels(playlist);
     final mode = _mode;
+    final visibleGroups = _parental.visibleGroups(_groups);
+    final visibleTotal = playlist.channels
+        .where(_parental.canShowChannel)
+        .length;
 
     return Scaffold(
       appBar: AppBar(
@@ -103,10 +177,9 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary
-                    .withValues(alpha: 0.14),
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -138,15 +211,21 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           ],
         ),
         actions: [
+          if (_parental.enabled)
+            ParentalLockButton(
+              unlocked: _parental.isUnlocked,
+              hiddenCategoryCount: _parental.hiddenGroupCount(_groups),
+              onPressed: () => unawaited(_toggleParentalLock()),
+            ),
           if (playlist.isRemote)
             IconButton(
               icon: const Icon(Icons.refresh_rounded),
               tooltip: 'Actualizar lista',
               onPressed: provider.loading
                   ? null
-                  : () => context
-                      .read<IptvProvider>()
-                      .refreshPlaylist(playlist.id),
+                  : () => context.read<IptvProvider>().refreshPlaylist(
+                      playlist.id,
+                    ),
             ),
           const SizedBox(width: 8),
         ],
@@ -158,20 +237,22 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               mode: mode,
               playlist: playlist,
               channels: channels,
-              groups: _groups,
+              groups: visibleGroups,
               groupCounts: _groupCounts,
               selectedGroup: _selectedGroup,
               query: _query,
-              onGroupSelected: (group) {
-                setState(() => _selectedGroup = group);
-              },
+              sidebarWidth: _sidebarWidth,
+              sidebarCollapsed: _sidebarCollapsed,
+              totalVisibleCount: visibleTotal,
+              parentalLocked: _parental.isLocked,
+              isProtectedGroup: _parental.isProtectedGroup,
+              onSidebarResize: _resizeSidebar,
+              onSidebarResizeEnd: () => unawaited(_persistSidebar()),
+              onSidebarToggle: _toggleSidebar,
+              onGroupSelected: (group) => unawaited(_selectGroup(group)),
               onQueryChanged: (value) => setState(() => _query = value),
-              onPlay: (channel) => _openChannel(
-                context,
-                channels,
-                channel,
-                provider,
-              ),
+              onPlay: (channel) =>
+                  _openChannel(context, channels, channel, provider),
               onFavoriteToggle: provider.toggleFavorite,
               isFavorite: provider.isFavorite,
             );
@@ -180,19 +261,13 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           return _CompactCatalogLayout(
             mode: mode,
             channels: channels,
-            groups: _groups,
+            groups: visibleGroups,
             selectedGroup: _selectedGroup,
             query: _query,
-            onGroupSelected: (group) {
-              setState(() => _selectedGroup = group);
-            },
+            onGroupSelected: (group) => unawaited(_selectGroup(group)),
             onQueryChanged: (value) => setState(() => _query = value),
-            onPlay: (channel) => _openChannel(
-              context,
-              channels,
-              channel,
-              provider,
-            ),
+            onPlay: (channel) =>
+                _openChannel(context, channels, channel, provider),
             onFavoriteToggle: provider.toggleFavorite,
             isFavorite: provider.isFavorite,
           );
@@ -201,45 +276,124 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     );
   }
 
+  Future<void> _selectGroup(String? group) async {
+    if (group != null &&
+        _parental.isLocked &&
+        _parental.isProtectedGroup(group)) {
+      final unlocked = await _requestParentalUnlock();
+      if (!unlocked || !mounted) return;
+    }
+    setState(() => _selectedGroup = group);
+  }
+
+  Future<void> _toggleParentalLock() async {
+    if (_parental.isUnlocked) {
+      _parental.lockNow();
+      return;
+    }
+    await _requestParentalUnlock();
+  }
+
+  Future<bool> _requestParentalUnlock() async {
+    final controller = TextEditingController();
+    final pin = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('Contenido protegido'),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          obscureText: true,
+          keyboardType: TextInputType.number,
+          maxLength: 4,
+          decoration: const InputDecoration(
+            labelText: 'PIN parental',
+            counterText: '',
+          ),
+          onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cancelar'),
+          ),
+          FilledButton(
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
+            child: const Text('Desbloquear'),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (!mounted || pin == null) return false;
+    final ok = await _parental.unlock(pin);
+    if (!mounted) return ok;
+    if (!ok) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(const SnackBar(content: Text('PIN incorrecto.')));
+    }
+    return ok;
+  }
+
   List<Channel> _filteredChannels(Playlist playlist) {
     final normalized = _query.trim().toLowerCase();
-    if (_selectedGroup == null && normalized.isEmpty) {
+    final parentalFiltering = _parental.enabled && _parental.isLocked;
+    if (_selectedGroup == null && normalized.isEmpty && !parentalFiltering) {
       return playlist.channels;
     }
 
-    return playlist.channels.where((channel) {
-      if (_selectedGroup != null && channel.group?.trim() != _selectedGroup) {
-        return false;
-      }
-      if (normalized.isEmpty) return true;
+    return playlist.channels
+        .where((channel) {
+          if (!_parental.canShowChannel(channel)) return false;
+          if (_selectedGroup != null &&
+              channel.group?.trim() != _selectedGroup) {
+            return false;
+          }
+          if (normalized.isEmpty) return true;
 
-      final name = channel.name.toLowerCase();
-      final group = channel.group?.toLowerCase() ?? '';
-      return name.contains(normalized) || group.contains(normalized);
-    }).toList(growable: false);
+          final name = channel.name.toLowerCase();
+          final group = channel.group?.toLowerCase() ?? '';
+          return name.contains(normalized) || group.contains(normalized);
+        })
+        .toList(growable: false);
   }
 
-  void _openChannel(
+  Future<void> _openChannel(
     BuildContext context,
     List<Channel> channels,
     Channel channel,
     IptvProvider provider,
-  ) {
+  ) async {
+    // Evita que dos clics rapidos apilen dos rutas PlayerScreen. El bloqueo
+    // se activa antes del primer await, por lo que un segundo clic en el
+    // mismo frame/event loop se descarta mientras el reproductor esta abierto.
+    if (_openingPlayer) return;
+
     final index = channels.indexOf(channel);
     if (index < 0) return;
 
-    Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          channel: channel,
-          playlist: channels,
-          initialIndex: index,
-          settings: provider.playbackSettings,
-          isLiveContent:
-              _mode == _CatalogMode.live || _mode == _CatalogMode.radios,
+    _openingPlayer = true;
+    ArtworkCacheService.instance.pauseForPlayback();
+    try {
+      await PlayerRouteGuard.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+            channel: channel,
+            playlist: channels,
+            initialIndex: index,
+            settings: provider.playbackSettings,
+            isLiveContent:
+                _mode == _CatalogMode.live || _mode == _CatalogMode.radios,
+          ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _openingPlayer = false;
+      ArtworkCacheService.instance.resumeBrowsing();
+    }
   }
 }
 
@@ -251,6 +405,14 @@ class _DesktopCatalogLayout extends StatelessWidget {
   final Map<String, int> groupCounts;
   final String? selectedGroup;
   final String query;
+  final double sidebarWidth;
+  final bool sidebarCollapsed;
+  final int totalVisibleCount;
+  final bool parentalLocked;
+  final bool Function(String?) isProtectedGroup;
+  final ValueChanged<double> onSidebarResize;
+  final VoidCallback onSidebarResizeEnd;
+  final VoidCallback onSidebarToggle;
   final ValueChanged<String?> onGroupSelected;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<Channel> onPlay;
@@ -265,6 +427,14 @@ class _DesktopCatalogLayout extends StatelessWidget {
     required this.groupCounts,
     required this.selectedGroup,
     required this.query,
+    required this.sidebarWidth,
+    required this.sidebarCollapsed,
+    required this.totalVisibleCount,
+    required this.parentalLocked,
+    required this.isProtectedGroup,
+    required this.onSidebarResize,
+    required this.onSidebarResizeEnd,
+    required this.onSidebarToggle,
     required this.onGroupSelected,
     required this.onQueryChanged,
     required this.onPlay,
@@ -277,17 +447,39 @@ class _DesktopCatalogLayout extends StatelessWidget {
     return Row(
       children: [
         SizedBox(
-          width: 268,
+          width: sidebarCollapsed ? 72 : sidebarWidth,
           child: _CategorySidebar(
             mode: mode,
-            totalCount: playlist.channels.length,
+            totalCount: totalVisibleCount,
             groups: groups,
             groupCounts: groupCounts,
             selectedGroup: selectedGroup,
+            collapsed: sidebarCollapsed,
+            parentalLocked: parentalLocked,
+            isProtectedGroup: isProtectedGroup,
+            onToggleCollapsed: onSidebarToggle,
             onGroupSelected: onGroupSelected,
           ),
         ),
-        const VerticalDivider(width: 1),
+        MouseRegion(
+          cursor: sidebarCollapsed
+              ? SystemMouseCursors.basic
+              : SystemMouseCursors.resizeColumn,
+          child: GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onHorizontalDragUpdate: sidebarCollapsed
+                ? null
+                : (details) => onSidebarResize(details.delta.dx),
+            onHorizontalDragEnd: sidebarCollapsed
+                ? null
+                : (_) => onSidebarResizeEnd(),
+            child: Container(
+              width: 9,
+              alignment: Alignment.center,
+              child: Container(width: 1, color: Colors.white12),
+            ),
+          ),
+        ),
         Expanded(
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
@@ -347,16 +539,16 @@ class _CatalogToolbar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 0.5,
-                      ),
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: 0.5,
+                  ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '$visibleCount ${mode.itemLabel}',
-                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        color: Colors.white60,
-                      ),
+                  style: Theme.of(
+                    context,
+                  ).textTheme.bodyMedium?.copyWith(color: Colors.white60),
                 ),
               ],
             ),
@@ -369,8 +561,9 @@ class _CatalogToolbar extends StatelessWidget {
                 hintText: 'Buscar en ${mode.title.toLowerCase()}…',
                 prefixIcon: const Icon(Icons.search_rounded),
                 filled: true,
-                fillColor:
-                    Theme.of(context).colorScheme.surfaceContainerHighest,
+                fillColor: Theme.of(
+                  context,
+                ).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
@@ -403,6 +596,10 @@ class _CategorySidebar extends StatelessWidget {
   final List<String> groups;
   final Map<String, int> groupCounts;
   final String? selectedGroup;
+  final bool collapsed;
+  final bool parentalLocked;
+  final bool Function(String?) isProtectedGroup;
+  final VoidCallback onToggleCollapsed;
   final ValueChanged<String?> onGroupSelected;
 
   const _CategorySidebar({
@@ -411,6 +608,10 @@ class _CategorySidebar extends StatelessWidget {
     required this.groups,
     required this.groupCounts,
     required this.selectedGroup,
+    required this.collapsed,
+    required this.parentalLocked,
+    required this.isProtectedGroup,
+    required this.onToggleCollapsed,
     required this.onGroupSelected,
   });
 
@@ -421,95 +622,216 @@ class _CategorySidebar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+          crossAxisAlignment: collapsed
+              ? CrossAxisAlignment.center
+              : CrossAxisAlignment.start,
           children: [
             Padding(
-              padding: const EdgeInsets.fromLTRB(20, 24, 20, 8),
+              padding: EdgeInsets.fromLTRB(
+                collapsed ? 8 : 20,
+                18,
+                collapsed ? 8 : 10,
+                8,
+              ),
               child: Row(
+                mainAxisAlignment: collapsed
+                    ? MainAxisAlignment.center
+                    : MainAxisAlignment.start,
                 children: [
                   Icon(
                     mode.icon,
                     color: Theme.of(context).colorScheme.primary,
                     size: 28,
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Text(
-                      mode.title,
-                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w900,
-                          ),
+                  if (!collapsed) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        mode.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: Theme.of(context).textTheme.titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w900),
+                      ),
                     ),
-                  ),
+                  ],
+                  if (!collapsed)
+                    IconButton(
+                      tooltip: 'Achicar categorías',
+                      onPressed: onToggleCollapsed,
+                      icon: const Icon(
+                        Icons.keyboard_double_arrow_left_rounded,
+                      ),
+                    ),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 20, 10),
-              child: Text(
-                'CATEGORÍAS',
-                style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                      color: Colors.white54,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.1,
+            if (collapsed)
+              IconButton(
+                tooltip: 'Agrandar categorías',
+                onPressed: onToggleCollapsed,
+                icon: const Icon(Icons.keyboard_double_arrow_right_rounded),
+              )
+            else
+              Padding(
+                padding: const EdgeInsets.fromLTRB(20, 8, 20, 10),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        'CATEGORÍAS',
+                        style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                          color: Colors.white54,
+                          fontWeight: FontWeight.w800,
+                          letterSpacing: 1.1,
+                        ),
+                      ),
                     ),
+                    const Tooltip(
+                      message:
+                          'Arrastrá el borde derecho para cambiar el ancho',
+                      child: Icon(
+                        Icons.drag_indicator_rounded,
+                        color: Colors.white30,
+                        size: 20,
+                      ),
+                    ),
+                  ],
+                ),
               ),
-            ),
             Expanded(
               child: ListView.builder(
-                padding: const EdgeInsets.fromLTRB(10, 0, 10, 20),
+                padding: EdgeInsets.fromLTRB(
+                  collapsed ? 8 : 10,
+                  0,
+                  collapsed ? 8 : 10,
+                  20,
+                ),
                 itemCount: groups.length + 1,
                 itemBuilder: (context, index) {
                   final group = index == 0 ? null : groups[index - 1];
+                  final label = group ?? 'Todos';
                   final selected = group == selectedGroup;
                   final count = group == null
                       ? totalCount
                       : (groupCounts[group] ?? 0);
+                  final locked =
+                      group != null &&
+                      parentalLocked &&
+                      isProtectedGroup(group);
+
+                  if (collapsed) {
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: Tooltip(
+                        message: locked
+                            ? '$label · Bloqueada con PIN'
+                            : '$label · $count',
+                        child: Material(
+                          color: selected
+                              ? Theme.of(
+                                  context,
+                                ).colorScheme.primary.withValues(alpha: 0.20)
+                              : Colors.transparent,
+                          borderRadius: BorderRadius.circular(14),
+                          child: InkWell(
+                            borderRadius: BorderRadius.circular(14),
+                            onTap: () => onGroupSelected(group),
+                            child: SizedBox(
+                              height: 52,
+                              child: Stack(
+                                alignment: Alignment.center,
+                                children: [
+                                  Icon(
+                                    group == null
+                                        ? Icons.grid_view_rounded
+                                        : Icons.folder_rounded,
+                                    size: 25,
+                                    color: selected
+                                        ? Theme.of(context).colorScheme.primary
+                                        : Colors.white70,
+                                  ),
+                                  if (locked)
+                                    const Positioned(
+                                      right: 7,
+                                      bottom: 7,
+                                      child: Icon(
+                                        Icons.lock_rounded,
+                                        size: 13,
+                                        color: Colors.amberAccent,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    );
+                  }
+
                   return Padding(
                     padding: const EdgeInsets.symmetric(vertical: 3),
-                    child: ListTile(
-                      minTileHeight: 54,
-                      selected: selected,
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
-                      ),
-                      selectedTileColor: Theme.of(context)
-                          .colorScheme
-                          .primary
-                          .withValues(alpha: 0.20),
-                      leading: Icon(
-                        group == null
-                            ? Icons.grid_view_rounded
-                            : Icons.folder_rounded,
-                        size: 24,
-                        color: selected
-                            ? Theme.of(context).colorScheme.primary
-                            : Colors.white70,
-                      ),
-                      title: Text(
-                        group ?? 'Todos',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontWeight:
-                              selected ? FontWeight.w800 : FontWeight.w600,
+                    child: Tooltip(
+                      message: label,
+                      waitDuration: const Duration(milliseconds: 450),
+                      child: ListTile(
+                        minTileHeight: 54,
+                        selected: selected,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
                         ),
+                        selectedTileColor: Theme.of(
+                          context,
+                        ).colorScheme.primary.withValues(alpha: 0.20),
+                        leading: Icon(
+                          group == null
+                              ? Icons.grid_view_rounded
+                              : Icons.folder_rounded,
+                          size: 24,
+                          color: selected
+                              ? Theme.of(context).colorScheme.primary
+                              : Colors.white70,
+                        ),
+                        title: Text(
+                          label,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            fontWeight: selected
+                                ? FontWeight.w800
+                                : FontWeight.w600,
+                          ),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            if (locked) ...[
+                              const Icon(
+                                Icons.lock_rounded,
+                                size: 17,
+                                color: Colors.amberAccent,
+                              ),
+                              const SizedBox(width: 6),
+                            ],
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 4,
+                              ),
+                              decoration: BoxDecoration(
+                                color: Colors.white.withValues(alpha: 0.06),
+                                borderRadius: BorderRadius.circular(10),
+                              ),
+                              child: Text(
+                                '$count',
+                                style: Theme.of(context).textTheme.labelSmall,
+                              ),
+                            ),
+                          ],
+                        ),
+                        onTap: () => onGroupSelected(group),
                       ),
-                      trailing: Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 4,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.white.withValues(alpha: 0.06),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Text(
-                          '$count',
-                          style: Theme.of(context).textTheme.labelSmall,
-                        ),
-                      ),
-                      onTap: () => onGroupSelected(group),
                     ),
                   );
                 },
@@ -560,23 +882,23 @@ class _CatalogGrid extends StatelessWidget {
         final width = constraints.maxWidth;
         final columns = mode.usesPoster
             ? (width >= 1500
-                ? 7
-                : width >= 1250
-                    ? 6
-                    : width >= 1000
-                        ? 5
-                        : 4)
+                  ? 7
+                  : width >= 1250
+                  ? 6
+                  : width >= 1000
+                  ? 5
+                  : 4)
             : (width >= 1500
-                ? 6
-                : width >= 1250
-                    ? 5
-                    : width >= 1000
-                        ? 4
-                        : 3);
+                  ? 6
+                  : width >= 1250
+                  ? 5
+                  : width >= 1000
+                  ? 4
+                  : 3);
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(28, 8, 28, 34),
-          cacheExtent: 700,
+          cacheExtent: 80,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
             crossAxisSpacing: 18,
@@ -673,9 +995,9 @@ class _CompactCatalogLayout extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
           child: Text(
             selectedGroup ?? mode.title.toUpperCase(),
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
           ),
         ),
         Expanded(
@@ -806,11 +1128,7 @@ class _LiveCardBody extends StatelessWidget {
               color: const Color(0xFF071526),
               borderRadius: BorderRadius.circular(14),
             ),
-            child: _Artwork(
-              channel: channel,
-              mode: mode,
-              fit: BoxFit.contain,
-            ),
+            child: _Artwork(channel: channel, mode: mode, fit: BoxFit.contain),
           ),
         ),
         Padding(
@@ -880,21 +1198,13 @@ class _PosterCardBody extends StatelessWidget {
     return Stack(
       fit: StackFit.expand,
       children: [
-        _Artwork(
-          channel: channel,
-          mode: mode,
-          fit: BoxFit.cover,
-        ),
+        _Artwork(channel: channel, mode: mode, fit: BoxFit.cover),
         const DecoratedBox(
           decoration: BoxDecoration(
             gradient: LinearGradient(
               begin: Alignment.topCenter,
               end: Alignment.bottomCenter,
-              colors: [
-                Color(0x12000000),
-                Color(0x30000000),
-                Color(0xE9000000),
-              ],
+              colors: [Color(0x12000000), Color(0x30000000), Color(0xE9000000)],
               stops: [0, 0.55, 1],
             ),
           ),
@@ -936,16 +1246,14 @@ class _PosterCardBody extends StatelessWidget {
                   height: 1.1,
                 ),
               ),
-              if (channel.group != null && channel.group!.trim().isNotEmpty) ...[
+              if (channel.group != null &&
+                  channel.group!.trim().isNotEmpty) ...[
                 const SizedBox(height: 5),
                 Text(
                   channel.group!,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: const TextStyle(
-                    color: Colors.white60,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
                 ),
               ],
             ],
@@ -974,27 +1282,11 @@ class _Artwork extends StatelessWidget {
       return _ArtworkFallback(mode: mode);
     }
 
-    return Image.network(
-      logo,
+    return CachedArtworkImage(
+      url: logo,
       fit: fit,
-      filterQuality: FilterQuality.medium,
-      errorBuilder: (_, __, ___) => _ArtworkFallback(mode: mode),
-      loadingBuilder: (context, child, progress) {
-        if (progress == null) return child;
-        return Center(
-          child: SizedBox(
-            width: 26,
-            height: 26,
-            child: CircularProgressIndicator(
-              strokeWidth: 2,
-              value: progress.expectedTotalBytes == null
-                  ? null
-                  : progress.cumulativeBytesLoaded /
-                      progress.expectedTotalBytes!,
-            ),
-          ),
-        );
-      },
+      cacheWidth: mode.usesPoster ? 420 : 300,
+      fallback: _ArtworkFallback(mode: mode),
     );
   }
 }

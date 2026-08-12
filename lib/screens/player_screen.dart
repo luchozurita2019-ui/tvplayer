@@ -1,17 +1,51 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
+import '../services/artwork_cache_service.dart';
 import '../services/playback_metrics_service.dart';
 import '../services/server_compatibility_service.dart';
 import '../widgets/channel_tile.dart';
 import '../widgets/live_video_view.dart';
 
 const String _defaultUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+    'AppleWebKit/537.36 (KHTML, like Gecko) '
+    'Chrome/96.0.4664.18 Safari/537.36';
+const String _legacyVlcUserAgent =
     'VLC/3.0.20 LibVLC/3.0.20 (iptv_player; +https://github.com)';
+
+enum _ConnectionHealthLevel { stable, unstable, poor }
+
+enum _ConnectionIssueSource { none, internet, provider, unknown }
+
+class _ConnectionHealthSnapshot {
+  final _ConnectionHealthLevel level;
+  final _ConnectionIssueSource source;
+  final String title;
+  final String detail;
+  final String confidence;
+
+  const _ConnectionHealthSnapshot({
+    required this.level,
+    required this.source,
+    required this.title,
+    required this.detail,
+    required this.confidence,
+  });
+
+  static const stable = _ConnectionHealthSnapshot(
+    level: _ConnectionHealthLevel.stable,
+    source: _ConnectionIssueSource.none,
+    title: 'Conexión estable',
+    detail: 'La reproducción está recibiendo datos con normalidad.',
+    confidence: 'alta',
+  );
+}
 
 class PlayerScreen extends StatefulWidget {
   final Channel channel;
@@ -35,11 +69,20 @@ class PlayerScreen extends StatefulWidget {
 
 class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _watchdogInterval = Duration(seconds: 2);
-  static const Duration _runtimeStatsInterval = Duration(seconds: 1);
   static const String _fastProbeSize = '131072';
+  static const String _liveProbeSize = '524288';
   static const String _normalProbeSize = '5000000';
   static const int _hlsSegmentRetryCount = 5;
-  static const Duration _liveTransientErrorGrace = Duration(seconds: 6);
+  static const Duration _liveTransientErrorGrace = Duration(seconds: 15);
+  static const Duration _liveStartupAttemptTimeout = Duration(seconds: 5);
+  static const int _maxLiveStartupCompatibilityFallbacks = 1;
+  static const int _maxAndroidTransientStartupRetries = 1;
+  static const Duration _androidTransientRetryDelay = Duration(
+    milliseconds: 700,
+  );
+  static const String _channelMaintenanceMessage =
+      'Este canal no se encuentra disponible en este momento.\n'
+      'Por favor, intentá nuevamente más tarde.';
 
   final PlaybackMetricsService _metrics = PlaybackMetricsService.instance;
   final ServerCompatibilityService _compatibility =
@@ -60,7 +103,19 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _currentOpenUsesFastProbe = false;
   bool _normalProbeFallbackUsed = false;
   bool _runtimeStatsBusy = false;
+  bool _runtimeFormatLoaded = false;
+  bool _acceptPlaybackEvents = true;
+  bool _providerIssueHint = false;
+  bool _startupCompatibilityHint = false;
+  bool _startupTransientFailureHint = false;
+  int _androidTransientStartupRetries = 0;
 
+  String? _baselineTlsVerify;
+  String? _baselineUserAgent;
+  String? _baselineReferrer;
+  String? _baselineHttpHeaderFields;
+
+  String? _errorTitle;
   String? _errorMessage;
   String _channelListQuery = '';
   String _tuningLabel = 'Equilibrado';
@@ -68,7 +123,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   int _sessionId = 0;
   int _startupSession = 0;
   int? _lastStartupMs;
+  int? _lastZapMs;
+  int? _zapSession;
   String? _startupUrl;
+  String? _lastConnectionDetail;
+  int _recentBufferingEvents = 0;
+  DateTime _bufferingWindowStartedAt = DateTime.now();
 
   int? _videoWidth;
   int? _videoHeight;
@@ -90,27 +150,39 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   List<ServerCompatibilityMode> _compatibilityPlan = const [
     ServerCompatibilityMode.direct,
+    ServerCompatibilityMode.nativeHttp,
+    ServerCompatibilityMode.mpvHttp,
+    ServerCompatibilityMode.tlsLegacy,
     ServerCompatibilityMode.compatible,
     ServerCompatibilityMode.liveRecovery,
     ServerCompatibilityMode.advanced,
+    ServerCompatibilityMode.xtreamHls,
   ];
   int _compatibilityIndex = 0;
   int _compatibilityFallbacks = 0;
   int _runtimeRecoveryPromotions = 0;
   bool _compatibilityPrefersNormalProbe = false;
-  ServerCompatibilityMode _compatibilityMode =
-      ServerCompatibilityMode.direct;
+  ServerCompatibilityMode _compatibilityMode = ServerCompatibilityMode.direct;
+  ServerCompatibilityMode? _startupCompatibilityTarget;
+  int? _terminalStartupSession;
   String? _compatibilityUrl;
   String _engineDiagnostic = 'Sin errores de red detectados';
 
+  final ValueNotifier<_ConnectionHealthSnapshot> _connectionHealth =
+      ValueNotifier<_ConnectionHealthSnapshot>(
+        _ConnectionHealthSnapshot.stable,
+      );
+
   Timer? _watchdogTimer;
-  Timer? _runtimeStatsTimer;
   Timer? _connectTimeoutTimer;
   Timer? _retryTimer;
   Timer? _transientLiveFailureTimer;
+  Timer? _connectionProbeTimer;
+  Timer? _connectionRecoveryTimer;
   Duration _lastKnownPosition = Duration.zero;
   DateTime _lastProgressAt = DateTime.now();
   Stopwatch? _startupStopwatch;
+  Stopwatch? _zapStopwatch;
 
   StreamSubscription? _bufferingSub;
   StreamSubscription? _errorSub;
@@ -122,15 +194,32 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _audioBitrateSub;
   StreamSubscription? _logSub;
 
+  bool get _isAndroidRuntime =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
   int get _maxAutoRetries => _effectiveSettings.maxRetries;
   Duration get _stallThreshold =>
       Duration(seconds: _effectiveSettings.stallThresholdSeconds);
   Duration get _connectTimeout =>
       Duration(seconds: _effectiveSettings.connectTimeoutSeconds);
 
+  Duration get _startupAttemptTimeout {
+    final configured = _connectTimeout;
+    if (!widget.isLiveContent ||
+        _hasEverPlayed ||
+        widget.settings.profile == BufferProfile.slowConnection) {
+      return configured;
+    }
+    return configured.inMilliseconds <=
+            _liveStartupAttemptTimeout.inMilliseconds
+        ? configured
+        : _liveStartupAttemptTimeout;
+  }
+
   @override
   void initState() {
     super.initState();
+    ArtworkCacheService.instance.pauseForPlayback();
     _currentIndex = widget.initialIndex;
     _effectiveSettings = widget.settings;
 
@@ -153,43 +242,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _bufferingSub = _player.stream.buffering.listen((buffering) {
-      if (!mounted) return;
+      if (!mounted || !_acceptPlaybackEvents) return;
 
-      if (!buffering) {
-        _connectTimeoutTimer?.cancel();
-        _retryTimer?.cancel();
-        _retryTimer = null;
-        _transientLiveFailureTimer?.cancel();
-        _transientLiveFailureTimer = null;
-        _hasEverPlayed = true;
-        _retryCount = 0;
+      if (buffering && _hasEverPlayed && !_opening && !_reconnecting) {
+        _onBufferingStarted();
+      }
+
+      // IMPORTANTE: buffering=false sólo significa que mpv dejó el estado de
+      // buffering. Algunos servidores TS emiten este evento antes del primer
+      // frame real. No cancelamos el timeout ni aprendemos compatibilidad hasta
+      // confirmar progreso/salida real de audio o video.
+      if (!buffering && _hasEverPlayed) {
+        _onBufferingRecovered();
         _lastProgressAt = DateTime.now();
       }
 
       setState(() {
         _isBuffering = buffering;
-        if (!buffering) {
+        if (!buffering && _hasEverPlayed) {
           _reconnecting = false;
         }
       });
 
-      if (!buffering &&
-          (_startupStopwatch?.isRunning ?? false) &&
-          _startupSession == _sessionId) {
-        _startupStopwatch!.stop();
-        final elapsed = _startupStopwatch!.elapsedMilliseconds;
-        final url = _startupUrl;
-        if (mounted) setState(() => _lastStartupMs = elapsed);
-        if (url != null) {
-          unawaited(_metrics.recordStartup(url, elapsed));
-          unawaited(_compatibility.recordSuccess(url, _compatibilityMode));
-        }
+      if (!buffering) {
+        _tryConfirmPlaybackFromDecodedOutput();
       }
     });
 
     _errorSub = _player.stream.error.listen((error) {
+      final rawError = error.toString();
+      if (_opening && widget.isLiveContent && !_hasEverPlayed) {
+        final text = rawError.toLowerCase();
+        _rememberStartupCompatibilityHint(text);
+        if (_isDefinitiveStartupFailureLog(text)) {
+          scheduleMicrotask(() {
+            if (!mounted) return;
+            _showChannelMaintenance(
+              'Fallo definitivo durante la apertura: $rawError',
+            );
+          });
+        }
+        return;
+      }
       if (_opening) return;
-      final message = 'Error de reproducción: $error';
+      final message = 'Error de reproducción: $rawError';
       if (widget.isLiveContent && _hasEverPlayed) {
         _scheduleTransientLiveFailure(message);
         return;
@@ -198,16 +294,24 @@ class _PlayerScreenState extends State<PlayerScreen> {
     });
 
     _playingSub = _player.stream.playing.listen((playing) {
+      if (!_acceptPlaybackEvents) return;
       _isPlaying = playing;
-      if (playing) _lastProgressAt = DateTime.now();
+      if (playing) {
+        _lastProgressAt = DateTime.now();
+        _tryConfirmPlaybackFromDecodedOutput();
+      }
     });
 
     _positionSub = _player.stream.position.listen((position) {
+      if (!_acceptPlaybackEvents) return;
       if (position != _lastKnownPosition) {
         _lastKnownPosition = position;
         _lastProgressAt = DateTime.now();
         _transientLiveFailureTimer?.cancel();
         _transientLiveFailureTimer = null;
+        // El avance del reloj es la evidencia más fuerte de que el stream
+        // realmente empezó a reproducir, no sólo de que terminó "buffering".
+        _confirmPlaybackStarted();
       }
     });
 
@@ -226,6 +330,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _videoHeight = height;
         _pixelFormat = pixelFormat;
       });
+      _tryConfirmPlaybackFromDecodedOutput();
     });
 
     _trackSub = _player.stream.track.listen((track) {
@@ -248,6 +353,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           _audioBitrate = audio.bitrate!.toDouble();
         }
       });
+      _tryConfirmPlaybackFromDecodedOutput();
     });
 
     _audioBitrateSub = _player.stream.audioBitrate.listen((bitrate) {
@@ -257,13 +363,81 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     _logSub = _player.stream.log.listen(_handlePlayerLog);
 
+    // El watchdog conserva su frecuencia porque sólo observa estado de
+    // reproducción. Las estadísticas técnicas ya no se consultan en segundo
+    // plano: se leen únicamente cuando el usuario abre los paneles de info.
     _watchdogTimer = Timer.periodic(_watchdogInterval, (_) => _checkStall());
-    _runtimeStatsTimer = Timer.periodic(
-      _runtimeStatsInterval,
-      (_) => unawaited(_refreshRuntimeStats()),
-    );
 
     unawaited(_initializeAndPlay());
+  }
+
+  void _tryConfirmPlaybackFromDecodedOutput() {
+    if (_hasEverPlayed ||
+        !_acceptPlaybackEvents ||
+        _opening ||
+        !_isPlaying ||
+        _isBuffering) {
+      return;
+    }
+
+    final hasVideoOutput = (_videoWidth ?? 0) > 0 && (_videoHeight ?? 0) > 0;
+    final hasAudioOutput = (_audioCodec?.trim().isNotEmpty ?? false);
+    if (hasVideoOutput || hasAudioOutput) {
+      _confirmPlaybackStarted();
+    }
+  }
+
+  void _confirmPlaybackStarted() {
+    if (!mounted ||
+        _hasEverPlayed ||
+        !_acceptPlaybackEvents ||
+        _opening ||
+        _startupSession != _sessionId) {
+      return;
+    }
+
+    _hasEverPlayed = true;
+    _retryCount = 0;
+    _lastProgressAt = DateTime.now();
+    _connectTimeoutTimer?.cancel();
+    _retryTimer?.cancel();
+    _retryTimer = null;
+    _transientLiveFailureTimer?.cancel();
+    _transientLiveFailureTimer = null;
+
+    // Leemos el formato real una sola vez cuando YA existe reproducción.
+    unawaited(_refreshContainerFormat());
+
+    int? elapsed;
+    if (_startupStopwatch?.isRunning ?? false) {
+      _startupStopwatch!.stop();
+      elapsed = _startupStopwatch!.elapsedMilliseconds;
+    }
+
+    int? zapElapsed;
+    if ((_zapStopwatch?.isRunning ?? false) && _zapSession == _sessionId) {
+      _zapStopwatch!.stop();
+      zapElapsed = _zapStopwatch!.elapsedMilliseconds;
+      _zapSession = null;
+    }
+
+    final url = _startupUrl;
+    setState(() {
+      _reconnecting = false;
+      if (elapsed != null) _lastStartupMs = elapsed;
+      if (zapElapsed != null) _lastZapMs = zapElapsed;
+      _engineDiagnostic =
+          'Reproducción confirmada · ${_compatibilityMode.label}';
+    });
+
+    if (url != null && elapsed != null) {
+      unawaited(_metrics.recordStartup(url, elapsed));
+      if (zapElapsed != null) {
+        unawaited(_metrics.recordZap(url, zapElapsed));
+      }
+      // Recién ahora aprendemos que este modo funciona para el host.
+      unawaited(_compatibility.recordSuccess(url, _compatibilityMode));
+    }
   }
 
   Future<void> _initializeAndPlay() async {
@@ -276,15 +450,37 @@ class _PlayerScreenState extends State<PlayerScreen> {
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
+        // Guardamos los defaults reales de esta compilación de libmpv. Los
+        // fallbacks HTTP/TLS pueden tocar opciones globales del Player, por lo
+        // que cada apertura restaura estos valores antes de probar otro modo.
+        try {
+          _baselineTlsVerify = (await platform.getProperty(
+            'tls-verify',
+          )).trim();
+        } catch (_) {}
+        try {
+          _baselineUserAgent = (await platform.getProperty(
+            'user-agent',
+          )).trim();
+        } catch (_) {}
+        try {
+          _baselineReferrer = (await platform.getProperty('referrer')).trim();
+        } catch (_) {}
+        try {
+          _baselineHttpHeaderFields = (await platform.getProperty(
+            'http-header-fields',
+          )).trim();
+        } catch (_) {}
+
         // keep-open=yes convierte un EOF en una pausa del Player. En IPTV
         // algunos servidores terminan la conexión periódicamente aunque la
         // señal continúe. No queremos que mpv transforme ese EOF en Pause.
         await platform.setProperty('keep-open', 'no');
 
-        // No dejamos que mpv cambie el estado global a Pause cuando el cache
-        // se vacía. El frame puede quedar quieto mientras llegan paquetes,
-        // pero el motor sigue en reproducción y FFmpeg puede reconectar abajo.
-        await platform.setProperty('cache-pause', 'no');
+        // Dejamos activo el buffering nativo de mpv. Si la red se queda sin
+        // datos, pausa internamente, rellena el cache y continúa sin destruir
+        // la sesión HTTP/HLS; esto es mucho más tolerante a conexiones débiles.
+        await platform.setProperty('cache-pause', 'yes');
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
 
@@ -310,33 +506,65 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!mounted || session != _sessionId) return false;
 
     final tunedSettings = tuning.settings;
+    final slowConnection =
+        widget.settings.profile == BufferProfile.slowConnection;
     final applyLiveStabilityFloor =
         widget.isLiveContent && widget.settings.profile == BufferProfile.auto;
-    _effectiveSettings = applyLiveStabilityFloor
-        ? tunedSettings.copyWith(
-            bufferMb: tunedSettings.bufferMb < 16 ? 16 : tunedSettings.bufferMb,
-            readaheadSeconds: tunedSettings.readaheadSeconds < 2.5
-                ? 2.5
-                : tunedSettings.readaheadSeconds,
-            recoveryBufferSeconds: tunedSettings.recoveryBufferSeconds < 1.5
-                ? 1.5
-                : tunedSettings.recoveryBufferSeconds,
-            connectTimeoutSeconds: tunedSettings.connectTimeoutSeconds < 8
-                ? 8
-                : tunedSettings.connectTimeoutSeconds,
-            stallThresholdSeconds: tunedSettings.stallThresholdSeconds < 12
-                ? 12
-                : tunedSettings.stallThresholdSeconds,
-          )
-        : tunedSettings;
-    _tuningLabel = applyLiveStabilityFloor
-        ? '${tuning.label} · Live estable'
-        : tuning.label;
+
+    if (slowConnection) {
+      // Live necesita reserva, pero no queremos acumular un retraso enorme.
+      // VOD puede anticipar mucho más porque no existe borde en vivo.
+      _effectiveSettings = widget.isLiveContent
+          ? tunedSettings.copyWith(
+              bufferMb: 48,
+              readaheadSeconds: 6.0,
+              recoveryBufferSeconds: 4.0,
+              connectTimeoutSeconds: 15,
+              maxRetries: 5,
+              stallThresholdSeconds: 18,
+            )
+          : tunedSettings.copyWith(
+              bufferMb: 96,
+              readaheadSeconds: 12.0,
+              recoveryBufferSeconds: 5.0,
+              connectTimeoutSeconds: 15,
+              maxRetries: 5,
+              stallThresholdSeconds: 18,
+            );
+      _tuningLabel = widget.isLiveContent
+          ? 'Conexión lenta · Live protegido'
+          : 'Conexión lenta · VOD reforzado';
+    } else {
+      _effectiveSettings = applyLiveStabilityFloor
+          ? tunedSettings.copyWith(
+              bufferMb: tunedSettings.bufferMb < 16
+                  ? 16
+                  : tunedSettings.bufferMb,
+              readaheadSeconds: tunedSettings.readaheadSeconds < 2.5
+                  ? 2.5
+                  : tunedSettings.readaheadSeconds,
+              recoveryBufferSeconds: tunedSettings.recoveryBufferSeconds < 1.5
+                  ? 1.5
+                  : tunedSettings.recoveryBufferSeconds,
+              connectTimeoutSeconds: tunedSettings.connectTimeoutSeconds < 8
+                  ? 8
+                  : tunedSettings.connectTimeoutSeconds,
+              stallThresholdSeconds: tunedSettings.stallThresholdSeconds < 12
+                  ? 12
+                  : tunedSettings.stallThresholdSeconds,
+            )
+          : tunedSettings;
+      _tuningLabel = applyLiveStabilityFloor
+          ? '${tuning.label} · Live estable'
+          : tuning.label;
+    }
     _useFastProbe = tuning.useFastProbe;
     final modeNeedsNormalProbe =
         _compatibilityMode == ServerCompatibilityMode.compatible ||
-            _compatibilityMode == ServerCompatibilityMode.advanced;
-    _currentOpenUsesFastProbe = _useFastProbe &&
+        _compatibilityMode == ServerCompatibilityMode.advanced;
+    _currentOpenUsesFastProbe =
+        !widget.isLiveContent &&
+        _useFastProbe &&
         !forceNormalProbe &&
         !_compatibilityPrefersNormalProbe &&
         !modeNeedsNormalProbe;
@@ -360,72 +588,109 @@ class _PlayerScreenState extends State<PlayerScreen> {
           'network-timeout',
           _effectiveSettings.connectTimeoutSeconds.toString(),
         );
-        await platform.setProperty(
-          'demuxer-lavf-probesize',
-          _currentOpenUsesFastProbe ? _fastProbeSize : _normalProbeSize,
-        );
-        await platform.setProperty(
-          'demuxer-lavf-probescore',
-          _currentOpenUsesFastProbe ? '15' : '26',
-        );
-
+        final useLiveStartupProbe =
+            widget.isLiveContent &&
+            !forceNormalProbe &&
+            _compatibilityMode != ServerCompatibilityMode.compatible &&
+            _compatibilityMode != ServerCompatibilityMode.advanced;
+        final probeSize = useLiveStartupProbe
+            ? _liveProbeSize
+            : (_currentOpenUsesFastProbe ? _fastProbeSize : _normalProbeSize);
+        final probeScore = useLiveStartupProbe
+            ? '20'
+            : (_currentOpenUsesFastProbe ? '15' : '26');
+        await platform.setProperty('demuxer-lavf-probesize', probeSize);
+        await platform.setProperty('demuxer-lavf-probescore', probeScore);
 
         // Compatibilidad por servidor. Limpiamos SIEMPRE las opciones de la
         // apertura anterior para que un proveedor no herede ajustes de otro.
-        await platform.setProperty('demuxer-lavf-propagate-opts', 'no');
+        await platform.setProperty('demuxer-lavf-propagate-opts', 'yes');
         await platform.setProperty('demuxer-lavf-o', '');
         await platform.setProperty('stream-lavf-o', '');
+
+        // Restauramos primero el estado HTTP/TLS original para que un fallback
+        // aprendido por un proveedor no contamine al intento siguiente.
+        if (_baselineTlsVerify != null && _baselineTlsVerify!.isNotEmpty) {
+          await platform.setProperty('tls-verify', _baselineTlsVerify!);
+        }
+        if (_baselineUserAgent != null && _baselineUserAgent!.isNotEmpty) {
+          await platform.setProperty('user-agent', _baselineUserAgent!);
+        }
+        await platform.setProperty('referrer', _baselineReferrer ?? '');
+        await platform.setProperty(
+          'http-header-fields',
+          _baselineHttpHeaderFields ?? '',
+        );
+
+        if (_compatibilityMode == ServerCompatibilityMode.tlsLegacy) {
+          // Sólo se usa como fallback HTTPS por endpoint. Nunca desactivamos
+          // verificación TLS globalmente para toda la aplicación.
+          await platform.setProperty('tls-verify', 'no');
+        }
+
+        if (_compatibilityMode == ServerCompatibilityMode.mpvHttp) {
+          // Algunos paneles responden distinto cuando los headers se aplican
+          // directamente en libmpv/libavformat en vez de Media.httpHeaders.
+          final nativeHeaders = channel.resolvedHttpHeaders(_defaultUserAgent);
+          String? takeHeader(String wanted) {
+            String? foundKey;
+            for (final key in nativeHeaders.keys) {
+              if (key.toLowerCase() == wanted.toLowerCase()) {
+                foundKey = key;
+                break;
+              }
+            }
+            if (foundKey == null) return null;
+            return nativeHeaders.remove(foundKey);
+          }
+
+          final userAgent = takeHeader('User-Agent');
+          final referrer = takeHeader('Referer');
+          if (userAgent != null && userAgent.isNotEmpty) {
+            await platform.setProperty('user-agent', userAgent);
+          }
+          if (referrer != null && referrer.isNotEmpty) {
+            await platform.setProperty('referrer', referrer);
+          }
+          if (nativeHeaders.isNotEmpty) {
+            final fields = nativeHeaders.entries
+                .map((entry) => '${entry.key}: ${entry.value}')
+                .join(',');
+            await platform.setProperty('http-header-fields', fields);
+          }
+        }
+
         final disableMime =
             _compatibilityMode == ServerCompatibilityMode.compatible ||
-                _compatibilityMode == ServerCompatibilityMode.advanced;
+            _compatibilityMode == ServerCompatibilityMode.advanced;
         await platform.setProperty(
           'demuxer-lavf-allow-mimetype',
           disableMime ? 'no' : 'yes',
         );
 
-        final recoveryMode =
-            _compatibilityMode == ServerCompatibilityMode.liveRecovery ||
-                _compatibilityMode == ServerCompatibilityMode.advanced;
-        final isAdvanced =
-            _compatibilityMode == ServerCompatibilityMode.advanced;
-        final isLiveHttp = widget.isLiveContent && _isHttpUrl(channel.url);
-        final isLiveHls = widget.isLiveContent && _looksLikeHls(channel.url);
+        final effectiveUrl = _playbackUrlForMode(channel.url);
+        final isLiveHls = widget.isLiveContent && _looksLikeHls(effectiveUrl);
 
-        // Hallazgo confirmado en HotPlayer Mac: seg_max_retry=5. Hacemos que
-        // FFmpeg reintente el segmento HLS antes de considerar caído el canal.
-        // live_start_index=-1 mantiene una reapertura pegada al borde en vivo.
+        // HotPlayer Mac contiene seg_max_retry=5: dejamos que FFmpeg
+        // recupere un segmento HLS antes de reconstruir toda la reproducción.
+        // En modos de compatibilidad también aceptamos extensiones HLS atípicas,
+        // algo frecuente en paneles/proxies IPTV. Direct conserva el filtro
+        // estándar de FFmpeg.
         if (isLiveHls) {
-          await platform.setProperty(
-            'demuxer-lavf-o',
-            'seg_max_retry=$_hlsSegmentRetryCount,live_start_index=-1',
-          );
+          final relaxedHlsExtensions =
+              _compatibilityMode != ServerCompatibilityMode.direct;
+          final hlsOptions = <String>[
+            'seg_max_retry=$_hlsSegmentRetryCount',
+            if (relaxedHlsExtensions) 'allowed_extensions=ALL',
+          ].join(',');
+          await platform.setProperty('demuxer-lavf-o', hlsOptions);
         }
 
-        // En live HTTP la recuperación de transporte trabaja desde la primera
-        // apertura, no sólo después de que Flutter reinicie el Media. Esto evita
-        // muchos cortes visibles y repeticiones de escenas.
-        if (isLiveHttp) {
-          final reconnectOptions = <String>[
-            'reconnect=1',
-            'reconnect_streamed=1',
-            'reconnect_on_network_error=1',
-            'reconnect_at_eof=1',
-            if (recoveryMode) 'reconnect_on_http_error=5xx',
-            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
-          ].join(',');
-          await platform.setProperty('stream-lavf-o', reconnectOptions);
-        } else if (recoveryMode) {
-          // VOD puede reconectar errores de red, pero nunca reabrimos por EOF:
-          // el final de una película o episodio es un final real.
-          final reconnectOptions = <String>[
-            'reconnect=1',
-            'reconnect_streamed=1',
-            'reconnect_on_network_error=1',
-            'reconnect_on_http_error=5xx',
-            'reconnect_delay_max=${isAdvanced ? 2 : 1}',
-          ].join(',');
-          await platform.setProperty('stream-lavf-o', reconnectOptions);
-        }
+        // V3.8 vuelve a una base más cercana a HotPlayer: no inyectamos una
+        // batería global de reconnect_* en stream-lavf-o. Esos flags no aparecen
+        // en el binario analizado y en ciertos servidores cambian el tratamiento
+        // de EOF/HTTP de forma contraproducente. El fallback de TV FULL queda a
+        // nivel de sesión sólo si mpv realmente no logra recuperar.
       }
     } catch (_) {
       // Estas propiedades son una optimización, no un requisito.
@@ -445,37 +710,283 @@ class _PlayerScreenState extends State<PlayerScreen> {
     // HotPlayer deja que FFmpeg intente recuperar segmentos antes de
     // reconstruir la reproducción. En live damos ese mismo margen: un microcorte
     // no debe convertirse en stop/open del Media.
+    final slowConnection =
+        widget.settings.profile == BufferProfile.slowConnection;
     final liveGrace = widget.isLiveContent
         ? Duration(
-            seconds: _stallThreshold.inSeconds < 15
-                ? 15
-                : _stallThreshold.inSeconds,
+            seconds: slowConnection
+                ? 45
+                : (_stallThreshold.inSeconds < 30
+                      ? 30
+                      : _stallThreshold.inSeconds),
           )
-        : _stallThreshold;
+        : Duration(seconds: slowConnection ? 30 : _stallThreshold.inSeconds);
     final bufferingGrace = widget.isLiveContent
         ? Duration(
-            seconds: _stallThreshold.inSeconds + 8 < 20
-                ? 20
-                : _stallThreshold.inSeconds + 8,
+            seconds: slowConnection
+                ? 60
+                : (_stallThreshold.inSeconds + 20 < 45
+                      ? 45
+                      : _stallThreshold.inSeconds + 20),
           )
         : Duration(
-            seconds: _stallThreshold.inSeconds < 8
-                ? 12
-                : _stallThreshold.inSeconds + 4,
+            seconds: slowConnection
+                ? 30
+                : (_stallThreshold.inSeconds < 8
+                      ? 12
+                      : _stallThreshold.inSeconds + 4),
           );
-    final effectiveStallThreshold =
-        _isBuffering ? bufferingGrace : liveGrace;
+    final effectiveStallThreshold = _isBuffering ? bufferingGrace : liveGrace;
 
     if (silentFor > effectiveStallThreshold) {
+      _scheduleConnectionDiagnosis(severe: true);
       final url = widget.playlist[_currentIndex].url;
       unawaited(_metrics.recordStall(url));
       _handleFailure('El stream dejó de responder', silent: true);
     }
   }
 
-  bool _isHttpUrl(String url) {
-    final uri = Uri.tryParse(url);
-    return uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
+  void _onBufferingStarted() {
+    final now = DateTime.now();
+    if (now.difference(_bufferingWindowStartedAt) >
+        const Duration(seconds: 60)) {
+      _bufferingWindowStartedAt = now;
+      _recentBufferingEvents = 0;
+    }
+    _recentBufferingEvents++;
+    _connectionRecoveryTimer?.cancel();
+
+    if (_connectionHealth.value.level == _ConnectionHealthLevel.stable) {
+      _connectionHealth.value = const _ConnectionHealthSnapshot(
+        level: _ConnectionHealthLevel.unstable,
+        source: _ConnectionIssueSource.unknown,
+        title: 'Señal inestable',
+        detail:
+            'TV FULL está esperando datos. Estamos verificando si el origen es la conexión o el servidor.',
+        confidence: 'baja',
+      );
+    }
+
+    _scheduleConnectionDiagnosis(
+      severe: _recentBufferingEvents >= 3,
+      delay: const Duration(seconds: 2),
+    );
+  }
+
+  void _onBufferingRecovered() {
+    _connectionProbeTimer?.cancel();
+    _connectionRecoveryTimer?.cancel();
+    _connectionRecoveryTimer = Timer(const Duration(seconds: 7), () {
+      if (!mounted || _isBuffering || _reconnecting || _errorMessage != null) {
+        return;
+      }
+      _providerIssueHint = false;
+      _lastConnectionDetail = null;
+      _connectionHealth.value = _ConnectionHealthSnapshot.stable;
+    });
+  }
+
+  void _scheduleConnectionDiagnosis({
+    bool severe = false,
+    Duration delay = const Duration(milliseconds: 700),
+  }) {
+    if (!mounted || !_hasEverPlayed) return;
+    final session = _sessionId;
+    _connectionProbeTimer?.cancel();
+    _connectionProbeTimer = Timer(delay, () {
+      if (!mounted || session != _sessionId) return;
+      unawaited(_diagnoseConnectionHealth(severe: severe));
+    });
+  }
+
+  Future<void> _diagnoseConnectionHealth({bool severe = false}) async {
+    if (!mounted || !_hasEverPlayed || _opening || _reconnecting) return;
+
+    await _refreshRuntimeStats();
+    if (!mounted) return;
+
+    final channel = widget.playlist[_currentIndex];
+    final current = await _metrics.statsForUrl(channel.url);
+    final all = await _metrics.allStats();
+    if (!mounted) return;
+
+    final mediaBits = (_videoBitrate ?? 0) + (_audioBitrate ?? 0);
+    final networkBits = (_networkReadBytesPerSecond ?? 0) * 8;
+    final ratio = mediaBits > 0 && networkBits > 0
+        ? networkBits / mediaBits
+        : null;
+
+    final currentHostLooksBad =
+        current.startupCount >= 3 &&
+        ((current.averageStartupMs ?? 0) >= 1800 ||
+            current.failureRatio >= 0.20 ||
+            current.stallRatio >= 0.15);
+    final otherHostsLookHealthy = all.any((stats) {
+      if (stats.host == current.host || stats.startupCount < 2) return false;
+      final avg = stats.averageStartupMs;
+      return (avg == null || avg < 1400) &&
+          stats.failureRatio < 0.12 &&
+          stats.stallRatio < 0.10;
+    });
+
+    _ConnectionIssueSource source;
+    String title;
+    String detail;
+    String confidence;
+
+    if (_providerIssueHint || (currentHostLooksBad && otherHostsLookHealthy)) {
+      source = _ConnectionIssueSource.provider;
+      title = 'Servidor del canal inestable';
+      detail =
+          _lastConnectionDetail ??
+          'Este servidor acumula más demoras o cortes que otros servidores usados en TV FULL.';
+      confidence = _providerIssueHint ? 'alta' : 'media';
+    } else if (ratio != null && ratio < 0.95 && !currentHostLooksBad) {
+      source = _ConnectionIssueSource.internet;
+      title = 'Posible conexión lenta';
+      detail = ratio < 0.65
+          ? 'Los datos están llegando bastante más lento de lo que necesita este canal. Probá Wi‑Fi más cerca del router o cable Ethernet.'
+          : 'La velocidad recibida está por debajo del bitrate necesario para sostener este canal de forma continua.';
+      confidence = ratio < 0.65 ? 'alta' : 'media';
+    } else {
+      source = _ConnectionIssueSource.unknown;
+      title = 'Recepción inestable';
+      detail =
+          _lastConnectionDetail ??
+          'La señal está llegando de forma irregular. Puede ser la conexión del usuario o el servidor del canal.';
+      confidence = 'baja';
+    }
+
+    final poorByThroughput = ratio != null && ratio < 0.65;
+    final level = severe || _recentBufferingEvents >= 3 || poorByThroughput
+        ? _ConnectionHealthLevel.poor
+        : _ConnectionHealthLevel.unstable;
+
+    _connectionHealth.value = _ConnectionHealthSnapshot(
+      level: level,
+      source: source,
+      title: title,
+      detail: detail,
+      confidence: confidence,
+    );
+  }
+
+  bool _looksLikeConnectionLog(String text) {
+    return text.contains('timeout') ||
+        text.contains('timed out') ||
+        text.contains('connection reset') ||
+        text.contains('broken pipe') ||
+        text.contains('connection refused') ||
+        text.contains('too many requests') ||
+        text.contains('network') ||
+        text.contains('http 5') ||
+        RegExp(r'\b5\d\d\b').hasMatch(text);
+  }
+
+  bool _looksProviderSpecific(String text) {
+    return text.contains('401') ||
+        text.contains('403') ||
+        text.contains('404') ||
+        text.contains('429') ||
+        text.contains('connection refused') ||
+        (RegExp(r'\b5\d\d\b').hasMatch(text) && text.contains('http'));
+  }
+
+  Future<void> _showConnectionHealthInfo(
+    _ConnectionHealthSnapshot snapshot,
+  ) async {
+    await _refreshRuntimeStats();
+    if (!mounted) return;
+
+    final sourceLabel = switch (snapshot.source) {
+      _ConnectionIssueSource.internet => 'Conexión / Wi‑Fi',
+      _ConnectionIssueSource.provider => 'Servidor del canal',
+      _ConnectionIssueSource.unknown => 'No determinado',
+      _ConnectionIssueSource.none => 'Sin problemas',
+    };
+
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Estado de reproducción'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(snapshot.title),
+            const SizedBox(height: 8),
+            Text(snapshot.detail),
+            const SizedBox(height: 14),
+            Text('Causa probable: $sourceLabel'),
+            Text('Confianza del diagnóstico: ${snapshot.confidence}'),
+            Text('Velocidad recibida: $_networkSpeedText'),
+            Text('Bitrate de video: ${_formatBitrate(_videoBitrate)}'),
+            Text('Bitrate de audio: ${_formatBitrate(_audioBitrate)}'),
+            Text(
+              'Buffer disponible: ${_lastCacheSeconds == null ? 'No disponible' : '${_lastCacheSeconds!.toStringAsFixed(1)} s'}',
+            ),
+            if (_lastZapMs != null)
+              Text('Último cambio de canal: $_lastZapMs ms'),
+          ],
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildConnectionHealthBadge() {
+    return ValueListenableBuilder<_ConnectionHealthSnapshot>(
+      valueListenable: _connectionHealth,
+      builder: (context, snapshot, _) {
+        if (snapshot.level == _ConnectionHealthLevel.stable) {
+          return const SizedBox.shrink();
+        }
+
+        final isPoor = snapshot.level == _ConnectionHealthLevel.poor;
+        final color = isPoor ? Colors.redAccent : Colors.amberAccent;
+        final icon = snapshot.source == _ConnectionIssueSource.provider
+            ? Icons.dns_rounded
+            : snapshot.source == _ConnectionIssueSource.internet
+            ? Icons.wifi_off_rounded
+            : Icons.network_check_rounded;
+
+        return Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(18),
+            onTap: () => unawaited(_showConnectionHealthInfo(snapshot)),
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
+              decoration: BoxDecoration(
+                color: const Color(0xDC101820),
+                borderRadius: BorderRadius.circular(18),
+                border: Border.all(color: color.withValues(alpha: 0.6)),
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 18, color: color),
+                  const SizedBox(width: 8),
+                  Text(
+                    snapshot.title,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 13,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
   }
 
   bool _looksLikeHls(String url) {
@@ -484,6 +995,51 @@ class _PlayerScreenState extends State<PlayerScreen> {
     return value.contains('.m3u8') ||
         format.contains('hls') ||
         format.contains('applehttp');
+  }
+
+  bool _looksLikeXtreamLiveTs(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || !(uri.scheme == 'http' || uri.scheme == 'https')) {
+      return false;
+    }
+    final path = uri.path.toLowerCase();
+    return path.contains('/live/') && path.endsWith('.ts');
+  }
+
+  String _playbackUrlForMode(String originalUrl) {
+    if (_compatibilityMode != ServerCompatibilityMode.xtreamHls ||
+        !_looksLikeXtreamLiveTs(originalUrl)) {
+      return originalUrl;
+    }
+
+    final uri = Uri.tryParse(originalUrl);
+    if (uri == null) return originalUrl;
+    final path = uri.path;
+    final lower = path.toLowerCase();
+    if (!lower.endsWith('.ts')) return originalUrl;
+    final hlsPath = '${path.substring(0, path.length - 3)}.m3u8';
+    return uri.replace(path: hlsPath).toString();
+  }
+
+  Future<void> _refreshContainerFormat() async {
+    if (_runtimeFormatLoaded ||
+        !mounted ||
+        !_hasEverPlayed ||
+        _opening ||
+        _reconnecting) {
+      return;
+    }
+
+    final platform = _player.platform;
+    if (platform is! NativePlayer) return;
+
+    final format = await _readStringProperty(platform, 'file-format');
+    if (!mounted || format == null || format.isEmpty || format == 'N/A') return;
+
+    // No hacemos setState: este dato alimenta compatibilidad/diagnóstico y será
+    // leído por la UI sólo cuando corresponda.
+    _containerFormat = format;
+    _runtimeFormatLoaded = true;
   }
 
   Future<void> _refreshRuntimeStats() async {
@@ -503,44 +1059,50 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final fps = await _readDoubleProperty(platform, 'estimated-vf-fps');
       final videoBitrate = await _readDoubleProperty(platform, 'video-bitrate');
       final audioBitrate = await _readDoubleProperty(platform, 'audio-bitrate');
-      final cacheSeconds =
-          await _readDoubleProperty(platform, 'demuxer-cache-duration');
+      final cacheSeconds = await _readDoubleProperty(
+        platform,
+        'demuxer-cache-duration',
+      );
       final cacheSpeed = await _readDoubleProperty(platform, 'cache-speed');
       final coreIdle = await _readStringProperty(platform, 'core-idle');
-      final pausedForCache =
-          await _readStringProperty(platform, 'paused-for-cache');
+      final pausedForCache = await _readStringProperty(
+        platform,
+        'paused-for-cache',
+      );
       final eofReached = await _readStringProperty(platform, 'eof-reached');
       final format = await _readStringProperty(platform, 'file-format');
 
       if (!mounted) return;
-      setState(() {
-        if (fps != null && fps > 0) _videoFps = fps;
-        if (videoBitrate != null && videoBitrate > 0) {
-          _videoBitrate = videoBitrate;
-        }
-        if (audioBitrate != null && audioBitrate > 0) {
-          _audioBitrate = audioBitrate;
-        }
-        if (cacheSeconds != null && cacheSeconds >= 0) {
-          _lastCacheSeconds = cacheSeconds;
-        }
-        if (cacheSpeed != null && cacheSpeed >= 0) {
-          _networkReadBytesPerSecond = cacheSpeed;
-        }
-        if (coreIdle != null) {
-          _coreIdle = coreIdle == 'yes' || coreIdle == 'true';
-        }
-        if (pausedForCache != null) {
-          _pausedForCache =
-              pausedForCache == 'yes' || pausedForCache == 'true';
-        }
-        if (eofReached != null) {
-          _eofReached = eofReached == 'yes' || eofReached == 'true';
-        }
-        if (format != null && format.isNotEmpty && format != 'N/A') {
-          _containerFormat = format;
-        }
-      });
+
+      // Snapshot técnico bajo demanda. No usamos setState porque estos valores
+      // no forman parte del camino crítico del video; los diálogos que los
+      // muestran se construyen después de que esta lectura termina.
+      if (fps != null && fps > 0) _videoFps = fps;
+      if (videoBitrate != null && videoBitrate > 0) {
+        _videoBitrate = videoBitrate;
+      }
+      if (audioBitrate != null && audioBitrate > 0) {
+        _audioBitrate = audioBitrate;
+      }
+      if (cacheSeconds != null && cacheSeconds >= 0) {
+        _lastCacheSeconds = cacheSeconds;
+      }
+      if (cacheSpeed != null && cacheSpeed >= 0) {
+        _networkReadBytesPerSecond = cacheSpeed;
+      }
+      if (coreIdle != null) {
+        _coreIdle = coreIdle == 'yes' || coreIdle == 'true';
+      }
+      if (pausedForCache != null) {
+        _pausedForCache = pausedForCache == 'yes' || pausedForCache == 'true';
+      }
+      if (eofReached != null) {
+        _eofReached = eofReached == 'yes' || eofReached == 'true';
+      }
+      if (format != null && format.isNotEmpty && format != 'N/A') {
+        _containerFormat = format;
+        _runtimeFormatLoaded = true;
+      }
     } finally {
       _runtimeStatsBusy = false;
     }
@@ -598,10 +1160,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // comportamiento durante la recuperación. Advanced = Compatible +
       // reconexión, evitando que un EOF haga volver a un modo incompatible.
       final recoveryMode =
-          _compatibilityMode == ServerCompatibilityMode.compatible ||
-                  _compatibilityMode == ServerCompatibilityMode.advanced
-              ? ServerCompatibilityMode.advanced
-              : ServerCompatibilityMode.liveRecovery;
+          _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
+              _compatibilityMode == ServerCompatibilityMode.mpvHttp ||
+              _compatibilityMode == ServerCompatibilityMode.tlsLegacy ||
+              _compatibilityMode == ServerCompatibilityMode.xtreamHls
+          ? _compatibilityMode
+          : _compatibilityMode == ServerCompatibilityMode.compatible ||
+                _compatibilityMode == ServerCompatibilityMode.advanced
+          ? ServerCompatibilityMode.advanced
+          : ServerCompatibilityMode.liveRecovery;
       await _compatibility.recordLiveEof(channel.url, recoveryMode);
       if (!mounted) return;
 
@@ -615,12 +1182,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
       scheduleMicrotask(() {
         if (!mounted || _opening || _reconnecting) return;
-        unawaited(
-          _playCurrent(
-            isRetry: true,
-            forceNormalProbe: true,
-          ),
-        );
+        unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
       });
       return;
     }
@@ -628,9 +1190,26 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _handleFailure('El stream terminó inesperadamente', silent: true);
   }
 
-  bool _advanceCompatibilityMode(String reason) {
-    if (_hasEverPlayed ||
-        _compatibilityIndex >= _compatibilityPlan.length - 1) {
+  bool _advanceCompatibilityMode(
+    String reason, {
+    ServerCompatibilityMode? preferredTarget,
+  }) {
+    if (_hasEverPlayed || _compatibilityPlan.isEmpty) {
+      return false;
+    }
+    if (widget.isLiveContent &&
+        _compatibilityFallbacks >= _maxLiveStartupCompatibilityFallbacks) {
+      return false;
+    }
+
+    var nextIndex = _compatibilityIndex + 1;
+    if (preferredTarget != null) {
+      final targetedIndex = _compatibilityPlan.indexOf(preferredTarget);
+      if (targetedIndex >= 0 && targetedIndex != _compatibilityIndex) {
+        nextIndex = targetedIndex;
+      }
+    }
+    if (nextIndex < 0 || nextIndex >= _compatibilityPlan.length) {
       return false;
     }
 
@@ -638,7 +1217,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final previous = _compatibilityMode;
     unawaited(_compatibility.recordFailure(url, previous));
 
-    _compatibilityIndex++;
+    _compatibilityIndex = nextIndex;
     _compatibilityFallbacks++;
     _compatibilityMode = _compatibilityPlan[_compatibilityIndex];
     _normalProbeFallbackUsed = true;
@@ -664,9 +1243,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final previous = _compatibilityMode;
     final ServerCompatibilityMode? target = switch (previous) {
       ServerCompatibilityMode.direct => ServerCompatibilityMode.liveRecovery,
+      ServerCompatibilityMode.nativeHttp => null,
+      ServerCompatibilityMode.mpvHttp => null,
+      ServerCompatibilityMode.tlsLegacy => null,
       ServerCompatibilityMode.compatible => ServerCompatibilityMode.advanced,
       ServerCompatibilityMode.liveRecovery => ServerCompatibilityMode.advanced,
       ServerCompatibilityMode.advanced => null,
+      ServerCompatibilityMode.xtreamHls => null,
     };
     if (target == null) return false;
 
@@ -691,8 +1274,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           '$reason · señal inestable en ${previous.label}; probando ${target.label}';
     });
 
-    final resumePosition =
-        widget.isLiveContent ? null : _lastKnownPosition;
+    final resumePosition = widget.isLiveContent ? null : _lastKnownPosition;
     scheduleMicrotask(() {
       if (!mounted) return;
       unawaited(
@@ -704,6 +1286,126 @@ class _PlayerScreenState extends State<PlayerScreen> {
       );
     });
     return true;
+  }
+
+  ServerCompatibilityMode? _compatibilityTargetForStartupLog(String text) {
+    final lower = text.toLowerCase();
+    final channelUrl = widget.playlist[_currentIndex].url;
+
+    if ((lower.contains('404') || lower.contains('not found')) &&
+        _looksLikeXtreamLiveTs(channelUrl) &&
+        _compatibilityMode != ServerCompatibilityMode.xtreamHls) {
+      return ServerCompatibilityMode.xtreamHls;
+    }
+    if (lower.contains('403') || lower.contains('forbidden')) {
+      return ServerCompatibilityMode.mpvHttp;
+    }
+    if (lower.contains('certificate') ||
+        lower.contains('tls') ||
+        lower.contains('ssl')) {
+      return ServerCompatibilityMode.tlsLegacy;
+    }
+    if (lower.contains('mime') ||
+        lower.contains('invalid data') ||
+        lower.contains('could not find codec parameters')) {
+      return ServerCompatibilityMode.compatible;
+    }
+    return null;
+  }
+
+  void _rememberStartupCompatibilityHint(String text) {
+    if (!widget.isLiveContent || _hasEverPlayed) return;
+    final target = _compatibilityTargetForStartupLog(text);
+    if (target == null || target == _compatibilityMode) return;
+    _startupCompatibilityHint = true;
+    _startupCompatibilityTarget = target;
+  }
+
+  bool _isTransientAndroidStartupFailure(String text) {
+    if (!_isAndroidRuntime) return false;
+    final lower = text.toLowerCase();
+    return lower.contains('408') ||
+        lower.contains('request timeout') ||
+        lower.contains('429') ||
+        lower.contains('too many requests') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection reset') ||
+        lower.contains('broken pipe') ||
+        lower.contains('service unavailable') ||
+        lower.contains('bad gateway') ||
+        lower.contains('gateway timeout') ||
+        lower.contains('timed out') ||
+        lower.contains('timeout') ||
+        lower.contains('tardó demasiado') ||
+        lower.contains('no llegó el primer frame') ||
+        (RegExp(r'\b5\d\d\b').hasMatch(lower) && lower.contains('http'));
+  }
+
+  bool _isDefinitiveStartupFailureLog(String text) {
+    if (!widget.isLiveContent || _hasEverPlayed) return false;
+    final lower = text.toLowerCase();
+
+    // Android puede reportar un 429/5xx o un socket transitorio antes de que
+    // el mismo stream abra normalmente. Un reintento corto evita falsos
+    // positivos sin cambiar el comportamiento de macOS.
+    if (_isTransientAndroidStartupFailure(lower)) return false;
+
+    // Un 404 en un endpoint Xtream .ts merece un único intento HLS porque
+    // algunos paneles publican el mismo stream sólo como .m3u8. El resto de
+    // 404/410/401 y errores de servidor no mejoran repitiendo ocho modos.
+    if ((lower.contains('404') || lower.contains('not found')) &&
+        _compatibilityTargetForStartupLog(lower) ==
+            ServerCompatibilityMode.xtreamHls) {
+      return false;
+    }
+
+    return lower.contains('401') ||
+        lower.contains('unauthorized') ||
+        lower.contains('404') ||
+        lower.contains('not found') ||
+        lower.contains('410') ||
+        lower.contains(' gone') ||
+        lower.contains('429') ||
+        lower.contains('too many requests') ||
+        lower.contains('connection refused') ||
+        lower.contains('service unavailable') ||
+        lower.contains('bad gateway') ||
+        lower.contains('gateway timeout') ||
+        (RegExp(r'\b5\d\d\b').hasMatch(lower) && lower.contains('http'));
+  }
+
+  void _showChannelMaintenance(String diagnostic) {
+    if (!mounted || !widget.isLiveContent || _hasEverPlayed) return;
+    final session = _sessionId;
+    if (_terminalStartupSession == session) return;
+    _terminalStartupSession = session;
+
+    _connectTimeoutTimer?.cancel();
+    _retryTimer?.cancel();
+    _transientLiveFailureTimer?.cancel();
+    _transientLiveFailureTimer = null;
+    _startupStopwatch?.stop();
+    _zapStopwatch?.stop();
+    _zapSession = null;
+    _opening = false;
+    _acceptPlaybackEvents = false;
+
+    final url = widget.playlist[_currentIndex].url;
+    unawaited(_metrics.recordFailure(url));
+    unawaited(_compatibility.recordFailure(url, _compatibilityMode));
+    unawaited(_player.stop());
+
+    setState(() {
+      _isBuffering = false;
+      _reconnecting = false;
+      _errorTitle = _isAndroidRuntime
+          ? 'CANAL TEMPORALMENTE NO DISPONIBLE'
+          : 'CANAL EN MANTENIMIENTO';
+      _errorMessage = _isAndroidRuntime
+          ? 'No pudimos obtener señal en este momento.\nIntentá nuevamente en unos segundos.'
+          : _channelMaintenanceMessage;
+      _engineDiagnostic = diagnostic;
+    });
   }
 
   void _handlePlayerLog(PlayerLog log) {
@@ -738,17 +1440,45 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (text.contains('too many redirects') ||
         text.contains('redirect loop')) {
       diagnostic = 'El servidor entró en un bucle de redirecciones HTTP';
-    } else if (RegExp(r'\b5\d\d\b').hasMatch(text) &&
-        text.contains('http')) {
+    } else if (RegExp(r'\b5\d\d\b').hasMatch(text) && text.contains('http')) {
       diagnostic = 'El servidor respondió con un error HTTP 5xx temporal';
     } else if (text.contains('mime')) {
       diagnostic =
           'El MIME del servidor puede ser incompatible; disponible fallback Compatible';
     } else if (text.contains('eof')) {
       diagnostic = 'EOF detectado en la señal en vivo';
-    } else if ((log.level == 'error' || log.level == 'fatal' || log.level == 'warn') &&
-        (text.contains('http') || text.contains('network') || text.contains('failed'))) {
+    } else if ((log.level == 'error' ||
+            log.level == 'fatal' ||
+            log.level == 'warn') &&
+        (text.contains('http') ||
+            text.contains('network') ||
+            text.contains('failed'))) {
       diagnostic = 'mpv/FFmpeg reportó un fallo de red durante la apertura';
+    }
+
+    if (widget.isLiveContent && !_hasEverPlayed && _opening) {
+      _rememberStartupCompatibilityHint(text);
+      if (_isTransientAndroidStartupFailure(text)) {
+        _startupTransientFailureHint = true;
+      }
+      if (_isDefinitiveStartupFailureLog(text)) {
+        final startupDiagnostic =
+            diagnostic ??
+            'mpv/FFmpeg confirmó que el canal no está disponible durante la apertura';
+        scheduleMicrotask(() {
+          if (!mounted) return;
+          _showChannelMaintenance(startupDiagnostic);
+        });
+        return;
+      }
+    }
+
+    if (diagnostic != null && _hasEverPlayed && _looksLikeConnectionLog(text)) {
+      _providerIssueHint = _looksProviderSpecific(text);
+      _lastConnectionDetail = diagnostic;
+      _scheduleConnectionDiagnosis(
+        severe: log.level == 'error' || log.level == 'fatal',
+      );
     }
 
     if (diagnostic != null && diagnostic != _engineDiagnostic) {
@@ -774,6 +1504,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           session != _sessionId ||
           _opening ||
           _reconnecting ||
+          _isBuffering ||
           _errorMessage != null) {
         return;
       }
@@ -802,6 +1533,43 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return;
     }
 
+    if (!_hasEverPlayed && widget.isLiveContent) {
+      final androidTransient =
+          _isAndroidRuntime &&
+          (_startupTransientFailureHint ||
+              _isTransientAndroidStartupFailure(message));
+      if (androidTransient &&
+          _androidTransientStartupRetries <
+              _maxAndroidTransientStartupRetries) {
+        _androidTransientStartupRetries++;
+        setState(() {
+          _reconnecting = true;
+          _errorMessage = null;
+          _engineDiagnostic =
+              'Android: fallo transitorio, reintentando conexión…';
+        });
+        _retryTimer = Timer(_androidTransientRetryDelay, () {
+          if (!mounted || failedSession != _sessionId) return;
+          unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
+        });
+        return;
+      }
+
+      final elapsedMs = _startupStopwatch?.elapsedMilliseconds ?? 999999;
+      final failedQuickly = elapsedMs < 2500;
+      final shouldTryCompatibility = _startupCompatibilityHint || failedQuickly;
+      if (shouldTryCompatibility &&
+          _advanceCompatibilityMode(
+            message,
+            preferredTarget: _startupCompatibilityTarget,
+          )) {
+        return;
+      }
+
+      _showChannelMaintenance(message);
+      return;
+    }
+
     if (!_hasEverPlayed && _advanceCompatibilityMode(message)) {
       return;
     }
@@ -817,8 +1585,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _errorMessage = null;
       });
 
-      final resumePosition =
-          widget.isLiveContent ? null : _lastKnownPosition;
+      final resumePosition = widget.isLiveContent ? null : _lastKnownPosition;
       _retryTimer = Timer(Duration(seconds: seconds), () {
         if (!mounted || failedSession != _sessionId) return;
         unawaited(
@@ -830,6 +1597,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         );
       });
     } else {
+      _zapStopwatch?.stop();
+      _zapSession = null;
       setState(() {
         _reconnecting = false;
         _errorMessage = silent
@@ -863,10 +1632,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
     bool isRetry = false,
     bool forceNormalProbe = false,
     bool skipStop = false,
+    bool isZap = false,
     Duration? resumePosition,
   }) async {
     final session = ++_sessionId;
+    _terminalStartupSession = null;
+    _startupCompatibilityHint = false;
+    _startupCompatibilityTarget = null;
+    _startupTransientFailureHint = false;
     _opening = true;
+    _acceptPlaybackEvents = false;
+    _connectionProbeTimer?.cancel();
+    _connectionRecoveryTimer?.cancel();
+
+    if (isZap) {
+      _zapStopwatch = Stopwatch()..start();
+      _zapSession = session;
+    } else if (isRetry && (_zapStopwatch?.isRunning ?? false)) {
+      _zapSession = session;
+    }
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _retryTimer = null;
@@ -875,13 +1659,29 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (!isRetry) {
       _retryCount = 0;
+      _androidTransientStartupRetries = 0;
       _normalProbeFallbackUsed = false;
+      _providerIssueHint = false;
+      _lastConnectionDetail = null;
+      _recentBufferingEvents = 0;
+      _bufferingWindowStartedAt = DateTime.now();
+      _connectionHealth.value = _ConnectionHealthSnapshot.stable;
       _resetStreamInfo();
 
       final channelUrl = widget.playlist[_currentIndex].url;
       final profile = await _compatibility.profileForUrl(channelUrl);
       if (!mounted || session != _sessionId) return;
-      _compatibilityPlan = _compatibility.planFor(profile.preferredMode);
+      final learnedPlan = _compatibility.planFor(profile.preferredMode);
+      final parsedChannelUri = Uri.tryParse(channelUrl);
+      final isHttps = parsedChannelUri?.scheme.toLowerCase() == 'https';
+      final isXtreamLiveTs = _looksLikeXtreamLiveTs(channelUrl);
+      _compatibilityPlan = learnedPlan
+          .where((mode) => isHttps || mode != ServerCompatibilityMode.tlsLegacy)
+          .where(
+            (mode) =>
+                isXtreamLiveTs || mode != ServerCompatibilityMode.xtreamHls,
+          )
+          .toList(growable: false);
       _compatibilityIndex = 0;
       _compatibilityFallbacks = 0;
       _runtimeRecoveryPromotions = 0;
@@ -900,8 +1700,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (mounted) {
       setState(() {
+        _errorTitle = null;
         _errorMessage = null;
-        _isBuffering = true;
+        _isBuffering = isZap ? false : true;
         _reconnecting = isRetry;
         _lastStartupMs = null;
       });
@@ -917,20 +1718,44 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (!prepared) return;
 
     try {
-      // En recuperación de EOF reemplazamos el Media directamente. Evitar un
-      // stop explícito reduce el hueco visible entre una conexión y la siguiente.
-      if (!skipStop) {
+      // En zapping live reemplazamos el Media directamente. El canal anterior
+      // puede seguir visible mientras preparamos headers/perfil; evitamos el
+      // hueco artificial de stop() -> open(). En retries/VOD conservamos stop().
+      final shouldStopBeforeOpen =
+          !skipStop && !isZap && (isRetry || !widget.isLiveContent);
+      if (shouldStopBeforeOpen) {
         await _player.stop();
         if (!mounted || session != _sessionId) return;
       }
 
       final channel = widget.playlist[_currentIndex];
-      final headers = channel.resolvedHttpHeaders(_defaultUserAgent);
+      final fallbackUserAgent =
+          _compatibilityMode == ServerCompatibilityMode.compatible ||
+              _compatibilityMode == ServerCompatibilityMode.advanced
+          ? _legacyVlcUserAgent
+          : _defaultUserAgent;
+      final nativeHttp =
+          _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
+          _compatibilityMode == ServerCompatibilityMode.xtreamHls;
+      final useMpvHttp = _compatibilityMode == ServerCompatibilityMode.mpvHttp;
+      final headers = channel.resolvedHttpHeaders(
+        fallbackUserAgent,
+        includeDefaultUserAgent: !nativeHttp,
+      );
+      final playbackUrl = _playbackUrlForMode(channel.url);
+      final media = useMpvHttp || headers.isEmpty
+          ? Media(playbackUrl)
+          : Media(playbackUrl, httpHeaders: headers);
 
-      await _player
-          .open(Media(channel.url, httpHeaders: headers))
-          .timeout(_connectTimeout);
-      if (!mounted || session != _sessionId) return;
+      final attemptTimeout = _startupAttemptTimeout;
+      final openFuture = _player.open(media);
+      _acceptPlaybackEvents = true;
+      await openFuture.timeout(attemptTimeout);
+      if (!mounted ||
+          session != _sessionId ||
+          _terminalStartupSession == session) {
+        return;
+      }
 
       if (!widget.isLiveContent &&
           resumePosition != null &&
@@ -943,17 +1768,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
 
       _opening = false;
-      _connectTimeoutTimer = Timer(_connectTimeout, () {
+      _connectTimeoutTimer = Timer(attemptTimeout, () {
         if (!mounted || session != _sessionId || _hasEverPlayed) return;
         if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
           _startNormalProbeFallback(session);
           return;
         }
-        _handleFailure('El canal tardó demasiado en responder', silent: true);
+        _handleFailure(
+          'El servidor respondió, pero no llegó el primer frame',
+          silent: true,
+        );
       });
     } on TimeoutException {
-      if (!mounted || session != _sessionId) return;
+      if (!mounted ||
+          session != _sessionId ||
+          _terminalStartupSession == session) {
+        return;
+      }
       _opening = false;
+      _acceptPlaybackEvents = true;
       unawaited(_player.stop());
       if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
         _startNormalProbeFallback(session);
@@ -961,8 +1794,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
       }
       _handleFailure('El canal tardó demasiado en abrir', silent: true);
     } catch (e) {
-      if (!mounted || session != _sessionId) return;
+      if (!mounted ||
+          session != _sessionId ||
+          _terminalStartupSession == session) {
+        return;
+      }
       _opening = false;
+      _acceptPlaybackEvents = true;
       if (_currentOpenUsesFastProbe && !_normalProbeFallbackUsed) {
         _startNormalProbeFallback(session);
         return;
@@ -981,6 +1819,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioCodec = null;
     _pixelFormat = null;
     _containerFormat = null;
+    _runtimeFormatLoaded = false;
     _audioChannels = null;
     _audioSampleRate = null;
     _lastCacheSeconds = null;
@@ -997,24 +1836,33 @@ class _PlayerScreenState extends State<PlayerScreen> {
       setState(() => _showChannelList = false);
       return;
     }
+    _zapTo(index);
+  }
+
+  void _zapTo(int index) {
+    if (index < 0 ||
+        index >= widget.playlist.length ||
+        index == _currentIndex) {
+      return;
+    }
     setState(() {
       _currentIndex = index;
       _showChannelList = false;
     });
-    unawaited(_playCurrent());
+    // El reemplazo directo se reserva para TV/radio. En VOD mantenemos el
+    // cierre explícito para no alterar seek/resume ni semántica de archivos.
+    unawaited(_playCurrent(isZap: widget.isLiveContent));
   }
 
   void _next() {
     if (_currentIndex < widget.playlist.length - 1) {
-      setState(() => _currentIndex++);
-      unawaited(_playCurrent());
+      _zapTo(_currentIndex + 1);
     }
   }
 
   void _previous() {
     if (_currentIndex > 0) {
-      setState(() => _currentIndex--);
-      unawaited(_playCurrent());
+      _zapTo(_currentIndex - 1);
     }
   }
 
@@ -1105,7 +1953,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final channel = widget.playlist[_currentIndex];
     final advertised = _advertisedQuality(channel.name);
     final actual = _qualityLabel;
-    final belowAdvertised = advertised != null &&
+    final belowAdvertised =
+        advertised != null &&
         _qualityRank(actual) >= 0 &&
         _qualityRank(actual) < _qualityRank(advertised);
 
@@ -1166,7 +2015,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
                 'Headers enviados: ${channel.resolvedHttpHeaders(_defaultUserAgent).keys.join(', ')}',
               ),
               Text('Diagnóstico de red: $_engineDiagnostic'),
-              Text('Recuperaciones transparentes de EOF: $_seamlessEofRecoveries'),
+              Text(
+                'Recuperaciones transparentes de EOF: $_seamlessEofRecoveries',
+              ),
             ],
           ),
         ),
@@ -1181,6 +2032,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   }
 
   Future<void> _showPerformanceInfo() async {
+    await _refreshRuntimeStats();
+    if (!mounted) return;
+
     final channel = widget.playlist[_currentIndex];
     final stats = await _metrics.statsForUrl(channel.url);
     if (!mounted) return;
@@ -1190,9 +2044,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
       BufferProfile.ultraFast => 'Ultra rápido',
       BufferProfile.balanced => 'Equilibrado',
       BufferProfile.stable => 'Estable',
+      BufferProfile.slowConnection => 'Conexión lenta',
       BufferProfile.custom => 'Personalizado',
     };
     final average = stats.averageStartupMs;
+    final averageZap = stats.averageZapMs;
 
     await showDialog<void>(
       context: context,
@@ -1220,9 +2076,17 @@ class _PlayerScreenState extends State<PlayerScreen> {
             Text(
               'Promedio servidor: ${average == null ? 'sin muestras' : '${average.round()} ms'}',
             ),
+            Text(
+              'Último zap: ${_lastZapMs == null ? 'sin medir' : '$_lastZapMs ms'}',
+            ),
+            Text(
+              'Promedio de zap: ${averageZap == null ? 'sin muestras' : '${averageZap.round()} ms'}',
+            ),
             Text('Muestras: ${stats.startupCount}'),
             Text('Fallos: ${stats.failures} · Cortes: ${stats.stalls}'),
-            Text('Fast Probe: ${_currentOpenUsesFastProbe ? 'activo' : 'normal'}'),
+            Text(
+              'Fast Probe: ${_currentOpenUsesFastProbe ? 'activo' : 'normal'}',
+            ),
             if (stats.fastProbeFallbacks > 0)
               Text('Fallbacks de detección: ${stats.fastProbeFallbacks}'),
             Text('Resolución actual: $_resolutionText'),
@@ -1252,10 +2116,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
   void dispose() {
     _sessionId++;
     _watchdogTimer?.cancel();
-    _runtimeStatsTimer?.cancel();
     _connectTimeoutTimer?.cancel();
     _retryTimer?.cancel();
     _transientLiveFailureTimer?.cancel();
+    _connectionProbeTimer?.cancel();
+    _connectionRecoveryTimer?.cancel();
+    _connectionHealth.dispose();
     _bufferingSub?.cancel();
     _errorSub?.cancel();
     _positionSub?.cancel();
@@ -1266,6 +2132,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _audioBitrateSub?.cancel();
     _logSub?.cancel();
     unawaited(_player.dispose());
+    ArtworkCacheService.instance.resumeBrowsing();
     super.dispose();
   }
 
@@ -1276,189 +2143,293 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final filteredChannels = query.trim().isEmpty
         ? widget.playlist
         : widget.playlist
-            .where((c) => c.name.toLowerCase().contains(query))
-            .toList();
+              .where((c) => c.name.toLowerCase().contains(query))
+              .toList();
+    final isChannelMaintenance =
+        widget.isLiveContent &&
+        (_errorTitle == 'CANAL EN MANTENIMIENTO' ||
+            _errorTitle == 'CANAL TEMPORALMENTE NO DISPONIBLE');
+    final errorAccent = isChannelMaintenance
+        ? Colors.amberAccent
+        : Colors.redAccent;
 
     return Scaffold(
       backgroundColor: Colors.black,
-      appBar: AppBar(
-        backgroundColor: const Color(0xFF071D38),
-        foregroundColor: Colors.white,
-        title: Row(
-          children: [
-            const Text(
-              'TV FULL',
-              style: TextStyle(
-                color: Color(0xFF58A6FF),
-                fontWeight: FontWeight.w800,
-                letterSpacing: 0.6,
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(channel.name, overflow: TextOverflow.ellipsis),
-            ),
-          ],
-        ),
-        actions: [
-          if (_videoWidth != null && _videoHeight != null)
-            TextButton.icon(
-              onPressed: _showStreamInfo,
-              icon: const Icon(Icons.high_quality, color: Colors.white70),
-              label: Text(
-                _compactResolutionLabel,
-                style: const TextStyle(color: Colors.white70),
-              ),
-            ),
-          if (_lastStartupMs != null)
-            TextButton.icon(
-              onPressed: _showPerformanceInfo,
-              icon: const Icon(Icons.speed, color: Colors.white70),
-              label: Text(
-                '$_lastStartupMs ms',
-                style: const TextStyle(color: Colors.white70),
-              ),
-            ),
-          IconButton(
-            icon: Icon(_showChannelList ? Icons.close : Icons.list),
-            tooltip: 'Lista de canales',
-            onPressed: () =>
-                setState(() => _showChannelList = !_showChannelList),
-          ),
-        ],
-      ),
       body: Stack(
         children: [
-          Center(
-            child: Stack(
-              alignment: Alignment.center,
-              children: [
-                LiveVideoView(
-                  key: ValueKey(channel.uniqueKey),
-                  player: _player,
-                  controller: _controller,
-                  canPrevious: _currentIndex > 0,
-                  canNext: _currentIndex < widget.playlist.length - 1,
-                  onPrevious: _previous,
-                  onNext: _next,
-                  isLiveContent: widget.isLiveContent,
-                ),
-                if ((_isBuffering || _reconnecting) &&
-                    _errorMessage == null)
-                  Column(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      const CircularProgressIndicator(color: Colors.white),
-                      const SizedBox(height: 12),
-                      Text(
-                        _normalProbeFallbackUsed && _retryCount == 0
-                            ? 'Probando modo compatible…'
-                            : _reconnecting
-                                    ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
-                                    : _hasEverPlayed
-                                        ? 'Recibiendo datos…'
-                                        : 'Cargando…',
-                        style: const TextStyle(color: Colors.white70),
-                        textAlign: TextAlign.center,
-                      ),
-                    ],
-                  ),
-                if (_errorMessage != null)
-                  Container(
-                    color: Colors.black87,
-                    padding: const EdgeInsets.all(24),
+          Positioned.fill(
+            child: LiveVideoView(
+              key: ValueKey(channel.uniqueKey),
+              player: _player,
+              controller: _controller,
+              canPrevious: _currentIndex > 0,
+              canNext: _currentIndex < widget.playlist.length - 1,
+              onPrevious: _previous,
+              onNext: _next,
+              isLiveContent: widget.isLiveContent,
+              title: channel.name,
+              subtitle: channel.group,
+              logoUrl: channel.logoUrl,
+              channelNumber: _currentIndex + 1,
+              resolution: _videoWidth == null || _videoHeight == null
+                  ? ''
+                  : _resolutionText,
+              performanceLabel: _lastZapMs != null
+                  ? 'Zap $_lastZapMs ms'
+                  : (_lastStartupMs == null ? null : '$_lastStartupMs ms'),
+              onBack: () => Navigator.of(context).maybePop(),
+              onShowChannelList: () =>
+                  setState(() => _showChannelList = !_showChannelList),
+              onShowStreamInfo: _showStreamInfo,
+              onShowPerformance: _lastStartupMs == null
+                  ? null
+                  : _showPerformanceInfo,
+            ),
+          ),
+          Positioned(
+            top: 18,
+            right: 18,
+            child: SafeArea(child: _buildConnectionHealthBadge()),
+          ),
+          if ((_isBuffering || _reconnecting) && _errorMessage == null)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Center(
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 22,
+                      vertical: 16,
+                    ),
+                    decoration: BoxDecoration(
+                      color: const Color(0xC914202D),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(color: Colors.white12),
+                    ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        const Icon(
-                          Icons.error_outline,
-                          color: Colors.redAccent,
-                          size: 48,
+                        const SizedBox(
+                          width: 30,
+                          height: 30,
+                          child: CircularProgressIndicator(
+                            color: Colors.white,
+                            strokeWidth: 2.5,
+                          ),
                         ),
                         const SizedBox(height: 12),
                         Text(
-                          _errorMessage!,
-                          style: const TextStyle(color: Colors.white),
+                          _normalProbeFallbackUsed && _retryCount == 0
+                              ? 'Probando modo compatible…'
+                              : _reconnecting
+                              ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
+                              : _hasEverPlayed
+                              ? 'Recibiendo datos…'
+                              : 'Cargando…',
+                          style: const TextStyle(
+                            color: Colors.white70,
+                            fontWeight: FontWeight.w600,
+                          ),
                           textAlign: TextAlign.center,
                         ),
-                        const SizedBox(height: 16),
-                        Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            ElevatedButton(
-                              onPressed: () => unawaited(_playCurrent()),
-                              child: const Text('Reintentar'),
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (_errorMessage != null)
+            Positioned.fill(
+              child: ColoredBox(
+                color: Colors.black87,
+                child: Center(
+                  child: Container(
+                    constraints: const BoxConstraints(maxWidth: 520),
+                    margin: const EdgeInsets.all(24),
+                    padding: const EdgeInsets.all(26),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF111B26),
+                      borderRadius: BorderRadius.circular(22),
+                      border: Border.all(
+                        color: errorAccent.withValues(alpha: 0.35),
+                      ),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isChannelMaintenance
+                              ? Icons.settings_suggest_rounded
+                              : Icons.error_outline_rounded,
+                          color: errorAccent,
+                          size: 48,
+                        ),
+                        if (_errorTitle != null) ...[
+                          const SizedBox(height: 14),
+                          Text(
+                            _errorTitle!,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 0.8,
                             ),
-                            const SizedBox(width: 12),
-                            OutlinedButton(
-                              onPressed: () =>
-                                  setState(() => _showChannelList = true),
+                            textAlign: TextAlign.center,
+                          ),
+                        ],
+                        const SizedBox(height: 12),
+                        Text(
+                          _errorMessage!,
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 16,
+                          ),
+                          textAlign: TextAlign.center,
+                        ),
+                        const SizedBox(height: 18),
+                        Wrap(
+                          alignment: WrapAlignment.center,
+                          spacing: 12,
+                          runSpacing: 10,
+                          children: [
+                            FilledButton.icon(
+                              onPressed: () => unawaited(_playCurrent()),
+                              icon: const Icon(Icons.refresh_rounded),
+                              label: const Text('Reintentar'),
+                            ),
+                            OutlinedButton.icon(
+                              onPressed: () => Navigator.of(context).maybePop(),
                               style: OutlinedButton.styleFrom(
                                 foregroundColor: Colors.white,
                               ),
-                              child: const Text('Ver otros canales'),
+                              icon: const Icon(Icons.arrow_back_rounded),
+                              label: Text(
+                                widget.isLiveContent
+                                    ? 'Volver a canales'
+                                    : 'Volver al catálogo',
+                              ),
                             ),
                           ],
                         ),
                       ],
                     ),
                   ),
-              ],
+                ),
+              ),
             ),
-          ),
           AnimatedPositioned(
-            duration: const Duration(milliseconds: 180),
-            curve: Curves.easeOut,
+            duration: const Duration(milliseconds: 200),
+            curve: Curves.easeOutCubic,
             top: 0,
             bottom: 0,
-            right: _showChannelList ? 0 : -340,
-            width: 340,
+            right: _showChannelList ? 0 : -370,
+            width: 370,
             child: Material(
-              color: const Color(0xFF071D38).withValues(alpha: 0.96),
-              child: Column(
-                children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(12, 12, 12, 0),
-                    child: TextField(
-                      style: const TextStyle(color: Colors.white),
-                      decoration: const InputDecoration(
-                        hintText: 'Buscar canal...',
-                        hintStyle: TextStyle(color: Colors.white54),
-                        prefixIcon: Icon(Icons.search, color: Colors.white54),
-                        enabledBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white24),
-                        ),
-                        focusedBorder: OutlineInputBorder(
-                          borderSide: BorderSide(color: Colors.white54),
-                        ),
-                        isDense: true,
-                      ),
-                      onChanged: (value) =>
-                          setState(() => _channelListQuery = value),
-                    ),
-                  ),
-                  Expanded(
-                    child: ListView.builder(
-                      itemCount: filteredChannels.length,
-                      itemBuilder: (context, index) {
-                        final c = filteredChannels[index];
-                        final realIndex = widget.playlist.indexOf(c);
-                        final isCurrent = realIndex == _currentIndex;
-                        return Container(
-                          color: isCurrent
-                              ? const Color(0xFF1677FF).withValues(alpha: 0.18)
-                              : Colors.transparent,
-                          child: ChannelTile(
-                            channel: c,
-                            isFavorite: false,
-                            onFavoriteToggle: () {},
-                            onTap: () => _switchToChannel(realIndex),
+              elevation: 18,
+              color: const Color(0xF2071728),
+              child: SafeArea(
+                left: false,
+                child: Column(
+                  children: [
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(14, 14, 14, 8),
+                      child: Row(
+                        children: [
+                          const Icon(
+                            Icons.live_tv_rounded,
+                            color: Color(0xFF58A6FF),
                           ),
-                        );
-                      },
+                          const SizedBox(width: 10),
+                          const Expanded(
+                            child: Text(
+                              'Canales',
+                              style: TextStyle(
+                                color: Colors.white,
+                                fontSize: 18,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                          ),
+                          IconButton(
+                            tooltip: 'Cerrar',
+                            onPressed: () =>
+                                setState(() => _showChannelList = false),
+                            icon: const Icon(Icons.close_rounded),
+                            color: Colors.white70,
+                          ),
+                        ],
+                      ),
                     ),
-                  ),
-                ],
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 4, 12, 10),
+                      child: TextField(
+                        style: const TextStyle(color: Colors.white),
+                        decoration: InputDecoration(
+                          hintText: 'Buscar canal…',
+                          hintStyle: const TextStyle(color: Colors.white54),
+                          prefixIcon: const Icon(
+                            Icons.search_rounded,
+                            color: Colors.white54,
+                          ),
+                          filled: true,
+                          fillColor: Colors.white.withValues(alpha: 0.06),
+                          enabledBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: const BorderSide(color: Colors.white12),
+                          ),
+                          focusedBorder: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(14),
+                            borderSide: const BorderSide(
+                              color: Color(0xFF1677FF),
+                            ),
+                          ),
+                          isDense: true,
+                        ),
+                        onChanged: (value) =>
+                            setState(() => _channelListQuery = value),
+                      ),
+                    ),
+                    const Divider(height: 1, color: Colors.white10),
+                    Expanded(
+                      child: ListView.builder(
+                        padding: const EdgeInsets.symmetric(vertical: 8),
+                        itemCount: filteredChannels.length,
+                        itemBuilder: (context, index) {
+                          final c = filteredChannels[index];
+                          final realIndex = widget.playlist.indexOf(c);
+                          final isCurrent = realIndex == _currentIndex;
+                          return Container(
+                            margin: const EdgeInsets.symmetric(
+                              horizontal: 8,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: isCurrent
+                                  ? const Color(
+                                      0xFF1677FF,
+                                    ).withValues(alpha: 0.18)
+                                  : Colors.transparent,
+                              borderRadius: BorderRadius.circular(12),
+                              border: isCurrent
+                                  ? Border.all(
+                                      color: const Color(
+                                        0xFF1677FF,
+                                      ).withValues(alpha: 0.35),
+                                    )
+                                  : null,
+                            ),
+                            child: ChannelTile(
+                              channel: c,
+                              isFavorite: false,
+                              onFavoriteToggle: () {},
+                              onTap: () => _switchToChannel(realIndex),
+                              allowNetworkArtwork: false,
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
           ),

@@ -61,7 +61,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Elegí el tipo de acceso que te entregó tu proveedor.',
+                'Pegá el enlace que te dio tu proveedor. En M3U/M3U8, TV FULL detecta automáticamente si el enlace pertenece a Xtream. También podés elegir el tipo manualmente.',
                 style: Theme.of(context).textTheme.bodyLarge?.copyWith(
                       color: Colors.white70,
                     ),
@@ -135,14 +135,23 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   }
 
   Widget _m3uFields() {
-    return TextField(
-      controller: _m3uUrlController,
-      keyboardType: TextInputType.url,
-      decoration: const InputDecoration(
-        labelText: 'URL M3U/M3U8',
-        hintText: 'https://servidor/lista.m3u',
-        prefixIcon: Icon(Icons.link_rounded),
-      ),
+    return Column(
+      children: [
+        TextField(
+          controller: _m3uUrlController,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            labelText: 'URL del proveedor',
+            hintText: 'https://servidor/get.php?username=... o lista.m3u',
+            prefixIcon: Icon(Icons.link_rounded),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const _InfoBox(
+          text:
+              'Detección automática: si el enlace get.php contiene usuario y contraseña y player_api.php valida, TV FULL lo guarda como Xtream nativo. Si no, lo carga como M3U/M3U8 normal.',
+        ),
+      ],
     );
   }
 

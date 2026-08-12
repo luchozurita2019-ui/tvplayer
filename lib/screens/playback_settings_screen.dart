@@ -4,6 +4,7 @@ import 'package:provider/provider.dart';
 import '../models/playback_settings.dart';
 import '../providers/iptv_provider.dart';
 import '../services/playback_metrics_service.dart';
+import '../services/internet_speed_test_service.dart';
 
 class PlaybackSettingsScreen extends StatefulWidget {
   const PlaybackSettingsScreen({super.key});
@@ -15,6 +16,9 @@ class PlaybackSettingsScreen extends StatefulWidget {
 
 class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
   late PlaybackSettings _draft;
+  bool _speedTestRunning = false;
+  InternetSpeedTestResult? _speedTestResult;
+  String? _speedTestError;
 
   @override
   void initState() {
@@ -29,6 +33,7 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
         BufferProfile.ultraFast => PlaybackSettings.ultraFast,
         BufferProfile.balanced => PlaybackSettings.balanced,
         BufferProfile.stable => PlaybackSettings.stable,
+        BufferProfile.slowConnection => PlaybackSettings.slowConnection,
         BufferProfile.custom => _draft.copyWith(profile: BufferProfile.custom),
       };
     });
@@ -36,6 +41,178 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
 
   void _makeCustom(PlaybackSettings settings) {
     setState(() => _draft = settings.copyWith(profile: BufferProfile.custom));
+  }
+
+  Future<void> _runInternetSpeedTest() async {
+    if (_speedTestRunning) return;
+    setState(() {
+      _speedTestRunning = true;
+      _speedTestError = null;
+    });
+    try {
+      final result = await InternetSpeedTestService.instance.run();
+      if (!mounted) return;
+      setState(() => _speedTestResult = result);
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _speedTestResult = null;
+        _speedTestError = e.toString().replaceFirst('Exception: ', '');
+      });
+    } finally {
+      if (mounted) setState(() => _speedTestRunning = false);
+    }
+  }
+
+  String _speedQuality(double mbps) {
+    if (mbps >= 40) return 'Muy buena';
+    if (mbps >= 20) return 'Buena';
+    if (mbps >= 10) return 'Aceptable';
+    if (mbps >= 6) return 'Limitada';
+    return 'Muy baja';
+  }
+
+  String _speedGuidance(double mbps) {
+    if (mbps < 6) {
+      return 'La descarga es baja para IPTV y puede provocar pausas o buffering, especialmente en canales HD.';
+    }
+    if (mbps < 10) {
+      return 'La conexión puede alcanzar para señales livianas, pero tiene poco margen para canales HD de bitrate alto.';
+    }
+    if (mbps < 20) {
+      return 'Hay un margen razonable para TV HD. Si un canal sigue fallando, conviene revisar también Wi‑Fi, servidor y estabilidad.';
+    }
+    if (mbps < 40) {
+      return 'La velocidad de descarga es buena para la mayoría de señales IPTV. Un fallo aislado probablemente necesita diagnóstico adicional.';
+    }
+    return 'La velocidad de descarga es muy buena. Si hay cortes, TV FULL debería revisar estabilidad, Wi‑Fi y el servidor del proveedor antes de atribuirlos al ancho de banda.';
+  }
+
+  Widget _buildInternetSpeedCard() {
+    final result = _speedTestResult;
+    return Card(
+      child: Padding(
+        padding: const EdgeInsets.all(18),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.speed_rounded),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    'Probar velocidad de Internet',
+                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                ),
+                FilledButton.icon(
+                  onPressed: _speedTestRunning ? null : _runInternetSpeedTest,
+                  icon: _speedTestRunning
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.network_check_rounded),
+                  label: Text(_speedTestRunning ? 'Midiendo…' : 'Iniciar test'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 8),
+            const Text(
+              'Mide la bajada y la latencia contra la red de Cloudflare. Sirve para soporte y para comprobar si el cliente tiene ancho de banda suficiente antes de diagnosticar la aplicación o el proveedor.',
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'El test usa aproximadamente 10–15 MB. No mide la velocidad del servidor IPTV y una buena bajada no descarta Wi‑Fi inestable, pérdida de paquetes o un proveedor saturado.',
+              style: TextStyle(color: Colors.white60, fontSize: 12),
+            ),
+            if (_speedTestRunning) ...[
+              const SizedBox(height: 16),
+              const LinearProgressIndicator(),
+              const SizedBox(height: 8),
+              const Text('Midiendo conexión… puede tardar algunos segundos.'),
+            ],
+            if (_speedTestError != null) ...[
+              const SizedBox(height: 14),
+              Text(
+                'No se pudo completar el test: $_speedTestError',
+                style: TextStyle(color: Theme.of(context).colorScheme.error),
+              ),
+            ],
+            if (result != null && !_speedTestRunning) ...[
+              const SizedBox(height: 16),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                children: [
+                  _SpeedMetric(
+                    label: 'DESCARGA',
+                    value: '${result.downloadMbps.toStringAsFixed(1)} Mbps',
+                    icon: Icons.download_rounded,
+                  ),
+                  _SpeedMetric(
+                    label: 'LATENCIA',
+                    value: '${result.latencyMs} ms',
+                    icon: Icons.timer_outlined,
+                  ),
+                  _SpeedMetric(
+                    label: 'CALIDAD',
+                    value: _speedQuality(result.downloadMbps),
+                    icon: Icons.network_check_rounded,
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                _speedGuidance(result.downloadMbps),
+                style: const TextStyle(fontWeight: FontWeight.w600),
+              ),
+              if (result.downloadMbps < 15) ...[
+                const SizedBox(height: 14),
+                Container(
+                  padding: const EdgeInsets.all(14),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.10),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: 0.30),
+                    ),
+                  ),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.wifi_tethering_error_rounded),
+                      const SizedBox(width: 12),
+                      const Expanded(
+                        child: Text(
+                          'Para esta velocidad conviene probar Conexión lenta. TV FULL reservará más video por adelantado y será más paciente ante microcortes.',
+                          style: TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      FilledButton(
+                        onPressed: () =>
+                            _applyPreset(BufferProfile.slowConnection),
+                        child: const Text('Activar'),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ],
+        ),
+      ),
+    );
   }
 
   Future<void> _showLearnedStats() async {
@@ -117,6 +294,8 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             'Elegí un perfil o dejá que TVPlayer aprenda automáticamente cómo responde cada servidor.',
           ),
           const SizedBox(height: 16),
+          _buildInternetSpeedCard(),
+          const SizedBox(height: 16),
           Wrap(
             spacing: 8,
             runSpacing: 8,
@@ -144,6 +323,12 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                 icon: Icons.shield_outlined,
                 selected: _draft.profile == BufferProfile.stable,
                 onTap: () => _applyPreset(BufferProfile.stable),
+              ),
+              _ProfileChip(
+                label: 'Conexión lenta',
+                icon: Icons.wifi_tethering_error_rounded,
+                selected: _draft.profile == BufferProfile.slowConnection,
+                onTap: () => _applyPreset(BufferProfile.slowConnection),
               ),
               _ProfileChip(
                 label: 'Personalizado',
@@ -182,6 +367,40 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                       onPressed: _showLearnedStats,
                       icon: const Icon(Icons.query_stats),
                       label: const Text('Ver diagnóstico aprendido'),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (_draft.profile == BufferProfile.slowConnection) ...[
+            const SizedBox(height: 16),
+            Card(
+              child: Padding(
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Row(
+                      children: [
+                        Icon(Icons.wifi_tethering_error_rounded),
+                        SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            'Modo conexión lenta',
+                            style: TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'Prioriza continuidad sobre velocidad de arranque. En TV en vivo usa una reserva moderada para no alejarse demasiado del directo; en Películas y Series anticipa más datos. Durante la reproducción, TV FULL mantiene pausadas las descargas de portadas y logos.',
+                    ),
+                    const SizedBox(height: 8),
+                    const Text(
+                      'No reduce automáticamente la calidad y no puede compensar un stream cuyo bitrate sea permanentemente mayor que la velocidad disponible.',
+                      style: TextStyle(color: Colors.white60, fontSize: 12),
                     ),
                   ],
                 ),
@@ -260,9 +479,59 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             child: Padding(
               padding: EdgeInsets.all(16),
               child: Text(
-                'Ultra rápido prioriza el zapping. Estable usa más margen para redes irregulares. Automático aprende por servidor. Si movés cualquier control manual, el perfil cambia a Personalizado.',
+                'Ultra rápido prioriza el zapping. Estable usa más margen para redes irregulares. Conexión lenta aumenta la reserva y la tolerancia a microcortes. Automático aprende por servidor. Si movés cualquier control manual, el perfil cambia a Personalizado.',
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _SpeedMetric extends StatelessWidget {
+  final String label;
+  final String value;
+  final IconData icon;
+
+  const _SpeedMetric({
+    required this.label,
+    required this.value,
+    required this.icon,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      constraints: const BoxConstraints(minWidth: 150),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+      decoration: BoxDecoration(
+        color: Theme.of(context).colorScheme.surfaceContainerHigh,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 22),
+          const SizedBox(width: 10),
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                label,
+                style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                      color: Colors.white60,
+                      fontWeight: FontWeight.w700,
+                    ),
+              ),
+              const SizedBox(height: 2),
+              Text(
+                value,
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
+              ),
+            ],
           ),
         ],
       ),
