@@ -59,9 +59,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     }
   }
 
-  List<Channel> _originalLiveChannels() => ContentClassifier.partition(
-    widget.playlist.channels,
-  ).forKind(IptvContentKind.live);
+  List<Channel> _originalLiveChannels() =>
+      ContentClassifier.partition(widget.playlist.channels)
+          .forKind(IptvContentKind.live);
 
   /// El API rápido nos da nombres/categorías/logos actuales, pero para PLAY
   /// preferimos la URL exacta de la lista original cuando podemos identificar
@@ -115,24 +115,22 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     final fastGroup = fast.group?.trim().toLowerCase();
     if (fastGroup != null && fastGroup.isNotEmpty) {
       for (final candidate in candidates) {
-        if (candidate.group?.trim().toLowerCase() == fastGroup)
-          return candidate;
+        if (candidate.group?.trim().toLowerCase() == fastGroup) return candidate;
       }
     }
     return candidates.first;
   }
 
-  String _normalizeName(String value) =>
-      value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+  String _normalizeName(String value) => value
+      .trim()
+      .toLowerCase()
+      .replaceAll(RegExp(r'\s+'), ' ');
 
   String? _numericStreamId(String rawUrl) {
     final uri = Uri.tryParse(rawUrl.trim());
     final path = uri?.path ?? rawUrl;
     if (path.isEmpty) return null;
-    final segments = path
-        .split('/')
-        .where((value) => value.isNotEmpty)
-        .toList();
+    final segments = path.split('/').where((value) => value.isNotEmpty).toList();
     if (segments.isEmpty) return null;
     var file = segments.last;
     final dot = file.lastIndexOf('.');

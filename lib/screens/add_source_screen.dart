@@ -56,15 +56,15 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               Text(
                 'Conectá tu proveedor',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
+                      fontWeight: FontWeight.w900,
+                    ),
               ),
               const SizedBox(height: 6),
               Text(
                 'Pegá el enlace que te dio tu proveedor. En M3U/M3U8, TV FULL detecta automáticamente si el enlace pertenece a Xtream. También podés elegir el tipo manualmente.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(color: Colors.white70),
+                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                      color: Colors.white70,
+                    ),
               ),
               const SizedBox(height: 24),
               _SourceSelector(
@@ -189,8 +189,9 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     tooltip: _obscurePassword ? 'Mostrar' : 'Ocultar',
-                    onPressed: () =>
-                        setState(() => _obscurePassword = !_obscurePassword),
+                    onPressed: () => setState(
+                      () => _obscurePassword = !_obscurePassword,
+                    ),
                     icon: Icon(
                       _obscurePassword
                           ? Icons.visibility_outlined
@@ -276,9 +277,9 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(content: Text(message)),
+    );
   }
 }
 
@@ -341,9 +342,8 @@ class _SourceSelector extends StatelessWidget {
                         style: TextStyle(
                           color: active ? Colors.white : Colors.white70,
                           fontSize: 16,
-                          fontWeight: active
-                              ? FontWeight.w800
-                              : FontWeight.w600,
+                          fontWeight:
+                              active ? FontWeight.w800 : FontWeight.w600,
                         ),
                       ),
                     ),
@@ -377,9 +377,9 @@ class _TitleRow extends StatelessWidget {
         const SizedBox(width: 12),
         Text(
           type.label,
-          style: Theme.of(
-            context,
-          ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+          style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w900,
+              ),
         ),
       ],
     );

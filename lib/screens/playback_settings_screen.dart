@@ -10,7 +10,8 @@ class PlaybackSettingsScreen extends StatefulWidget {
   const PlaybackSettingsScreen({super.key});
 
   @override
-  State<PlaybackSettingsScreen> createState() => _PlaybackSettingsScreenState();
+  State<PlaybackSettingsScreen> createState() =>
+      _PlaybackSettingsScreenState();
 }
 
 class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
@@ -103,8 +104,8 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                   child: Text(
                     'Probar velocidad de Internet',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
+                          fontWeight: FontWeight.w800,
+                        ),
                   ),
                 ),
                 FilledButton.icon(
@@ -175,14 +176,16 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.primary.withValues(alpha: 0.10),
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
+                        .withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: Theme.of(
-                        context,
-                      ).colorScheme.primary.withValues(alpha: 0.30),
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: 0.30),
                     ),
                   ),
                   child: Row(
@@ -412,8 +415,9 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             min: 4,
             max: 128,
             divisions: 31,
-            onChanged: (value) =>
-                _makeCustom(_draft.copyWith(bufferMb: value.round())),
+            onChanged: (value) => _makeCustom(
+              _draft.copyWith(bufferMb: value.round()),
+            ),
           ),
           _SliderTile(
             title: 'Lectura anticipada',
@@ -422,8 +426,9 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             min: 0.5,
             max: 12,
             divisions: 23,
-            onChanged: (value) =>
-                _makeCustom(_draft.copyWith(readaheadSeconds: value)),
+            onChanged: (value) => _makeCustom(
+              _draft.copyWith(readaheadSeconds: value),
+            ),
           ),
           _SliderTile(
             title: 'Buffer tras un corte',
@@ -432,8 +437,9 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             min: 0.5,
             max: 8,
             divisions: 15,
-            onChanged: (value) =>
-                _makeCustom(_draft.copyWith(recoveryBufferSeconds: value)),
+            onChanged: (value) => _makeCustom(
+              _draft.copyWith(recoveryBufferSeconds: value),
+            ),
           ),
           _SliderTile(
             title: 'Timeout de conexión',
@@ -453,8 +459,9 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
             min: 0,
             max: 6,
             divisions: 6,
-            onChanged: (value) =>
-                _makeCustom(_draft.copyWith(maxRetries: value.round())),
+            onChanged: (value) => _makeCustom(
+              _draft.copyWith(maxRetries: value.round()),
+            ),
           ),
           _SliderTile(
             title: 'Detección de stream trabado',
@@ -513,16 +520,16 @@ class _SpeedMetric extends StatelessWidget {
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Colors.white60,
-                  fontWeight: FontWeight.w700,
-                ),
+                      color: Colors.white60,
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
               const SizedBox(height: 2),
               Text(
                 value,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w900),
+                style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                    ),
               ),
             ],
           ),
@@ -586,7 +593,10 @@ class _SliderTile extends StatelessWidget {
             Row(
               children: [
                 Expanded(child: Text(title)),
-                Text(subtitle, style: Theme.of(context).textTheme.labelLarge),
+                Text(
+                  subtitle,
+                  style: Theme.of(context).textTheme.labelLarge,
+                ),
               ],
             ),
             Slider(
