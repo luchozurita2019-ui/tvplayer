@@ -1417,6 +1417,20 @@ class _PlayerScreenState extends State<PlayerScreen> {
       diagnostic = 'mpv/FFmpeg reportó un fallo de red durante la apertura';
     }
 
+    if (widget.isLiveContent && !_hasEverPlayed && _opening) {
+      _rememberStartupCompatibilityHint(text);
+      if (_isDefinitiveStartupFailureLog(text)) {
+        final startupDiagnostic =
+            diagnostic ??
+            'mpv/FFmpeg confirmó que el canal no está disponible durante la apertura';
+        scheduleMicrotask(() {
+          if (!mounted) return;
+          _showChannelMaintenance(startupDiagnostic);
+        });
+        return;
+      }
+    }
+
     if (diagnostic != null && _hasEverPlayed && _looksLikeConnectionLog(text)) {
       _providerIssueHint = _looksProviderSpecific(text);
       _lastConnectionDetail = diagnostic;
