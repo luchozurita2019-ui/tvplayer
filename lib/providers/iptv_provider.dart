@@ -91,7 +91,7 @@ class IptvProvider extends ChangeNotifier {
       await _storage.savePlaylists(_playlists);
       _error = null;
     } catch (e) {
-      _error = e.toString();
+      _error = _friendlyConnectionError(e);
     } finally {
       _setLoading(false);
     }
@@ -133,7 +133,7 @@ class IptvProvider extends ChangeNotifier {
       await _storage.savePlaylists(_playlists);
       _error = null;
     } catch (e) {
-      _error = e.toString();
+      _error = _friendlyConnectionError(e);
     } finally {
       _setLoading(false);
     }
@@ -168,9 +168,7 @@ class IptvProvider extends ChangeNotifier {
     final m3uBuckets = ContentClassifier.partition(m3uChannels);
 
     final merged = <Channel>[
-      ...(nativeBuckets.live.isNotEmpty
-          ? nativeBuckets.live
-          : m3uBuckets.live),
+      ...(nativeBuckets.live.isNotEmpty ? nativeBuckets.live : m3uBuckets.live),
       ...(nativeBuckets.movies.isNotEmpty
           ? nativeBuckets.movies
           : m3uBuckets.movies),
@@ -246,7 +244,7 @@ class IptvProvider extends ChangeNotifier {
       await _storage.savePlaylists(_playlists);
       _error = null;
     } catch (e) {
-      _error = e.toString();
+      _error = _friendlyConnectionError(e);
     } finally {
       _setLoading(false);
     }
@@ -292,14 +290,17 @@ class IptvProvider extends ChangeNotifier {
       await _storage.savePlaylists(_playlists);
       _error = null;
     } catch (e) {
-      _error = e.toString();
+      _error = _friendlyConnectionError(e);
     } finally {
       _setLoading(false);
     }
   }
 
   Future<void> addPlaylistFromContent(
-      String name, String path, String content) async {
+    String name,
+    String path,
+    String content,
+  ) async {
     _setLoading(true);
     try {
       final channels = await compute(parseM3uInBackground, content);
@@ -333,14 +334,16 @@ class IptvProvider extends ChangeNotifier {
       final List<Channel> channels;
       var detectedType = playlist.sourceType;
       if (playlist.sourceType == PlaylistSourceType.xtream) {
-        final connection =
-            await XtreamService.reconnectFromPlaylistUrl(playlist.source);
+        final connection = await XtreamService.reconnectFromPlaylistUrl(
+          playlist.source,
+        );
         channels = await _loadXtreamChannels(connection);
       } else {
         // Las listas guardadas antes de la autodetección pueden seguir marcadas
         // como M3U aunque sean un get.php Xtream. Actualizar las migra sin borrar.
-        final xtream =
-            await XtreamService.tryConnectFromPlaylistUrl(playlist.source);
+        final xtream = await XtreamService.tryConnectFromPlaylistUrl(
+          playlist.source,
+        );
         if (xtream != null) {
           channels = await _loadXtreamChannels(xtream);
           detectedType = PlaylistSourceType.xtream;
@@ -367,7 +370,7 @@ class IptvProvider extends ChangeNotifier {
       await _storage.savePlaylists(_playlists);
       _error = null;
     } catch (e) {
-      _error = e.toString();
+      _error = _friendlyConnectionError(e);
     } finally {
       _setLoading(false);
     }
@@ -407,10 +410,29 @@ class IptvProvider extends ChangeNotifier {
     if (_searchQuery.trim().isEmpty) return channels;
     final q = _searchQuery.toLowerCase();
     return channels
-        .where((c) =>
-            c.name.toLowerCase().contains(q) ||
-            (c.group?.toLowerCase().contains(q) ?? false))
+        .where(
+          (c) =>
+              c.name.toLowerCase().contains(q) ||
+              (c.group?.toLowerCase().contains(q) ?? false),
+        )
         .toList();
+  }
+
+  String _friendlyConnectionError(Object error) {
+    var message = error.toString();
+    message = message.replaceAllMapped(
+      RegExp(r'([?&](?:username|password)=)([^&#\s]+)', caseSensitive: false),
+      (match) => '${match.group(1)}••••',
+    );
+
+    final lower = message.toLowerCase();
+    if (lower.contains('wrong_version_number')) {
+      return 'El servidor rechazó la conexión segura. Revisá si este proveedor usa http:// en lugar de https://.';
+    }
+    if (lower.contains('connection refused')) {
+      return 'No se pudo conectar con el servidor. Verificá que el host y el puerto estén disponibles.';
+    }
+    return message;
   }
 
   void _setLoading(bool value) {

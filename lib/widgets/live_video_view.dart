@@ -182,10 +182,10 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   }
 
   String get _fitLabel => switch (_fitIndex) {
-        1 => 'Zoom',
-        2 => 'Estirar',
-        _ => 'Original',
-      };
+    1 => 'Zoom',
+    2 => 'Estirar',
+    _ => 'Original',
+  };
 
   void _showOverlay({bool scheduleHide = true}) {
     _overlayTimer?.cancel();
@@ -202,6 +202,16 @@ class _LiveVideoViewState extends State<LiveVideoView> {
       if (!mounted || !_playing || _buffering) return;
       setState(() => _overlayVisible = false);
     });
+  }
+
+  void _toggleOverlayFromPointer() {
+    _overlayTimer?.cancel();
+    if (!_overlayVisible) {
+      _showOverlay();
+      return;
+    }
+    if (!_playing || _buffering) return;
+    setState(() => _overlayVisible = false);
   }
 
   void _toggleFit(VideoState videoState) {
@@ -280,11 +290,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     };
   }
 
-  String _trackDescription(
-    String? title,
-    String? language,
-    String fallback,
-  ) {
+  String _trackDescription(String? title, String? language, String fallback) {
     final lang = _languageName(language);
     final cleanTitle = title?.trim();
     if (lang != null && cleanTitle != null && cleanTitle.isNotEmpty) {
@@ -301,8 +307,11 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     final track = _selectedAudioTrack;
     if (track.id == 'auto') return 'Audio: Auto';
     if (track.id == 'no') return 'Audio: Off';
-    final label = _languageName(track.language) ??
-        (track.title?.trim().isNotEmpty == true ? track.title!.trim() : 'Pista');
+    final label =
+        _languageName(track.language) ??
+        (track.title?.trim().isNotEmpty == true
+            ? track.title!.trim()
+            : 'Pista');
     return 'Audio: $label';
   }
 
@@ -310,8 +319,11 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     final track = _selectedSubtitleTrack;
     if (track.id == 'no') return 'Subtítulos: Off';
     if (track.id == 'auto') return 'Subtítulos: Auto';
-    final label = _languageName(track.language) ??
-        (track.title?.trim().isNotEmpty == true ? track.title!.trim() : 'Pista');
+    final label =
+        _languageName(track.language) ??
+        (track.title?.trim().isNotEmpty == true
+            ? track.title!.trim()
+            : 'Pista');
     return 'Subs: $label';
   }
 
@@ -337,7 +349,9 @@ class _LiveVideoViewState extends State<LiveVideoView> {
                   'Idioma / pista de audio',
                   style: TextStyle(fontWeight: FontWeight.w900),
                 ),
-                subtitle: Text('Disponible sólo cuando el contenido incluye varias pistas.'),
+                subtitle: Text(
+                  'Disponible sólo cuando el contenido incluye varias pistas.',
+                ),
               ),
               const Divider(height: 1),
               Flexible(
@@ -347,9 +361,14 @@ class _LiveVideoViewState extends State<LiveVideoView> {
                     ListTile(
                       leading: const Icon(Icons.auto_awesome_rounded),
                       title: const Text('Automático'),
-                      subtitle: const Text('Dejar que el reproductor elija la pista predeterminada'),
+                      subtitle: const Text(
+                        'Dejar que el reproductor elija la pista predeterminada',
+                      ),
                       trailing: _selectedAudioTrack.id == 'auto'
-                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                          ? const Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF58A6FF),
+                            )
                           : null,
                       onTap: () async {
                         await widget.player.setAudioTrack(AudioTrack.auto());
@@ -370,24 +389,34 @@ class _LiveVideoViewState extends State<LiveVideoView> {
                         final track = entry.value;
                         final selected = _selectedAudioTrack.id == track.id;
                         final details = <String>[
-                          if (track.codec?.trim().isNotEmpty == true) track.codec!.toUpperCase(),
-                          if (track.channels?.trim().isNotEmpty == true) track.channels!,
+                          if (track.codec?.trim().isNotEmpty == true)
+                            track.codec!.toUpperCase(),
+                          if (track.channels?.trim().isNotEmpty == true)
+                            track.channels!,
                           if (track.isDefault == true) 'Predeterminada',
                         ];
                         return ListTile(
                           leading: const Icon(Icons.audiotrack_rounded),
-                          title: Text(_trackDescription(
-                            track.title,
-                            track.language,
-                            'Pista ${index + 1}',
-                          )),
-                          subtitle: details.isEmpty ? null : Text(details.join(' · ')),
+                          title: Text(
+                            _trackDescription(
+                              track.title,
+                              track.language,
+                              'Pista ${index + 1}',
+                            ),
+                          ),
+                          subtitle: details.isEmpty
+                              ? null
+                              : Text(details.join(' · ')),
                           trailing: selected
-                              ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                              ? const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: Color(0xFF58A6FF),
+                                )
                               : null,
                           onTap: () async {
                             await widget.player.setAudioTrack(track);
-                            if (sheetContext.mounted) Navigator.pop(sheetContext);
+                            if (sheetContext.mounted)
+                              Navigator.pop(sheetContext);
                           },
                         );
                       }),
@@ -419,12 +448,17 @@ class _LiveVideoViewState extends State<LiveVideoView> {
             mainAxisSize: MainAxisSize.min,
             children: [
               const ListTile(
-                leading: Icon(Icons.subtitles_rounded, color: Color(0xFF58A6FF)),
+                leading: Icon(
+                  Icons.subtitles_rounded,
+                  color: Color(0xFF58A6FF),
+                ),
                 title: Text(
                   'Subtítulos',
                   style: TextStyle(fontWeight: FontWeight.w900),
                 ),
-                subtitle: Text('Elegí una pista incluida por el proveedor o desactivalos.'),
+                subtitle: Text(
+                  'Elegí una pista incluida por el proveedor o desactivalos.',
+                ),
               ),
               const Divider(height: 1),
               Flexible(
@@ -435,22 +469,34 @@ class _LiveVideoViewState extends State<LiveVideoView> {
                       leading: const Icon(Icons.subtitles_off_rounded),
                       title: const Text('Desactivados'),
                       trailing: _selectedSubtitleTrack.id == 'no'
-                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                          ? const Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF58A6FF),
+                            )
                           : null,
                       onTap: () async {
-                        await widget.player.setSubtitleTrack(SubtitleTrack.no());
+                        await widget.player.setSubtitleTrack(
+                          SubtitleTrack.no(),
+                        );
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
                       },
                     ),
                     ListTile(
                       leading: const Icon(Icons.auto_awesome_rounded),
                       title: const Text('Automático'),
-                      subtitle: const Text('Usar la pista de subtítulos predeterminada'),
+                      subtitle: const Text(
+                        'Usar la pista de subtítulos predeterminada',
+                      ),
                       trailing: _selectedSubtitleTrack.id == 'auto'
-                          ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                          ? const Icon(
+                              Icons.check_circle_rounded,
+                              color: Color(0xFF58A6FF),
+                            )
                           : null,
                       onTap: () async {
-                        await widget.player.setSubtitleTrack(SubtitleTrack.auto());
+                        await widget.player.setSubtitleTrack(
+                          SubtitleTrack.auto(),
+                        );
                         if (sheetContext.mounted) Navigator.pop(sheetContext);
                       },
                     ),
@@ -468,23 +514,32 @@ class _LiveVideoViewState extends State<LiveVideoView> {
                         final track = entry.value;
                         final selected = _selectedSubtitleTrack.id == track.id;
                         final details = <String>[
-                          if (track.codec?.trim().isNotEmpty == true) track.codec!.toUpperCase(),
+                          if (track.codec?.trim().isNotEmpty == true)
+                            track.codec!.toUpperCase(),
                           if (track.isDefault == true) 'Predeterminada',
                         ];
                         return ListTile(
                           leading: const Icon(Icons.closed_caption_rounded),
-                          title: Text(_trackDescription(
-                            track.title,
-                            track.language,
-                            'Subtítulo ${index + 1}',
-                          )),
-                          subtitle: details.isEmpty ? null : Text(details.join(' · ')),
+                          title: Text(
+                            _trackDescription(
+                              track.title,
+                              track.language,
+                              'Subtítulo ${index + 1}',
+                            ),
+                          ),
+                          subtitle: details.isEmpty
+                              ? null
+                              : Text(details.join(' · ')),
                           trailing: selected
-                              ? const Icon(Icons.check_circle_rounded, color: Color(0xFF58A6FF))
+                              ? const Icon(
+                                  Icons.check_circle_rounded,
+                                  color: Color(0xFF58A6FF),
+                                )
                               : null,
                           onTap: () async {
                             await widget.player.setSubtitleTrack(track);
-                            if (sheetContext.mounted) Navigator.pop(sheetContext);
+                            if (sheetContext.mounted)
+                              Navigator.pop(sheetContext);
                           },
                         );
                       }),
@@ -519,7 +574,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
       onHover: (_) => _showOverlay(),
       child: Listener(
         behavior: HitTestBehavior.translucent,
-        onPointerDown: (_) => _showOverlay(),
+        onPointerDown: (_) => _toggleOverlayFromPointer(),
         child: Video(
           controller: widget.controller,
           fit: _videoFit,
@@ -639,7 +694,9 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   Widget _buildBottomArea(VideoState videoState) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact = constraints.maxWidth < 760;
+        final compact =
+            constraints.maxWidth < 980 ||
+            MediaQuery.sizeOf(context).height < 520;
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -680,7 +737,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
                               overflow: TextOverflow.ellipsis,
                               style: TextStyle(
                                 color: Colors.white,
-                                fontSize: compact ? 20 : 28,
+                                fontSize: compact ? 17 : 28,
                                 fontWeight: FontWeight.w900,
                                 height: 1.05,
                               ),
@@ -704,7 +761,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
                       ),
                       SizedBox(width: compact ? 12 : 18),
                       SizedBox(
-                        width: compact ? 92 : 132,
+                        width: compact ? 76 : 132,
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.end,
                           children: [
@@ -753,8 +810,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     final color = _isActuallyLive
         ? const Color(0xFFFF2D2D)
         : _buffering
-            ? const Color(0xFFFFC857)
-            : Colors.white38;
+        ? const Color(0xFFFFC857)
+        : Colors.white38;
     return Row(
       children: [
         Container(
@@ -802,7 +859,10 @@ class _LiveVideoViewState extends State<LiveVideoView> {
 
   Widget _buildVodProgress() {
     final totalMs = _duration.inMilliseconds;
-    final currentMs = _position.inMilliseconds.clamp(0, totalMs > 0 ? totalMs : 0);
+    final currentMs = _position.inMilliseconds.clamp(
+      0,
+      totalMs > 0 ? totalMs : 0,
+    );
     final max = totalMs > 0 ? totalMs.toDouble() : 1.0;
     final value = currentMs.toDouble().clamp(0.0, max).toDouble();
 
@@ -869,11 +929,18 @@ class _LiveVideoViewState extends State<LiveVideoView> {
           onTap: widget.onNext,
         ),
         const SizedBox(width: 10),
-        _textPill(
-          icon: Icons.aspect_ratio_rounded,
-          label: _fitLabel,
-          onTap: () => _toggleFit(videoState),
-        ),
+        if (compact)
+          _iconPill(
+            icon: Icons.aspect_ratio_rounded,
+            tooltip: 'Formato: $_fitLabel',
+            onTap: () => _toggleFit(videoState),
+          )
+        else
+          _textPill(
+            icon: Icons.aspect_ratio_rounded,
+            label: _fitLabel,
+            onTap: () => _toggleFit(videoState),
+          ),
         if (!compact) ...[
           const SizedBox(width: 10),
           _textPill(
@@ -930,8 +997,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   }
 
   Widget _channelLogo(bool compact) {
-    final width = compact ? 72.0 : 106.0;
-    final height = compact ? 50.0 : 66.0;
+    final width = compact ? 60.0 : 106.0;
+    final height = compact ? 42.0 : 66.0;
     return Container(
       width: width,
       height: height,
@@ -1136,8 +1203,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
             _volume <= 0
                 ? Icons.volume_off_rounded
                 : _volume < 50
-                    ? Icons.volume_down_rounded
-                    : Icons.volume_up_rounded,
+                ? Icons.volume_down_rounded
+                : Icons.volume_up_rounded,
             color: Colors.white,
             size: 20,
           ),

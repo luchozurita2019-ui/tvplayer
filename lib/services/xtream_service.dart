@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
@@ -37,10 +38,7 @@ class XtreamNativeCatalog {
   final List<Channel> live;
   final List<Channel> vod;
 
-  const XtreamNativeCatalog({
-    required this.live,
-    required this.vod,
-  });
+  const XtreamNativeCatalog({required this.live, required this.vod});
 
   bool get isEmpty => live.isEmpty && vod.isEmpty;
 }
@@ -70,18 +68,12 @@ class XtreamService {
       throw Exception('Ingresá usuario y contraseña de Xtream Codes.');
     }
 
-    final authUri = _endpoint(
-      server,
-      'player_api.php',
-      <String, String>{
-        'username': user,
-        'password': pass,
-      },
-    );
+    final authUri = _endpoint(server, 'player_api.php', <String, String>{
+      'username': user,
+      'password': pass,
+    });
 
-    final response = await _client
-        .get(authUri, headers: _jsonHeaders)
-        .timeout(timeout);
+    final response = await _getJsonWithAndroidRetry(authUri, timeout);
 
     if (response.statusCode != 200) {
       throw Exception(
@@ -103,7 +95,8 @@ class XtreamService {
 
     final userInfo = Map<String, dynamic>.from(userInfoRaw);
     final authValue = userInfo['auth'];
-    final authenticated = authValue == 1 ||
+    final authenticated =
+        authValue == 1 ||
         authValue == '1' ||
         authValue == true ||
         userInfo['status']?.toString().toLowerCase() == 'active';
@@ -132,16 +125,12 @@ class XtreamService {
     // la API por HTTP en un puerto y sirven video por HTTPS en otro.
     final streamServer = _resolveStreamServer(server, serverInfo);
 
-    final playlistUrl = _endpoint(
-      server,
-      'get.php',
-      <String, String>{
-        'username': user,
-        'password': pass,
-        'type': 'm3u_plus',
-        'output': 'ts',
-      },
-    ).toString();
+    final playlistUrl = _endpoint(server, 'get.php', <String, String>{
+      'username': user,
+      'password': pass,
+      'type': 'm3u_plus',
+      'output': 'ts',
+    }).toString();
 
     return XtreamConnectionResult(
       playlistUrl: playlistUrl,
@@ -182,10 +171,7 @@ class XtreamService {
   }) async {
     if (!looksLikeXtreamPlaylistUrl(playlistUrl)) return null;
     try {
-      return await reconnectFromPlaylistUrl(
-        playlistUrl,
-        timeout: timeout,
-      );
+      return await reconnectFromPlaylistUrl(playlistUrl, timeout: timeout);
     } catch (_) {
       return null;
     }
@@ -217,11 +203,7 @@ class XtreamService {
     }
 
     final server = uri
-        .replace(
-          path: path.isEmpty ? '/' : path,
-          query: '',
-          fragment: '',
-        )
+        .replace(path: path.isEmpty ? '/' : path, query: '', fragment: '')
         .toString()
         .replaceAll(RegExp(r'/$'), '');
 
@@ -286,19 +268,14 @@ class XtreamService {
     String action,
     Duration timeout,
   ) async {
-    final uri = _endpoint(
-      connection.apiServer,
-      'player_api.php',
-      <String, String>{
-        'username': connection.username,
-        'password': connection.password,
-        'action': action,
-      },
-    );
+    final uri =
+        _endpoint(connection.apiServer, 'player_api.php', <String, String>{
+          'username': connection.username,
+          'password': connection.password,
+          'action': action,
+        });
 
-    final response = await _client
-        .get(uri, headers: _jsonHeaders)
-        .timeout(timeout);
+    final response = await _getJsonWithAndroidRetry(uri, timeout);
     if (response.statusCode != 200) {
       throw Exception('Xtream $action respondió HTTP ${response.statusCode}.');
     }
@@ -306,6 +283,43 @@ class XtreamService {
     final decoded = jsonDecode(response.body);
     if (decoded is List) return decoded;
     return const <dynamic>[];
+  }
+
+  static bool get _isAndroidRuntime =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  static bool _retryableAndroidConnectionError(Object error) {
+    if (!_isAndroidRuntime) return false;
+    final text = error.toString().toLowerCase();
+    return text.contains('socketexception') ||
+        text.contains('connection refused') ||
+        text.contains('connection reset') ||
+        text.contains('network is unreachable') ||
+        text.contains('timed out') ||
+        text.contains('timeoutexception') ||
+        text.contains('clientexception');
+  }
+
+  static Future<http.Response> _getJsonWithAndroidRetry(
+    Uri uri,
+    Duration timeout,
+  ) async {
+    final attempts = _isAndroidRuntime ? 2 : 1;
+    Object? lastError;
+    for (var attempt = 0; attempt < attempts; attempt++) {
+      try {
+        return await _client.get(uri, headers: _jsonHeaders).timeout(timeout);
+      } catch (error) {
+        lastError = error;
+        if (attempt + 1 >= attempts ||
+            !_retryableAndroidConnectionError(error)) {
+          rethrow;
+        }
+        XtreamHttpClient.cancelBrowsingRequests();
+        await Future<void>.delayed(const Duration(milliseconds: 700));
+      }
+    }
+    throw lastError ?? Exception('No se pudo conectar con Xtream.');
   }
 
   static Map<String, String> _categoryMap(List<dynamic> raw) {
@@ -341,7 +355,8 @@ class XtreamService {
         connection.streamServer,
         item['direct_source']?.toString(),
       );
-      final url = directSource ??
+      final url =
+          directSource ??
           _streamUrl(
             connection.streamServer,
             section: 'live',
@@ -390,7 +405,8 @@ class XtreamService {
         connection.streamServer,
         item['direct_source']?.toString(),
       );
-      final url = directSource ??
+      final url =
+          directSource ??
           _streamUrl(
             connection.streamServer,
             section: 'movie',
@@ -450,11 +466,7 @@ class XtreamService {
       '$streamId.$extension',
     ];
     return base
-        .replace(
-          pathSegments: segments,
-          query: '',
-          fragment: '',
-        )
+        .replace(pathSegments: segments, query: '', fragment: '')
         .toString();
   }
 
@@ -517,11 +529,7 @@ class XtreamService {
     return uri;
   }
 
-  static Uri _endpoint(
-    Uri base,
-    String endpoint,
-    Map<String, String> query,
-  ) {
+  static Uri _endpoint(Uri base, String endpoint, Map<String, String> query) {
     var path = base.path;
     if (path.isEmpty || path == '/') {
       path = '/$endpoint';
@@ -530,10 +538,6 @@ class XtreamService {
       path = '$path/$endpoint';
     }
 
-    return base.replace(
-      path: path,
-      queryParameters: query,
-      fragment: '',
-    );
+    return base.replace(path: path, queryParameters: query, fragment: '');
   }
 }

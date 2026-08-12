@@ -95,7 +95,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                 physics: const NeverScrollableScrollPhysics(),
                 crossAxisSpacing: 18,
                 mainAxisSpacing: 18,
-                childAspectRatio: columns == 1 ? 3.3 : 1.35,
+                childAspectRatio: columns == 1 ? 2.55 : 1.35,
                 children: [
                   _ContentCard(
                     icon: Icons.live_tv_rounded,
@@ -261,33 +261,76 @@ class _ContentCard extends StatelessWidget {
               ],
             ),
           ),
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 58,
-                color: enabled ? Colors.white : Colors.white30,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: enabled ? Colors.white : Colors.white38,
-                  fontWeight: FontWeight.w900,
+          padding: const EdgeInsets.all(18),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final compact = constraints.maxWidth < 620;
+              final iconWidget = Container(
+                width: compact ? 58 : 72,
+                height: compact ? 58 : 72,
+                decoration: BoxDecoration(
+                  color: accent.withValues(alpha: enabled ? 0.22 : 0.08),
+                  borderRadius: BorderRadius.circular(compact ? 16 : 20),
+                  border: Border.all(
+                    color: accent.withValues(alpha: enabled ? 0.40 : 0.10),
+                  ),
                 ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: enabled ? Colors.white70 : Colors.white30,
+                child: Icon(
+                  icon,
+                  size: compact ? 34 : 42,
+                  color: enabled ? Colors.white : Colors.white30,
                 ),
-              ),
-            ],
+              );
+
+              final labels = Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: compact
+                    ? CrossAxisAlignment.start
+                    : CrossAxisAlignment.center,
+                children: [
+                  Text(
+                    title,
+                    textAlign: compact ? TextAlign.left : TextAlign.center,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: enabled ? Colors.white : Colors.white38,
+                      fontWeight: FontWeight.w900,
+                      fontSize: compact ? 20 : null,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    subtitle,
+                    textAlign: compact ? TextAlign.left : TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      color: enabled ? Colors.white70 : Colors.white30,
+                    ),
+                  ),
+                ],
+              );
+
+              if (compact) {
+                return Row(
+                  children: [
+                    iconWidget,
+                    const SizedBox(width: 16),
+                    Expanded(child: labels),
+                    Icon(
+                      Icons.chevron_right_rounded,
+                      color: enabled ? Colors.white54 : Colors.white12,
+                    ),
+                  ],
+                );
+              }
+
+              return Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [iconWidget, const SizedBox(height: 14), labels],
+              );
+            },
           ),
         ),
       ),

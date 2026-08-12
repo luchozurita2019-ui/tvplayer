@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
@@ -75,6 +76,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   static const Duration _liveTransientErrorGrace = Duration(seconds: 15);
   static const Duration _liveStartupAttemptTimeout = Duration(seconds: 5);
   static const int _maxLiveStartupCompatibilityFallbacks = 1;
+  static const int _maxAndroidTransientStartupRetries = 1;
+  static const Duration _androidTransientRetryDelay = Duration(
+    milliseconds: 700,
+  );
   static const String _channelMaintenanceMessage =
       'Este canal no se encuentra disponible en este momento.\n'
       'Por favor, intentá nuevamente más tarde.';
@@ -102,6 +107,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
   bool _acceptPlaybackEvents = true;
   bool _providerIssueHint = false;
   bool _startupCompatibilityHint = false;
+  bool _startupTransientFailureHint = false;
+  int _androidTransientStartupRetries = 0;
 
   String? _baselineTlsVerify;
   String? _baselineUserAgent;
@@ -186,6 +193,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
   StreamSubscription? _trackSub;
   StreamSubscription? _audioBitrateSub;
   StreamSubscription? _logSub;
+
+  bool get _isAndroidRuntime =>
+      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
 
   int get _maxAutoRetries => _effectiveSettings.maxRetries;
   Duration get _stallThreshold =>
@@ -1311,9 +1321,34 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _startupCompatibilityTarget = target;
   }
 
+  bool _isTransientAndroidStartupFailure(String text) {
+    if (!_isAndroidRuntime) return false;
+    final lower = text.toLowerCase();
+    return lower.contains('408') ||
+        lower.contains('request timeout') ||
+        lower.contains('429') ||
+        lower.contains('too many requests') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection reset') ||
+        lower.contains('broken pipe') ||
+        lower.contains('service unavailable') ||
+        lower.contains('bad gateway') ||
+        lower.contains('gateway timeout') ||
+        lower.contains('timed out') ||
+        lower.contains('timeout') ||
+        lower.contains('tardó demasiado') ||
+        lower.contains('no llegó el primer frame') ||
+        (RegExp(r'\b5\d\d\b').hasMatch(lower) && lower.contains('http'));
+  }
+
   bool _isDefinitiveStartupFailureLog(String text) {
     if (!widget.isLiveContent || _hasEverPlayed) return false;
     final lower = text.toLowerCase();
+
+    // Android puede reportar un 429/5xx o un socket transitorio antes de que
+    // el mismo stream abra normalmente. Un reintento corto evita falsos
+    // positivos sin cambiar el comportamiento de macOS.
+    if (_isTransientAndroidStartupFailure(lower)) return false;
 
     // Un 404 en un endpoint Xtream .ts merece un único intento HLS porque
     // algunos paneles publican el mismo stream sólo como .m3u8. El resto de
@@ -1363,8 +1398,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     setState(() {
       _isBuffering = false;
       _reconnecting = false;
-      _errorTitle = 'CANAL EN MANTENIMIENTO';
-      _errorMessage = _channelMaintenanceMessage;
+      _errorTitle = _isAndroidRuntime
+          ? 'CANAL TEMPORALMENTE NO DISPONIBLE'
+          : 'CANAL EN MANTENIMIENTO';
+      _errorMessage = _isAndroidRuntime
+          ? 'No pudimos obtener señal en este momento.\nIntentá nuevamente en unos segundos.'
+          : _channelMaintenanceMessage;
       _engineDiagnostic = diagnostic;
     });
   }
@@ -1419,6 +1458,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (widget.isLiveContent && !_hasEverPlayed && _opening) {
       _rememberStartupCompatibilityHint(text);
+      if (_isTransientAndroidStartupFailure(text)) {
+        _startupTransientFailureHint = true;
+      }
       if (_isDefinitiveStartupFailureLog(text)) {
         final startupDiagnostic =
             diagnostic ??
@@ -1492,6 +1534,27 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     if (!_hasEverPlayed && widget.isLiveContent) {
+      final androidTransient =
+          _isAndroidRuntime &&
+          (_startupTransientFailureHint ||
+              _isTransientAndroidStartupFailure(message));
+      if (androidTransient &&
+          _androidTransientStartupRetries <
+              _maxAndroidTransientStartupRetries) {
+        _androidTransientStartupRetries++;
+        setState(() {
+          _reconnecting = true;
+          _errorMessage = null;
+          _engineDiagnostic =
+              'Android: fallo transitorio, reintentando conexión…';
+        });
+        _retryTimer = Timer(_androidTransientRetryDelay, () {
+          if (!mounted || failedSession != _sessionId) return;
+          unawaited(_playCurrent(isRetry: true, forceNormalProbe: true));
+        });
+        return;
+      }
+
       final elapsedMs = _startupStopwatch?.elapsedMilliseconds ?? 999999;
       final failedQuickly = elapsedMs < 2500;
       final shouldTryCompatibility = _startupCompatibilityHint || failedQuickly;
@@ -1576,6 +1639,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _terminalStartupSession = null;
     _startupCompatibilityHint = false;
     _startupCompatibilityTarget = null;
+    _startupTransientFailureHint = false;
     _opening = true;
     _acceptPlaybackEvents = false;
     _connectionProbeTimer?.cancel();
@@ -1595,6 +1659,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     if (!isRetry) {
       _retryCount = 0;
+      _androidTransientStartupRetries = 0;
       _normalProbeFallbackUsed = false;
       _providerIssueHint = false;
       _lastConnectionDetail = null;
@@ -2081,7 +2146,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
               .where((c) => c.name.toLowerCase().contains(query))
               .toList();
     final isChannelMaintenance =
-        widget.isLiveContent && _errorTitle == 'CANAL EN MANTENIMIENTO';
+        widget.isLiveContent &&
+        (_errorTitle == 'CANAL EN MANTENIMIENTO' ||
+            _errorTitle == 'CANAL TEMPORALMENTE NO DISPONIBLE');
     final errorAccent = isChannelMaintenance
         ? Colors.amberAccent
         : Colors.redAccent;
