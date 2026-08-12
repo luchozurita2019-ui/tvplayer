@@ -9,6 +9,8 @@ import 'xtream_live_screen.dart';
 import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
 
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
+
 class SourceContentScreen extends StatefulWidget {
   final Playlist playlist;
 
@@ -62,8 +64,10 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 900;
-          final columns = constraints.maxWidth >= 1250
+          final wide = _androidTvBuild || constraints.maxWidth >= 900;
+          final columns = _androidTvBuild
+              ? (constraints.maxWidth >= 1500 ? 4 : 2)
+              : constraints.maxWidth >= 1250
               ? 4
               : constraints.maxWidth >= 760
               ? 2
@@ -77,16 +81,14 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
             children: [
               Text(
                 '¿Qué querés ver?',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
+                style: Theme.of(context).textTheme.headlineMedium
+                    ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 6),
               Text(
                 'Contenido organizado automáticamente por TV FULL.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(color: Colors.white70),
+                style: Theme.of(context).textTheme.bodyLarge
+                    ?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 28),
               GridView.count(
@@ -264,7 +266,7 @@ class _ContentCard extends StatelessWidget {
           padding: const EdgeInsets.all(18),
           child: LayoutBuilder(
             builder: (context, constraints) {
-              final compact = constraints.maxWidth < 620;
+              final compact = !_androidTvBuild && constraints.maxWidth < 620;
               final iconWidget = Container(
                 width: compact ? 58 : 72,
                 height: compact ? 58 : 72,

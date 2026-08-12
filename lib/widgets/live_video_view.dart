@@ -1,10 +1,13 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:media_kit/media_kit.dart';
 import 'package:media_kit_video/media_kit_video.dart';
 
 import 'cached_artwork_image.dart';
+
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
 
 /// Reproductor visual premium de TV FULL.
 ///
@@ -212,6 +215,14 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     }
     if (!_playing || _buffering) return;
     setState(() => _overlayVisible = false);
+  }
+
+  KeyEventResult _handleTvKeyEvent(FocusNode node, KeyEvent event) {
+    if (!_androidTvBuild || event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    _showOverlay();
+    return KeyEventResult.ignored;
   }
 
   void _toggleFit(VideoState videoState) {
@@ -570,7 +581,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
 
   @override
   Widget build(BuildContext context) {
-    return MouseRegion(
+    final video = MouseRegion(
       onHover: (_) => _showOverlay(),
       child: Listener(
         behavior: HitTestBehavior.translucent,
@@ -582,38 +593,43 @@ class _LiveVideoViewState extends State<LiveVideoView> {
         ),
       ),
     );
+    if (!_androidTvBuild) return video;
+    return Focus(autofocus: true, onKeyEvent: _handleTvKeyEvent, child: video);
   }
 
   Widget _buildControls(VideoState videoState) {
-    return IgnorePointer(
-      ignoring: !_overlayVisible,
-      child: AnimatedOpacity(
-        opacity: _overlayVisible ? 1 : 0,
-        duration: const Duration(milliseconds: 220),
-        curve: Curves.easeOut,
-        child: Stack(
-          children: [
-            Positioned(
-              left: 0,
-              right: 0,
-              top: 0,
-              child: _buildTopBar(videoState),
-            ),
-            Positioned(
-              left: 20,
-              right: 20,
-              bottom: 18,
-              child: SafeArea(
-                top: false,
-                child: Center(
-                  child: ConstrainedBox(
-                    constraints: const BoxConstraints(maxWidth: 1320),
-                    child: _buildBottomArea(videoState),
+    return ExcludeFocus(
+      excluding: !_overlayVisible,
+      child: IgnorePointer(
+        ignoring: !_overlayVisible,
+        child: AnimatedOpacity(
+          opacity: _overlayVisible ? 1 : 0,
+          duration: const Duration(milliseconds: 220),
+          curve: Curves.easeOut,
+          child: Stack(
+            children: [
+              Positioned(
+                left: 0,
+                right: 0,
+                top: 0,
+                child: _buildTopBar(videoState),
+              ),
+              Positioned(
+                left: 20,
+                right: 20,
+                bottom: 18,
+                child: SafeArea(
+                  top: false,
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 1320),
+                      child: _buildBottomArea(videoState),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -694,9 +710,12 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   Widget _buildBottomArea(VideoState videoState) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final compact =
-            constraints.maxWidth < 980 ||
-            MediaQuery.sizeOf(context).height < 520;
+        final compact = _androidTvBuild
+            ? constraints.maxWidth < 720
+            : constraints.maxWidth < 980 ||
+                  MediaQuery.sizeOf(context).height < 520;
+        final compactControls =
+            compact || (_androidTvBuild && constraints.maxWidth < 1180);
         return Column(
           mainAxisSize: MainAxisSize.min,
           children: [
@@ -799,7 +818,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
               ),
             ),
             const SizedBox(height: 12),
-            _buildControlRow(videoState, compact),
+            _buildControlRow(videoState, compactControls),
           ],
         );
       },

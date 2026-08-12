@@ -30,6 +30,7 @@ const _proPanelSoft = Color(0xFF111B28);
 const _proBorder = Color(0xFF233043);
 const _proText = Color(0xFFF4F7FB);
 const _proMuted = Color(0xFF8D9AAD);
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -74,9 +75,8 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _openAddSource(BuildContext context) async {
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const AddSourceScreen()));
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const AddSourceScreen()));
   }
 
   void _selectSection(int section) {
@@ -90,7 +90,7 @@ class _HomeScreenState extends State<HomeScreen> {
 
     return LayoutBuilder(
       builder: (context, constraints) {
-        final desktop = constraints.maxWidth >= 860;
+        final desktop = _androidTvBuild || constraints.maxWidth >= 860;
 
         if (desktop) {
           return Scaffold(
@@ -279,9 +279,8 @@ class _HomeScreenState extends State<HomeScreen> {
     }
 
     if (!mounted) return;
-    await Navigator.of(
-      context,
-    ).push(MaterialPageRoute(builder: (_) => const ParentalControlScreen()));
+    await Navigator.of(context)
+        .push(MaterialPageRoute(builder: (_) => const ParentalControlScreen()));
   }
 }
 
@@ -299,7 +298,7 @@ class _PremiumSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: compact ? double.infinity : 270,
+      width: compact ? double.infinity : (_androidTvBuild ? 238 : 270),
       color: _proBackground,
       padding: const EdgeInsets.fromLTRB(18, 22, 18, 20),
       child: Column(
@@ -457,8 +456,10 @@ class _SidebarItem extends StatelessWidget {
                 ),
                 if (badge != null)
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 7, vertical: 3),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 7,
+                      vertical: 3,
+                    ),
                     decoration: BoxDecoration(
                       color: _proGold.withValues(alpha: 0.13),
                       borderRadius: BorderRadius.circular(20),
@@ -600,10 +601,7 @@ class _TvLogo extends StatelessWidget {
           colors: [_proBlue, _proBlueDeep],
         ),
         borderRadius: BorderRadius.circular(size * 0.23),
-        border: Border.all(
-          color: borderColor,
-          width: favorite ? 2.2 : 1.2,
-        ),
+        border: Border.all(color: borderColor, width: favorite ? 2.2 : 1.2),
         boxShadow: [
           BoxShadow(
             color: glowColor.withValues(alpha: favorite ? 0.26 : 0.18),
@@ -684,8 +682,10 @@ class _PremiumTopBar extends StatelessWidget {
               style: FilledButton.styleFrom(
                 backgroundColor: _proBlue,
                 foregroundColor: Colors.white,
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 18, vertical: 16),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 16,
+                ),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(13),
                 ),
@@ -776,17 +776,14 @@ class _PlaylistsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: _proBlue),
-      );
+      return const Center(child: CircularProgressIndicator(color: _proBlue));
     }
 
     if (playlists.isEmpty) {
       return _EmptyState(
         icon: Icons.playlist_add_rounded,
         title: 'Todavía no hay servicios',
-        message:
-            'Agregá una lista M3U/M3U8, Xtream Codes o Portal Stalker para comenzar.',
+        message: 'Agregá una lista M3U/M3U8, Xtream Codes o Portal Stalker para comenzar.',
         actionLabel: 'Agregar lista',
         onAction: onAddPlaylist,
       );
@@ -800,12 +797,17 @@ class _PlaylistsView extends StatelessWidget {
         return a.name.toLowerCase().compareTo(b.name.toLowerCase());
       });
 
-    final totalItems =
-        playlists.fold<int>(0, (total, item) => total + item.channels.length);
-    final totalGroups =
-        playlists.fold<int>(0, (total, item) => total + item.groups.length);
-    final favoriteCount =
-        playlists.where((item) => favoriteIds.contains(item.id)).length;
+    final totalItems = playlists.fold<int>(
+      0,
+      (total, item) => total + item.channels.length,
+    );
+    final totalGroups = playlists.fold<int>(
+      0,
+      (total, item) => total + item.groups.length,
+    );
+    final favoriteCount = playlists
+        .where((item) => favoriteIds.contains(item.id))
+        .length;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -851,8 +853,10 @@ class _PlaylistsView extends StatelessWidget {
                     ),
                   ),
                   Container(
-                    padding:
-                        const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 11,
+                      vertical: 7,
+                    ),
                     decoration: BoxDecoration(
                       color: _proPanel,
                       borderRadius: BorderRadius.circular(20),
@@ -901,22 +905,22 @@ class _FavoritePlaylistsView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (loading) {
-      return const Center(
-        child: CircularProgressIndicator(color: _proBlue),
-      );
+      return const Center(child: CircularProgressIndicator(color: _proBlue));
     }
 
-    final favorites = playlists
-        .where((playlist) => favoriteIds.contains(playlist.id))
-        .toList(growable: false)
-      ..sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
+    final favorites =
+        playlists
+            .where((playlist) => favoriteIds.contains(playlist.id))
+            .toList(growable: false)
+          ..sort(
+            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+          );
 
     if (favorites.isEmpty) {
       return _EmptyState(
         icon: Icons.star_border_rounded,
         title: 'Todavía no tenés listas favoritas',
-        message:
-            'Tocá la estrella de una lista para destacarla con el contorno dorado.',
+        message: 'Tocá la estrella de una lista para destacarla con el contorno dorado.',
         actionLabel: playlists.isEmpty ? 'Agregar lista' : null,
         onAction: playlists.isEmpty ? onAddPlaylist : null,
       );
@@ -990,11 +994,7 @@ class _ServicesHero extends StatelessWidget {
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xFF0B2238),
-            Color(0xFF0A1625),
-            _proPanel,
-          ],
+          colors: [Color(0xFF0B2238), Color(0xFF0A1625), _proPanel],
         ),
         borderRadius: BorderRadius.circular(22),
         border: Border.all(color: _proBlue.withValues(alpha: 0.32)),
@@ -1076,11 +1076,7 @@ class _ServicesHero extends StatelessWidget {
                 const SizedBox(height: 10),
                 const Text(
                   'Accedé a tus servicios, organizalos y destacá tus favoritos sin cambiar la reproducción.',
-                  style: TextStyle(
-                    color: _proMuted,
-                    fontSize: 12,
-                    height: 1.4,
-                  ),
+                  style: TextStyle(color: _proMuted, fontSize: 12, height: 1.4),
                 ),
               ],
             ),
@@ -1095,8 +1091,10 @@ class _ServicesHero extends StatelessWidget {
                 style: OutlinedButton.styleFrom(
                   foregroundColor: _proSilver,
                   side: const BorderSide(color: _proBorder),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 16, vertical: 13),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 13,
+                  ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(12),
                   ),
@@ -1270,7 +1268,9 @@ class _PlaylistGrid extends StatelessWidget {
   Widget build(BuildContext context) {
     return LayoutBuilder(
       builder: (context, constraints) {
-        final columns = constraints.maxWidth >= 1250
+        final columns = _androidTvBuild
+            ? (constraints.maxWidth >= 1180 ? 3 : 2)
+            : constraints.maxWidth >= 1250
             ? 3
             : constraints.maxWidth >= 760
             ? 2
@@ -1375,15 +1375,14 @@ class _PlaylistCard extends StatelessWidget {
             ),
             borderRadius: BorderRadius.circular(18),
             border: Border.all(
-              color: isFavorite
-                  ? _proGold.withValues(alpha: 0.46)
-                  : _proBorder,
+              color: isFavorite ? _proGold.withValues(alpha: 0.46) : _proBorder,
               width: isFavorite ? 1.35 : 1,
             ),
             boxShadow: [
               BoxShadow(
-                color: (isFavorite ? _proGold : _proBlue)
-                    .withValues(alpha: 0.055),
+                color: (isFavorite ? _proGold : _proBlue).withValues(
+                  alpha: 0.055,
+                ),
                 blurRadius: 18,
                 spreadRadius: 0,
               ),
@@ -1744,14 +1743,14 @@ class _PerformanceView extends StatelessWidget {
                   ),
                 ),
                 Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 12,
+                    vertical: 7,
+                  ),
                   decoration: BoxDecoration(
                     color: _proGold.withValues(alpha: 0.11),
                     borderRadius: BorderRadius.circular(20),
-                    border: Border.all(
-                      color: _proGold.withValues(alpha: 0.3),
-                    ),
+                    border: Border.all(color: _proGold.withValues(alpha: 0.3)),
                   ),
                   child: const Text(
                     'PRO',
@@ -1805,7 +1804,8 @@ class _PerformanceView extends StatelessWidget {
                     ),
                     _MetricChip(
                       label: 'Lectura anticipada',
-                      value: '${settings.readaheadSeconds.toStringAsFixed(1)} s',
+                      value:
+                          '${settings.readaheadSeconds.toStringAsFixed(1)} s',
                     ),
                     _MetricChip(
                       label: 'Recuperación',
@@ -1900,8 +1900,7 @@ class _InformationView extends StatelessWidget {
           const _SectionLead(
             icon: Icons.info_outline_rounded,
             title: 'Información de TV FULL PRO',
-            message:
-                'Este espacio queda preparado para comunicar novedades, versiones y futuras actualizaciones.',
+            message: 'Este espacio queda preparado para comunicar novedades, versiones y futuras actualizaciones.',
           ),
           const SizedBox(height: 18),
           Wrap(
@@ -1911,29 +1910,25 @@ class _InformationView extends StatelessWidget {
               _InfoCard(
                 icon: Icons.system_update_alt_rounded,
                 title: 'Centro de actualizaciones',
-                message:
-                    'Acá se mostrarán nuevas versiones, cambios importantes y avisos de actualización.',
+                message: 'Acá se mostrarán nuevas versiones, cambios importantes y avisos de actualización.',
                 accent: _proBlue,
               ),
               _InfoCard(
                 icon: Icons.newspaper_rounded,
                 title: 'Novedades',
-                message:
-                    'Un lugar para informar mejoras de rendimiento, nuevas funciones y cambios de la aplicación.',
+                message: 'Un lugar para informar mejoras de rendimiento, nuevas funciones y cambios de la aplicación.',
                 accent: Color(0xFF9B8CFF),
               ),
               _InfoCard(
                 icon: Icons.verified_user_outlined,
                 title: 'Seguridad',
-                message:
-                    'Acceso rápido a información relacionada con privacidad, control parental y uso seguro.',
+                message: 'Acceso rápido a información relacionada con privacidad, control parental y uso seguro.',
                 accent: Color(0xFF5DD6A8),
               ),
               _InfoCard(
                 icon: Icons.workspace_premium_outlined,
                 title: 'TV FULL PRO',
-                message:
-                    'Las funciones premium y de rendimiento estarán identificadas con el distintivo dorado PRO.',
+                message: 'Las funciones premium y de rendimiento estarán identificadas con el distintivo dorado PRO.',
                 accent: _proGold,
               ),
             ],
@@ -1959,10 +1954,7 @@ class _ProfileComingSoonView extends StatelessWidget {
           borderRadius: BorderRadius.circular(24),
           border: Border.all(color: _proBorder),
           boxShadow: [
-            BoxShadow(
-              color: _proBlue.withValues(alpha: 0.06),
-              blurRadius: 30,
-            ),
+            BoxShadow(color: _proBlue.withValues(alpha: 0.06), blurRadius: 30),
           ],
         ),
         child: const Column(
@@ -1992,11 +1984,7 @@ class _ProfileComingSoonView extends StatelessWidget {
             Text(
               'La interfaz ya reserva este espacio para una futura experiencia de perfiles. No hay ninguna función activa todavía.',
               textAlign: TextAlign.center,
-              style: TextStyle(
-                color: _proMuted,
-                fontSize: 12,
-                height: 1.5,
-              ),
+              style: TextStyle(color: _proMuted, fontSize: 12, height: 1.5),
             ),
           ],
         ),
@@ -2023,10 +2011,7 @@ class _SectionLead extends StatelessWidget {
       padding: const EdgeInsets.all(22),
       decoration: BoxDecoration(
         gradient: LinearGradient(
-          colors: [
-            _proBlue.withValues(alpha: 0.09),
-            _proPanel,
-          ],
+          colors: [_proBlue.withValues(alpha: 0.09), _proPanel],
         ),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(color: _proBlue.withValues(alpha: 0.25)),
@@ -2231,8 +2216,10 @@ class _EmptyState extends StatelessWidget {
                 style: FilledButton.styleFrom(
                   backgroundColor: _proBlue,
                   foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 18,
+                    vertical: 14,
+                  ),
                 ),
                 onPressed: onAction,
                 icon: const Icon(Icons.add_rounded),

@@ -14,6 +14,8 @@ import '../widgets/parental_lock_button.dart';
 import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
+
 enum _CatalogMode { live, movies, series, radios }
 
 extension on _CatalogMode {
@@ -58,7 +60,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   late Map<String, int> _groupCounts;
 
   final ParentalControlService _parental = ParentalControlService.instance;
-  double _sidebarWidth = 320;
+  double _sidebarWidth = _androidTvBuild ? 260 : 320;
   bool _sidebarCollapsed = false;
   bool _openingPlayer = false;
 
@@ -93,7 +95,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     await _parental.init();
     final prefs = await SharedPreferences.getInstance();
     if (!mounted) return;
-    final width = prefs.getDouble(_sidebarWidthKey) ?? 320;
+    final width =
+        prefs.getDouble(_sidebarWidthKey) ?? (_androidTvBuild ? 260 : 320);
     setState(() {
       _sidebarWidth = width
           .clamp(_sidebarMinWidth, _sidebarMaxWidth)
@@ -177,9 +180,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: Theme.of(
-                  context,
-                ).colorScheme.primary.withValues(alpha: 0.14),
+                color: Theme.of(context).colorScheme.primary
+                    .withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Icon(
@@ -232,7 +234,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
       ),
       body: LayoutBuilder(
         builder: (context, constraints) {
-          if (constraints.maxWidth >= 900) {
+          if (_androidTvBuild || constraints.maxWidth >= 900) {
             return _DesktopCatalogLayout(
               mode: mode,
               playlist: playlist,
@@ -546,9 +548,8 @@ class _CatalogToolbar extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   '$visibleCount ${mode.itemLabel}',
-                  style: Theme.of(
-                    context,
-                  ).textTheme.bodyMedium?.copyWith(color: Colors.white60),
+                  style: Theme.of(context).textTheme.bodyMedium
+                      ?.copyWith(color: Colors.white60),
                 ),
               ],
             ),
@@ -561,9 +562,9 @@ class _CatalogToolbar extends StatelessWidget {
                 hintText: 'Buscar en ${mode.title.toLowerCase()}…',
                 prefixIcon: const Icon(Icons.search_rounded),
                 filled: true,
-                fillColor: Theme.of(
-                  context,
-                ).colorScheme.surfaceContainerHighest,
+                fillColor: Theme.of(context)
+                    .colorScheme
+                    .surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
@@ -729,9 +730,8 @@ class _CategorySidebar extends StatelessWidget {
                             : '$label · $count',
                         child: Material(
                           color: selected
-                              ? Theme.of(
-                                  context,
-                                ).colorScheme.primary.withValues(alpha: 0.20)
+                              ? Theme.of(context).colorScheme.primary
+                                    .withValues(alpha: 0.20)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(14),
                           child: InkWell(
@@ -781,9 +781,8 @@ class _CategorySidebar extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        selectedTileColor: Theme.of(
-                          context,
-                        ).colorScheme.primary.withValues(alpha: 0.20),
+                        selectedTileColor: Theme.of(context).colorScheme.primary
+                            .withValues(alpha: 0.20),
                         leading: Icon(
                           group == null
                               ? Icons.grid_view_rounded
@@ -880,7 +879,15 @@ class _CatalogGrid extends StatelessWidget {
     return LayoutBuilder(
       builder: (context, constraints) {
         final width = constraints.maxWidth;
-        final columns = mode.usesPoster
+        final columns = _androidTvBuild
+            ? (width >= 1450
+                  ? 6
+                  : width >= 1120
+                  ? 5
+                  : width >= 880
+                  ? 4
+                  : 3)
+            : mode.usesPoster
             ? (width >= 1500
                   ? 7
                   : width >= 1250
@@ -995,9 +1002,8 @@ class _CompactCatalogLayout extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
           child: Text(
             selectedGroup ?? mode.title.toUpperCase(),
-            style: Theme.of(
-              context,
-            ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w900),
+            style: Theme.of(context).textTheme.titleLarge
+                ?.copyWith(fontWeight: FontWeight.w900),
           ),
         ),
         Expanded(
@@ -1057,30 +1063,36 @@ class _CatalogCard extends StatefulWidget {
 
 class _CatalogCardState extends State<_CatalogCard> {
   bool _hovered = false;
+  bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final primary = Theme.of(context).colorScheme.primary;
+    final highlighted = _hovered || _focused;
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
       child: AnimatedScale(
-        scale: _hovered ? 1.025 : 1,
+        scale: highlighted ? (_androidTvBuild ? 1.045 : 1.025) : 1,
         duration: const Duration(milliseconds: 140),
         curve: Curves.easeOut,
         child: Card(
-          elevation: _hovered ? 7 : 1,
+          elevation: highlighted ? 9 : 1,
           clipBehavior: Clip.antiAlias,
           shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(18),
             side: BorderSide(
-              color: _hovered
-                  ? primary.withValues(alpha: 0.75)
+              color: highlighted
+                  ? primary.withValues(alpha: 0.92)
                   : Colors.white.withValues(alpha: 0.08),
-              width: _hovered ? 1.4 : 1,
+              width: highlighted ? (_androidTvBuild ? 2.3 : 1.4) : 1,
             ),
           ),
           child: InkWell(
+            onFocusChange: (value) {
+              if (mounted) setState(() => _focused = value);
+            },
+            focusColor: primary.withValues(alpha: 0.18),
             onTap: widget.onTap,
             child: widget.mode.usesPoster
                 ? _PosterCardBody(

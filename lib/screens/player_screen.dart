@@ -1,4 +1,5 @@
 import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:media_kit/media_kit.dart';
@@ -18,6 +19,7 @@ const String _defaultUserAgent =
     'Chrome/96.0.4664.18 Safari/537.36';
 const String _legacyVlcUserAgent =
     'VLC/3.0.20 LibVLC/3.0.20 (iptv_player; +https://github.com)';
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
 
 enum _ConnectionHealthLevel { stable, unstable, poor }
 
@@ -454,14 +456,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         // fallbacks HTTP/TLS pueden tocar opciones globales del Player, por lo
         // que cada apertura restaura estos valores antes de probar otro modo.
         try {
-          _baselineTlsVerify = (await platform.getProperty(
-            'tls-verify',
-          )).trim();
+          _baselineTlsVerify = (await platform.getProperty('tls-verify'))
+              .trim();
         } catch (_) {}
         try {
-          _baselineUserAgent = (await platform.getProperty(
-            'user-agent',
-          )).trim();
+          _baselineUserAgent = (await platform.getProperty('user-agent'))
+              .trim();
         } catch (_) {}
         try {
           _baselineReferrer = (await platform.getProperty('referrer')).trim();
@@ -761,8 +761,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         level: _ConnectionHealthLevel.unstable,
         source: _ConnectionIssueSource.unknown,
         title: 'Señal inestable',
-        detail:
-            'TV FULL está esperando datos. Estamos verificando si el origen es la conexión o el servidor.',
+        detail: 'TV FULL está esperando datos. Estamos verificando si el origen es la conexión o el servidor.',
         confidence: 'baja',
       );
     }
@@ -837,9 +836,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_providerIssueHint || (currentHostLooksBad && otherHostsLookHealthy)) {
       source = _ConnectionIssueSource.provider;
       title = 'Servidor del canal inestable';
-      detail =
-          _lastConnectionDetail ??
-          'Este servidor acumula más demoras o cortes que otros servidores usados en TV FULL.';
+      detail = _lastConnectionDetail ?? 'Este servidor acumula más demoras o cortes que otros servidores usados en TV FULL.';
       confidence = _providerIssueHint ? 'alta' : 'media';
     } else if (ratio != null && ratio < 0.95 && !currentHostLooksBad) {
       source = _ConnectionIssueSource.internet;
@@ -851,9 +848,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       source = _ConnectionIssueSource.unknown;
       title = 'Recepción inestable';
-      detail =
-          _lastConnectionDetail ??
-          'La señal está llegando de forma irregular. Puede ser la conexión del usuario o el servidor del canal.';
+      detail = _lastConnectionDetail ?? 'La señal está llegando de forma irregular. Puede ser la conexión del usuario o el servidor del canal.';
       confidence = 'baja';
     }
 
@@ -1443,8 +1438,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (RegExp(r'\b5\d\d\b').hasMatch(text) && text.contains('http')) {
       diagnostic = 'El servidor respondió con un error HTTP 5xx temporal';
     } else if (text.contains('mime')) {
-      diagnostic =
-          'El MIME del servidor puede ser incompatible; disponible fallback Compatible';
+      diagnostic = 'El MIME del servidor puede ser incompatible; disponible fallback Compatible';
     } else if (text.contains('eof')) {
       diagnostic = 'EOF detectado en la señal en vivo';
     } else if ((log.level == 'error' ||
@@ -2152,6 +2146,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final errorAccent = isChannelMaintenance
         ? Colors.amberAccent
         : Colors.redAccent;
+    final screenWidth = MediaQuery.sizeOf(context).width;
+    final channelPanelWidth = _androidTvBuild
+        ? (screenWidth * 0.34).clamp(330.0, 460.0).toDouble()
+        : 370.0;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -2321,8 +2319,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
             curve: Curves.easeOutCubic,
             top: 0,
             bottom: 0,
-            right: _showChannelList ? 0 : -370,
-            width: 370,
+            right: _showChannelList ? 0 : -channelPanelWidth,
+            width: channelPanelWidth,
             child: Material(
               elevation: 18,
               color: const Color(0xF2071728),
@@ -2404,16 +2402,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             ),
                             decoration: BoxDecoration(
                               color: isCurrent
-                                  ? const Color(
-                                      0xFF1677FF,
-                                    ).withValues(alpha: 0.18)
+                                  ? const Color(0xFF1677FF)
+                                        .withValues(alpha: 0.18)
                                   : Colors.transparent,
                               borderRadius: BorderRadius.circular(12),
                               border: isCurrent
                                   ? Border.all(
-                                      color: const Color(
-                                        0xFF1677FF,
-                                      ).withValues(alpha: 0.35),
+                                      color: const Color(0xFF1677FF)
+                                          .withValues(alpha: 0.35),
                                     )
                                   : null,
                             ),

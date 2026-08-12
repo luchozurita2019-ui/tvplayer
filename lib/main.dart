@@ -1,8 +1,11 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:media_kit/media_kit.dart';
+
 import 'providers/iptv_provider.dart';
 import 'screens/home_screen.dart';
+
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
 
 void main() {
   // Inicializa el motor nativo de media_kit antes de correr la app.
@@ -34,6 +37,13 @@ class IptvPlayerApp extends StatelessWidget {
           brightness: Brightness.dark,
           colorScheme: scheme,
           scaffoldBackgroundColor: darkNavy,
+          focusColor: const Color(0x6634A8FF),
+          hoverColor: const Color(0x332A9CFF),
+          splashColor: const Color(0x4434A8FF),
+          highlightColor: const Color(0x2234A8FF),
+          visualDensity: _androidTvBuild
+              ? const VisualDensity(horizontal: 0.5, vertical: 0.5)
+              : VisualDensity.standard,
           appBarTheme: const AppBarTheme(
             backgroundColor: Color(0xFF09182B),
             foregroundColor: Colors.white,
@@ -59,14 +69,28 @@ class IptvPlayerApp extends StatelessWidget {
           inputDecorationTheme: InputDecorationTheme(
             filled: true,
             fillColor: const Color(0xFF0B182A),
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(14),
-            ),
+            border: OutlineInputBorder(borderRadius: BorderRadius.circular(14)),
           ),
           filledButtonTheme: FilledButtonThemeData(
             style: FilledButton.styleFrom(
               backgroundColor: brandBlue,
               foregroundColor: Colors.white,
+              minimumSize: _androidTvBuild ? const Size(56, 48) : null,
+            ),
+          ),
+          iconButtonTheme: IconButtonThemeData(
+            style: ButtonStyle(
+              minimumSize: _androidTvBuild
+                  ? const WidgetStatePropertyAll(Size(48, 48))
+                  : null,
+              backgroundColor: _androidTvBuild
+                  ? WidgetStateProperty.resolveWith((states) {
+                      if (states.contains(WidgetState.focused)) {
+                        return const Color(0x5534A8FF);
+                      }
+                      return null;
+                    })
+                  : null,
             ),
           ),
         ),
