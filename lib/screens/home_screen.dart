@@ -16,6 +16,7 @@ import 'edit_source_screen.dart';
 import 'source_content_screen.dart';
 import 'playback_settings_screen.dart';
 import 'parental_control_screen.dart';
+import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -472,7 +473,8 @@ class _FavoritesView extends StatelessWidget {
             title: Text(channel.name),
             subtitle: channel.group == null ? null : Text(channel.group!),
             trailing: const Icon(Icons.play_arrow),
-            onTap: () => Navigator.of(context).push(
+            onTap: () => PlayerRouteGuard.push(
+              context,
               MaterialPageRoute(
                 builder: (_) => PlayerScreen(
                   channel: channel,

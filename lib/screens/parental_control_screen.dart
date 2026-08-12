@@ -42,13 +42,13 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
         final filteredGroups = normalizedQuery.isEmpty
             ? groups
             : groups
-                .where((group) => group.toLowerCase().contains(normalizedQuery))
-                .toList(growable: false);
+                  .where(
+                    (group) => group.toLowerCase().contains(normalizedQuery),
+                  )
+                  .toList(growable: false);
 
         return Scaffold(
-          appBar: AppBar(
-            title: const Text('Control parental'),
-          ),
+          appBar: AppBar(title: const Text('Control parental')),
           body: ListView(
             padding: const EdgeInsets.all(20),
             children: [
@@ -80,18 +80,17 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary
-                    .withValues(alpha: 0.14),
+                color: Theme.of(
+                  context,
+                ).colorScheme.primary.withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(16),
               ),
               child: Icon(
                 !active
                     ? Icons.shield_outlined
                     : unlocked
-                        ? Icons.lock_open_rounded
-                        : Icons.lock_rounded,
+                    ? Icons.lock_open_rounded
+                    : Icons.lock_rounded,
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
@@ -104,19 +103,19 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
                     !active
                         ? 'Control parental desactivado'
                         : unlocked
-                            ? 'Contenido protegido desbloqueado'
-                            : 'Contenido protegido bloqueado',
+                        ? 'Contenido protegido desbloqueado'
+                        : 'Contenido protegido bloqueado',
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w800,
-                        ),
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                   const SizedBox(height: 4),
                   Text(
                     !_parental.pinConfigured
                         ? 'Creá un PIN de 4 dígitos para comenzar.'
                         : active
-                            ? 'TV FULL protege categorías y resultados adultos con tu PIN.'
-                            : 'Tu PIN está guardado y podés volver a activar la protección cuando quieras.',
+                        ? 'TV FULL protege categorías y resultados adultos con tu PIN.'
+                        : 'Tu PIN está guardado y podés volver a activar la protección cuando quieras.',
                   ),
                 ],
               ),
@@ -136,9 +135,9 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
           children: [
             Text(
               'Crear PIN parental',
-              style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
             const Text(
@@ -163,7 +162,9 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
           SwitchListTile(
             secondary: const Icon(Icons.shield_rounded),
             title: const Text('Activar control parental'),
-            subtitle: const Text('Bloquea categorías y contenido detectado como adulto.'),
+            subtitle: const Text(
+              'Bloquea categorías y contenido detectado como adulto.',
+            ),
             value: _parental.enabled,
             onChanged: (value) => unawaited(_parental.setEnabled(value)),
           ),
@@ -181,7 +182,9 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
           ListTile(
             leading: const Icon(Icons.timer_outlined),
             title: const Text('Tiempo de desbloqueo'),
-            subtitle: const Text('Después de ese tiempo, TV FULL vuelve a pedir el PIN.'),
+            subtitle: const Text(
+              'Después de ese tiempo, TV FULL vuelve a pedir el PIN.',
+            ),
             trailing: DropdownButton<int>(
               value: _parental.unlockMinutes,
               items: const [
@@ -241,9 +244,9 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
             child: Text(
               'Categorías protegidas',
-              style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w800),
             ),
           ),
           const Padding(
@@ -288,9 +291,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
                         ? const Text('Protegida con PIN')
                         : const Text('Sin protección'),
                     value: protected,
-                    onChanged: (value) => unawaited(
-                      _parental.setGroupProtected(group, value),
-                    ),
+                    onChanged: (value) =>
+                        unawaited(_parental.setGroupProtected(group, value)),
                   );
                 },
               ),
@@ -304,7 +306,10 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
     final first = await _askPin('Crear PIN', 'Ingresá 4 números');
     if (!mounted || first == null) return;
     if (!_validPin(first)) return;
-    final second = await _askPin('Confirmar PIN', 'Repetí los mismos 4 números');
+    final second = await _askPin(
+      'Confirmar PIN',
+      'Repetí los mismos 4 números',
+    );
     if (!mounted || second == null) return;
     if (first != second) {
       _message('Los PIN no coinciden.');
@@ -324,7 +329,10 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
     final next = await _askPin('Nuevo PIN', 'Ingresá 4 números');
     if (!mounted || next == null) return;
     if (!_validPin(next)) return;
-    final confirmation = await _askPin('Confirmar nuevo PIN', 'Repetí el nuevo PIN');
+    final confirmation = await _askPin(
+      'Confirmar nuevo PIN',
+      'Repetí el nuevo PIN',
+    );
     if (!mounted || confirmation == null) return;
     if (next != confirmation) {
       _message('Los PIN no coinciden.');
@@ -335,13 +343,18 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
   }
 
   Future<void> _unlockTemporarily() async {
-    final pin = await _askPin('Desbloquear contenido', 'Ingresá tu PIN parental');
+    final pin = await _askPin(
+      'Desbloquear contenido',
+      'Ingresá tu PIN parental',
+    );
     if (!mounted || pin == null) return;
     final ok = await _parental.unlock(pin);
     if (!mounted) return;
-    _message(ok
-        ? 'Contenido desbloqueado por ${_parental.unlockMinutes} minutos.'
-        : 'PIN incorrecto.');
+    _message(
+      ok
+          ? 'Contenido desbloqueado por ${_parental.unlockMinutes} minutos.'
+          : 'PIN incorrecto.',
+    );
   }
 
   bool _validPin(String value) {
@@ -362,10 +375,7 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
           obscureText: true,
           keyboardType: TextInputType.number,
           maxLength: 4,
-          decoration: InputDecoration(
-            hintText: hint,
-            counterText: '',
-          ),
+          decoration: InputDecoration(hintText: hint, counterText: ''),
           onSubmitted: (value) => Navigator.pop(dialogContext, value.trim()),
         ),
         actions: [
@@ -374,7 +384,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
             child: const Text('Aceptar'),
           ),
         ],

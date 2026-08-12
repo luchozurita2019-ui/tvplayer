@@ -73,8 +73,8 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
               Text(
                 'Editar ${playlist.sourceType.label}',
                 style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
+                  fontWeight: FontWeight.w900,
+                ),
               ),
               const SizedBox(height: 8),
               const Text(
@@ -119,7 +119,9 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
                         child: Text(
                           provider.error!,
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.onErrorContainer,
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.onErrorContainer,
                           ),
                         ),
                       ),
@@ -139,7 +141,9 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.save_outlined),
-                  label: Text(provider.loading ? 'Guardando…' : 'Guardar cambios'),
+                  label: Text(
+                    provider.loading ? 'Guardando…' : 'Guardar cambios',
+                  ),
                 ),
               ),
             ],
@@ -267,10 +271,7 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
           password: _passwordController.text,
         );
       case PlaylistSourceType.stalker:
-        await provider.renamePlaylist(
-          playlist.id,
-          _nameController.text.trim(),
-        );
+        await provider.renamePlaylist(playlist.id, _nameController.text.trim());
     }
 
     if (!mounted) return;

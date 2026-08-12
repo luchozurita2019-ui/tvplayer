@@ -13,6 +13,7 @@ import '../services/xtream_vod_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import '../widgets/parental_lock_button.dart';
 import '../widgets/parental_unlock_dialog.dart';
+import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
 class XtreamMoviesScreen extends StatefulWidget {
@@ -225,7 +226,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     final channel =
         details?.toChannel(connection) ?? movie.toChannel(connection);
     final provider = context.read<IptvProvider>();
-    await Navigator.of(context).push(
+    await PlayerRouteGuard.push(
+      context,
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           channel: channel,
@@ -629,7 +631,8 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
     if (!await _ensureParentalAccess() || !mounted) return;
     final channel = details.toChannel(widget.connection);
     final provider = context.read<IptvProvider>();
-    await Navigator.of(context).push(
+    await PlayerRouteGuard.push(
+      context,
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           channel: channel,
@@ -647,7 +650,8 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
     final trailer = details.trailerChannel();
     if (trailer == null) return;
     final provider = context.read<IptvProvider>();
-    await Navigator.of(context).push(
+    await PlayerRouteGuard.push(
+      context,
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           channel: trailer,

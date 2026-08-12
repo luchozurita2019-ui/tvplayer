@@ -11,6 +11,7 @@ import '../services/artwork_cache_service.dart';
 import '../services/parental_control_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import '../widgets/parental_lock_button.dart';
+import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
 enum _CatalogMode { live, movies, series, radios }
@@ -376,7 +377,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     _openingPlayer = true;
     ArtworkCacheService.instance.pauseForPlayback();
     try {
-      await Navigator.of(context).push(
+      await PlayerRouteGuard.push(
+        context,
         MaterialPageRoute(
           builder: (_) => PlayerScreen(
             channel: channel,

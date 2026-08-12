@@ -14,6 +14,7 @@ import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import '../widgets/parental_lock_button.dart';
 import '../widgets/parental_unlock_dialog.dart';
+import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
 class XtreamSeriesScreen extends StatefulWidget {
@@ -948,7 +949,8 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
     final index = episodes.indexWhere((item) => item.id == episode.id);
     if (channels.isEmpty || index < 0) return;
     final provider = context.read<IptvProvider>();
-    await Navigator.of(context).push(
+    await PlayerRouteGuard.push(
+      context,
       MaterialPageRoute(
         builder: (_) => PlayerScreen(
           channel: channels[index],
