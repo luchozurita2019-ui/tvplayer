@@ -1,0 +1,66 @@
+name: Apply VOD Series single-player guard
+
+on:
+  push:
+    branches: [ v41-vod-series-single-player-guard-patcher ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-working-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patcher branch
+        uses: actions/checkout@v5
+        with:
+          ref: v41-vod-series-single-player-guard-patcher
+
+      - name: Preserve patch script
+        run: cp .github/scripts/apply_global_player_route_guard.py /tmp/apply_global_player_route_guard.py
+
+      - name: Checkout working branch
+        run: |
+          git fetch origin performance-engine-v38-hotplayer-baseline
+          git checkout -B performance-engine-v38-hotplayer-baseline origin/performance-engine-v38-hotplayer-baseline
+
+      - name: Apply global PlayerScreen route guard
+        run: python3 /tmp/apply_global_player_route_guard.py
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Validate patch
+        run: |
+          dart format lib/services/player_route_guard.dart lib/screens
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          files = [p for p in Path('lib/screens').glob('*.dart') if 'PlayerScreen(' in p.read_text(encoding='utf-8')]
+          if not files:
+              raise SystemExit('No PlayerScreen callers found')
+          unguarded = []
+          for p in files:
+              text = p.read_text(encoding='utf-8')
+              pattern = re.compile(r'Navigator\.of\(context\)\.push\([\s\S]{0,180}?builder: \(_\) => PlayerScreen\(')
+              if pattern.search(text):
+                  unguarded.append(str(p))
+              if '../services/player_route_guard.dart' not in text:
+                  raise SystemExit(f'Missing PlayerRouteGuard import: {p}')
+          if unguarded:
+              raise SystemExit('Unguarded PlayerScreen routes: ' + ', '.join(unguarded))
+          print('Todas las aperturas directas de PlayerScreen encontradas usan PlayerRouteGuard.')
+          PY
+
+      - name: Commit and push working branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/services/player_route_guard.dart lib/screens
+          git diff --cached --stat
+          git commit -m "Prevent duplicate players in VOD and Series"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
