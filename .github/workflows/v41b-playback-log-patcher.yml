@@ -1,0 +1,59 @@
+name: Apply v41b playback log fast failure
+
+on:
+  push:
+    branches:
+      - v41-playback-fast-failure-patcher
+    paths:
+      - .github/scripts/apply_v41b_log_fastfail.py
+      - .github/workflows/v41b-playback-log-patcher.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout staging branch
+        uses: actions/checkout@v5
+        with:
+          ref: v41-playback-fast-failure-patcher
+          fetch-depth: 0
+
+      - name: Preserve patcher and switch to working branch
+        run: |
+          cp .github/scripts/apply_v41b_log_fastfail.py /tmp/apply_v41b_log_fastfail.py
+          git fetch origin performance-engine-v38-hotplayer-baseline
+          git checkout -B performance-engine-v38-hotplayer-baseline origin/performance-engine-v38-hotplayer-baseline
+
+      - name: Apply startup log fast-failure hook
+        run: python3 /tmp/apply_v41b_log_fastfail.py
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Format changed Dart file
+        run: dart format lib/screens/player_screen.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify patch scope
+        run: |
+          git diff --name-only
+          test "$(git diff --name-only)" = "lib/screens/player_screen.dart"
+          git diff --check
+
+      - name: Commit v41b to working branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/player_screen.dart
+          git commit -m "Detect definitive live startup failures from player logs"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
