@@ -39,13 +39,13 @@ patched = []
 replacements = 0
 for path in sorted(Path('lib/screens').glob('*.dart')):
     text = path.read_text(encoding='utf-8')
-    if 'PlayerScreen(' not in text:
+    if 'PlayerScreen(' not in text or not pattern.search(text):
         continue
 
     if "../services/player_route_guard.dart" not in text:
         anchor = "import 'player_screen.dart';"
         if anchor not in text:
-            raise SystemExit(f'{path}: PlayerScreen usado pero no se encontró import player_screen.dart')
+            raise SystemExit(f'{path}: PlayerScreen directo sin import player_screen.dart reconocible')
         text = text.replace(
             anchor,
             "import '../services/player_route_guard.dart';\n" + anchor,
@@ -66,14 +66,12 @@ for path in sorted(Path('lib/screens').glob('*.dart')):
     nonlocal_marker = [0]
     new_text = pattern.sub(repl, text)
     count = nonlocal_marker[0]
-    if count:
-        path.write_text(new_text, encoding='utf-8')
-        patched.append(str(path))
-        replacements += count
-    elif '../services/player_route_guard.dart' in text:
-        # Si el archivo usa PlayerScreen pero no matcheó ninguna apertura,
-        # no dejamos un import inútil: abortamos para revisar el patrón.
-        raise SystemExit(f'{path}: no se encontró una apertura PlayerScreen compatible para proteger')
+    if not count:
+        raise SystemExit(f'{path}: se detectó ruta PlayerScreen pero no se pudo parchear')
+
+    path.write_text(new_text, encoding='utf-8')
+    patched.append(str(path))
+    replacements += count
 
 if replacements < 3:
     raise SystemExit(f'Sólo se protegieron {replacements} aperturas PlayerScreen; se esperaban al menos 3')
