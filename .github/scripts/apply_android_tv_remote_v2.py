@@ -9,6 +9,17 @@ def replace_once(path: str, old: str, new: str) -> None:
     p.write_text(text.replace(old, new, 1))
 
 
+def replace_n(path: str, old: str, new: str, count: int) -> None:
+    p = Path(path)
+    text = p.read_text()
+    found = text.count(old)
+    if found < count:
+        raise SystemExit(
+            f"Expected at least {count} matches in {path}, found {found}: {old[:100]!r}"
+        )
+    p.write_text(text.replace(old, new, count))
+
+
 # Global Android TV remote OK/Enter -> ActivateIntent bridge.
 replace_once(
     'lib/main.dart',
@@ -21,7 +32,7 @@ replace_once(
     "        debugShowCheckedModeBanner: false,\n        builder: (context, child) {\n          if (!_androidTvBuild || child == null) {\n            return child ?? const SizedBox.shrink();\n          }\n          return Shortcuts(\n            shortcuts: const <ShortcutActivator, Intent>{\n              SingleActivator(LogicalKeyboardKey.select): ActivateIntent(),\n              SingleActivator(LogicalKeyboardKey.enter): ActivateIntent(),\n              SingleActivator(LogicalKeyboardKey.numpadEnter): ActivateIntent(),\n              SingleActivator(LogicalKeyboardKey.space): ActivateIntent(),\n            },\n            child: FocusTraversalGroup(\n              policy: ReadingOrderTraversalPolicy(),\n              child: child,\n            ),\n          );\n        },\n        theme: ThemeData(\n",
 )
 
-# Home: first playlist gets focus; remote focus remains visible and scrolls into view.
+# Home: first playlist is the initial D-pad target.
 replace_once(
     'lib/screens/home_screen.dart',
     "            return _PlaylistCard(\n              playlist: playlist,\n              isFavorite: favoriteIds.contains(playlist.id),\n              onToggleFavorite: () => onToggleFavorite(playlist),\n            );\n",
@@ -38,7 +49,7 @@ replace_once(
     "      child: InkWell(\n        autofocus: autofocus,\n        focusColor: _proBlue.withValues(alpha: 0.24),\n        onFocusChange: (focused) {\n          if (focused && _androidTvBuild) {\n            WidgetsBinding.instance.addPostFrameCallback((_) {\n              if (context.mounted) {\n                Scrollable.ensureVisible(\n                  context,\n                  duration: const Duration(milliseconds: 180),\n                  alignment: 0.35,\n                );\n              }\n            });\n          }\n        },\n        onTap: () => _openPlaylist(context),\n        borderRadius: BorderRadius.circular(18),\n",
 )
 
-# Content selector: TV en vivo starts focused and every card accepts remote OK.
+# Content selector: TV en vivo starts focused and accepts the remote center button.
 replace_once(
     'lib/screens/source_content_screen.dart',
     "                  _ContentCard(\n                    icon: Icons.live_tv_rounded,\n",
@@ -60,12 +71,13 @@ replace_once(
     "      child: InkWell(\n        autofocus: enabled && autofocus,\n        focusColor: accent.withValues(alpha: 0.30),\n        onFocusChange: (focused) {\n          if (focused && _androidTvBuild) {\n            WidgetsBinding.instance.addPostFrameCallback((_) {\n              if (context.mounted) {\n                Scrollable.ensureVisible(\n                  context,\n                  duration: const Duration(milliseconds: 160),\n                  alignment: 0.4,\n                );\n              }\n            });\n          }\n        },\n        onTap: enabled ? onTap : null,\n        child: Container(\n",
 )
 
-# Channel grid: first channel gets focus after loading; D-pad focus follows scrolling.
-old_card_call = """            return _CatalogCard(\n              mode: mode,\n              channel: channel,\n              isFavorite: isFavorite(channel),\n              onFavoriteToggle: () => onFavoriteToggle(channel),\n              onTap: () => onPlay(channel),\n            );\n"""
-new_card_call = """            return _CatalogCard(\n              mode: mode,\n              channel: channel,\n              isFavorite: isFavorite(channel),\n              autofocus: _androidTvBuild && index == 0,\n              onFavoriteToggle: () => onFavoriteToggle(channel),\n              onTap: () => onPlay(channel),\n            );\n"""
-replace_once('lib/screens/channel_list_screen.dart', old_card_call, new_card_call)
-# Same construction appears in compact layout too.
-replace_once('lib/screens/channel_list_screen.dart', old_card_call, new_card_call)
+# Channel grids: first channel becomes the D-pad target after the catalog loads.
+replace_n(
+    'lib/screens/channel_list_screen.dart',
+    "              isFavorite: isFavorite(channel),\n              onFavoriteToggle: () => onFavoriteToggle(channel),\n",
+    "              isFavorite: isFavorite(channel),\n              autofocus: _androidTvBuild && index == 0,\n              onFavoriteToggle: () => onFavoriteToggle(channel),\n",
+    2,
+)
 replace_once(
     'lib/screens/channel_list_screen.dart',
     "class _CatalogCard extends StatefulWidget {\n  final _CatalogMode mode;\n  final Channel channel;\n  final bool isFavorite;\n",
@@ -82,8 +94,8 @@ replace_once(
     "          child: InkWell(\n            autofocus: widget.autofocus,\n            onFocusChange: (value) {\n              if (mounted) setState(() => _focused = value);\n              if (value && _androidTvBuild) {\n                WidgetsBinding.instance.addPostFrameCallback((_) {\n                  if (mounted) {\n                    Scrollable.ensureVisible(\n                      context,\n                      duration: const Duration(milliseconds: 150),\n                      alignment: 0.35,\n                    );\n                  }\n                });\n              }\n            },\n            focusColor: primary.withValues(alpha: 0.24),\n            onTap: widget.onTap,\n",
 )
 
-# Player: center/OK always reveals controls if they are hidden, while visible controls
-# continue receiving the normal ActivateIntent from the global shortcut bridge.
+# Player: center/OK reveals controls when they are hidden. Visible controls still
+# receive the normal ActivateIntent from the global shortcut bridge.
 replace_once(
     'lib/widgets/live_video_view.dart',
     "  KeyEventResult _handleTvKeyEvent(FocusNode node, KeyEvent event) {\n    if (!_androidTvBuild || event is! KeyDownEvent) {\n      return KeyEventResult.ignored;\n    }\n    _showOverlay();\n    return KeyEventResult.ignored;\n  }\n",
