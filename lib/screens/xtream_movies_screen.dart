@@ -36,6 +36,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   String _progressLabel = 'Cargando información del servidor…';
   DateTime _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
   int _lastProgressBytes = 0;
+  bool _openingMovieDetails = false;
 
   static const double _sidebarMinWidth = 230;
   static const double _sidebarMaxWidth = 480;
@@ -184,37 +185,46 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     XtreamVodSummary movie, {
     required bool artworkAvailable,
   }) async {
-    if (_parental.isLocked &&
-        _parental.isProtectedItem(name: movie.name, group: movie.category)) {
-      final unlocked = await requestParentalUnlock(context);
-      if (!unlocked || !mounted) return;
-    }
+    // fetchDetails ocurre antes de abrir la ficha. Sin esta guarda, dos clics
+    // rápidos lanzaban dos solicitudes y luego apilaban dos fichas de película.
+    if (_openingMovieDetails) return;
+    _openingMovieDetails = true;
 
     try {
-      final details = await XtreamVodService.fetchDetails(
-        connection,
-        movie,
-        timeout: const Duration(seconds: 12),
-      );
-      if (!mounted) return;
-      // No abrimos una ficha vacía por una URL de imagen rota. La ficha se
-      // conserva sólo si la tarjeta cargó una carátula real o existe tráiler.
-      if (!artworkAvailable && details.trailerChannel() == null) {
-        await _playMovieDirect(connection, movie, details: details);
-        return;
+      if (_parental.isLocked &&
+          _parental.isProtectedItem(name: movie.name, group: movie.category)) {
+        final unlocked = await requestParentalUnlock(context);
+        if (!unlocked || !mounted) return;
       }
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => XtreamMovieDetailScreen(
-            connection: connection,
-            movie: movie,
-            initialDetails: details,
+
+      try {
+        final details = await XtreamVodService.fetchDetails(
+          connection,
+          movie,
+          timeout: const Duration(seconds: 12),
+        );
+        if (!mounted) return;
+        // No abrimos una ficha vacía por una URL de imagen rota. La ficha se
+        // conserva sólo si la tarjeta cargó una carátula real o existe tráiler.
+        if (!artworkAvailable && details.trailerChannel() == null) {
+          await _playMovieDirect(connection, movie, details: details);
+          return;
+        }
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => XtreamMovieDetailScreen(
+              connection: connection,
+              movie: movie,
+              initialDetails: details,
+            ),
           ),
-        ),
-      );
-    } catch (_) {
-      if (!mounted) return;
-      await _playMovieDirect(connection, movie);
+        );
+      } catch (_) {
+        if (!mounted) return;
+        await _playMovieDirect(connection, movie);
+      }
+    } finally {
+      _openingMovieDetails = false;
     }
   }
 
