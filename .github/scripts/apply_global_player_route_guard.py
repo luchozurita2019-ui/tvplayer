@@ -30,7 +30,7 @@ class PlayerRouteGuard {
 """, encoding='utf-8')
 
 pattern = re.compile(
-    r"await Navigator\.of\(context\)\.push\(\n"
+    r"(?P<await>await[ \t]+)?Navigator\.of\(context\)\.push\(\n"
     r"(?P<route_indent>[ \t]*)MaterialPageRoute\(\n"
     r"(?P<builder_indent>[ \t]*)builder: \(_\) => PlayerScreen\("
 )
@@ -54,10 +54,11 @@ for path in sorted(Path('lib/screens').glob('*.dart')):
 
     def repl(match):
         nonlocal_marker[0] += 1
+        await_prefix = match.group('await') or ''
         route_indent = match.group('route_indent')
         builder_indent = match.group('builder_indent')
         return (
-            'await PlayerRouteGuard.push(\n'
+            f'{await_prefix}PlayerRouteGuard.push(\n'
             f'{route_indent}context,\n'
             f'{route_indent}MaterialPageRoute(\n'
             f'{builder_indent}builder: (_) => PlayerScreen('
@@ -73,8 +74,8 @@ for path in sorted(Path('lib/screens').glob('*.dart')):
     patched.append(str(path))
     replacements += count
 
-if replacements < 3:
-    raise SystemExit(f'Sólo se protegieron {replacements} aperturas PlayerScreen; se esperaban al menos 3')
+if replacements < 4:
+    raise SystemExit(f'Sólo se protegieron {replacements} aperturas PlayerScreen; se esperaban al menos 4')
 
 print(f'PlayerScreen routes protegidas: {replacements}')
 for item in patched:
