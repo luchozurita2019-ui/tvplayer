@@ -1,0 +1,51 @@
+name: Apply movie detail single-route guard
+
+on:
+  push:
+    branches: [ v41-movie-detail-guard-patcher ]
+
+permissions:
+  contents: write
+
+jobs:
+  patch-working-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout patcher branch
+        uses: actions/checkout@v5
+        with:
+          ref: v41-movie-detail-guard-patcher
+
+      - name: Preserve patch script
+        run: cp .github/scripts/apply_movie_detail_guard.py /tmp/apply_movie_detail_guard.py
+
+      - name: Checkout working branch
+        run: |
+          git fetch origin performance-engine-v38-hotplayer-baseline
+          git checkout -B performance-engine-v38-hotplayer-baseline origin/performance-engine-v38-hotplayer-baseline
+
+      - name: Apply movie detail guard
+        run: python3 /tmp/apply_movie_detail_guard.py
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Validate patch
+        run: |
+          dart format lib/screens/xtream_movies_screen.dart
+          flutter pub get
+          flutter analyze --no-fatal-infos --no-fatal-warnings
+          grep -q "bool _openingMovieDetails = false;" lib/screens/xtream_movies_screen.dart
+          grep -q "if (_openingMovieDetails) return;" lib/screens/xtream_movies_screen.dart
+          grep -q "_openingMovieDetails = false;" lib/screens/xtream_movies_screen.dart
+
+      - name: Commit and push working branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/xtream_movies_screen.dart
+          git diff --cached --stat
+          git commit -m "Prevent duplicate movie detail routes"
+          git push origin HEAD:performance-engine-v38-hotplayer-baseline
