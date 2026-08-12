@@ -9,17 +9,6 @@ def replace_once(path: str, old: str, new: str) -> None:
     p.write_text(text.replace(old, new, 1))
 
 
-def replace_n(path: str, old: str, new: str, count: int) -> None:
-    p = Path(path)
-    text = p.read_text()
-    found = text.count(old)
-    if found < count:
-        raise SystemExit(
-            f"Expected at least {count} matches in {path}, found {found}: {old[:100]!r}"
-        )
-    p.write_text(text.replace(old, new, count))
-
-
 # Global Android TV remote OK/Enter -> ActivateIntent bridge.
 replace_once(
     'lib/main.dart',
@@ -72,11 +61,15 @@ replace_once(
 )
 
 # Channel grids: first channel becomes the D-pad target after the catalog loads.
-replace_n(
+replace_once(
     'lib/screens/channel_list_screen.dart',
     "              isFavorite: isFavorite(channel),\n              onFavoriteToggle: () => onFavoriteToggle(channel),\n",
     "              isFavorite: isFavorite(channel),\n              autofocus: _androidTvBuild && index == 0,\n              onFavoriteToggle: () => onFavoriteToggle(channel),\n",
-    2,
+)
+replace_once(
+    'lib/screens/channel_list_screen.dart',
+    "                          isFavorite: isFavorite(channel),\n                          onFavoriteToggle: () => onFavoriteToggle(channel),\n",
+    "                          isFavorite: isFavorite(channel),\n                          autofocus: _androidTvBuild && index == 0,\n                          onFavoriteToggle: () => onFavoriteToggle(channel),\n",
 )
 replace_once(
     'lib/screens/channel_list_screen.dart',
