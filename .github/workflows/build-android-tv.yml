@@ -97,18 +97,28 @@ jobs:
           text = manifest.read_text()
 
           marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          additions = '''<manifest xmlns:android="http://schemas.android.com/apk/res/android">
-    <uses-permission android:name="android.permission.INTERNET" />
-    <uses-feature android:name="android.software.leanback" android:required="true" />
-    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
-    <uses-feature android:name="android.hardware.faketouch" android:required="false" />'''
+          additions = (
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-feature android:name="android.software.leanback" android:required="true" />\n'
+              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+              '    <uses-feature android:name="android.hardware.faketouch" android:required="false" />'
+          )
           if 'android.software.leanback' not in text:
               text = text.replace(marker, additions, 1)
 
           if 'android:usesCleartextTraffic' not in text:
-              text = text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+              text = text.replace(
+                  '<application',
+                  '<application android:usesCleartextTraffic="true"',
+                  1,
+              )
 
-          text = text.replace('android:label="iptv_player"', 'android:label="TV FULL PRO TV"', 1)
+          text = text.replace(
+              'android:label="iptv_player"',
+              'android:label="TV FULL PRO TV"',
+              1,
+          )
           if 'android:banner=' not in text:
               text = text.replace(
                   'android:label="TV FULL PRO TV"',
