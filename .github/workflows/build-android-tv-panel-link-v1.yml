@@ -1,0 +1,184 @@
+name: Build Android TV Panel Link V1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-panel-link-v1
+    paths:
+      - '.github/workflows/build-android-tv-panel-link-v1.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-tv-panel-link:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Android TV panel-link branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-panel-link-v1
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Bring remote provisioning engine to Android TV
+        shell: bash
+        run: |
+          git fetch origin mac-remote-provisioning-v1:refs/remotes/origin/mac-remote-provisioning-v1
+          git show origin/mac-remote-provisioning-v1:lib/services/remote_provisioning_service.dart > lib/services/remote_provisioning_service.dart
+          git show origin/mac-remote-provisioning-v1:lib/providers/iptv_provider.dart > lib/providers/iptv_provider.dart
+          python3 <<'PY'
+          from pathlib import Path
+
+          service = Path('lib/services/remote_provisioning_service.dart')
+          text = service.read_text()
+          text = text.replace(
+              "  bool get isSupported =>\n      !kIsWeb && defaultTargetPlatform == TargetPlatform.macOS;",
+              "  bool get isSupported =>\n      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;",
+          )
+          text = text.replace(
+              "La vinculación remota todavía está habilitada solo en macOS.",
+              "La vinculación remota está disponible en esta compilación para Android TV.",
+          )
+          text = text.replace("'platform': 'macos'", "'platform': 'android_tv'")
+          text = text.replace("'device_name': 'TV FULL macOS'", "'device_name': 'TV FULL Android TV'")
+          text = text.replace(
+              "'app_version': '1.0.0+1-mac-remote-v3'",
+              "'app_version': '1.0.0+1-android-tv-panel-v1'",
+          )
+          service.write_text(text)
+
+          provider = Path('lib/providers/iptv_provider.dart')
+          p = provider.read_text()
+          p = p.replace(
+              '// Primera prueba de aprovisionamiento remoto: sólo macOS. Android y\n    // Android TV conservan exactamente su comportamiento actual.',
+              '// Android TV se registra automáticamente en el panel y sincroniza\n    // los servicios remotos asignados al dispositivo.',
+          )
+          provider.write_text(p)
+          PY
+
+      - name: Format remote source
+        run: dart format lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify remote integration markers
+        shell: bash
+        run: |
+          grep -q "TargetPlatform.android" lib/services/remote_provisioning_service.dart
+          grep -q "'platform': 'android_tv'" lib/services/remote_provisioning_service.dart
+          grep -q "RemoteProvisioningService" lib/providers/iptv_provider.dart
+          grep -q "syncRemoteServices" lib/providers/iptv_provider.dart
+          grep -q "RemoteDeviceCredentialsInvalidException" lib/providers/iptv_provider.dart
+
+      - name: Commit Android TV panel integration
+        shell: bash
+        run: |
+          if git diff --quiet -- lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart; then
+            echo "Remote provisioning source already up to date"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart
+            git commit -m "Link Android TV app to TV FULL panel"
+            git push origin HEAD:android-tv-panel-link-v1
+          fi
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Configure Android TV package
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          additions = (
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-feature android:name="android.software.leanback" android:required="true" />\n'
+              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+              '    <uses-feature android:name="android.hardware.faketouch" android:required="false" />'
+          )
+          if 'android.software.leanback' not in text:
+              text = text.replace(marker, additions, 1)
+          if 'android:usesCleartextTraffic' not in text:
+              text = text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          text = text.replace('android:label="iptv_player"', 'android:label="TV FULL PRO TV"', 1)
+          if 'android:banner=' not in text:
+              text = text.replace(
+                  'android:label="TV FULL PRO TV"',
+                  'android:label="TV FULL PRO TV"\n        android:banner="@mipmap/ic_launcher"',
+                  1,
+              )
+          if 'android:screenOrientation=' not in text:
+              text = text.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity"\n            android:screenOrientation="landscape"',
+                  1,
+              )
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in text:
+              text = text.replace(
+                  '<category android:name="android.intent.category.LAUNCHER"/>',
+                  '<category android:name="android.intent.category.LAUNCHER"/>\n'
+                  '                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>',
+                  1,
+              )
+          manifest.write_text(text)
+
+          gradle = Path('android/app/build.gradle.kts')
+          gradle_text = gradle.read_text().replace(
+              'applicationId = "com.example.iptv_player"',
+              'applicationId = "com.tvfull.pro.tv"',
+          )
+          gradle.write_text(gradle_text)
+          PY
+
+      - name: Build Android TV panel-linked APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "Android TV panel-linked build attempt $attempt/2"
+            if flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-Android-TV-Panel-Link-V1.apk
+          sha256sum artifact/TV-FULL-PRO-Android-TV-Panel-Link-V1.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload Android TV panel-linked APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-Android-TV-Panel-Link-V1
+          path: artifact/
+          retention-days: 30
