@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>TV FULL PRO · Panel</title>
+  <style>
+    :root{color-scheme:dark;--bg:#06101d;--panel:#0b1828;--panel2:#0f2034;--line:#1e3550;--blue:#1683ff;--blue2:#53abff;--gold:#e5bd55;--text:#f3f6fa;--muted:#91a1b5;--green:#50d39a;--red:#ff6e78;--shadow:0 18px 45px rgba(0,0,0,.28)}
+    *{box-sizing:border-box} body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:radial-gradient(circle at 20% 0,#0e2a48 0,transparent 38%),var(--bg);color:var(--text);min-height:100vh}
+    button,input,select,textarea{font:inherit}.hidden{display:none!important}.muted{color:var(--muted)}.gold{color:var(--gold)}.green{color:var(--green)}.red{color:var(--red)}
+    .auth-shell{min-height:100vh;display:grid;place-items:center;padding:28px}.auth-card{width:min(460px,100%);background:rgba(11,24,40,.94);border:1px solid var(--line);border-radius:26px;padding:32px;box-shadow:var(--shadow)}
+    .brand{display:flex;align-items:center;gap:13px;margin-bottom:26px}.brand-logo{width:56px;height:44px;border-radius:15px;background:linear-gradient(145deg,var(--blue),#0c59c5);border:2px solid var(--gold);display:grid;place-items:center;box-shadow:0 0 24px rgba(22,131,255,.24);font-size:23px}.brand-title{font-size:22px;font-weight:900;letter-spacing:.2px}.brand-title b{color:var(--gold);font-size:15px;letter-spacing:1px;margin-left:6px}.brand-sub{font-size:9px;letter-spacing:3px;color:var(--muted);font-weight:800;margin-top:2px}
+    label{display:block;font-size:12px;color:var(--muted);font-weight:700;margin:0 0 7px}.field{margin-bottom:14px}input,select,textarea{width:100%;background:#091522;border:1px solid var(--line);color:var(--text);border-radius:13px;padding:12px 13px;outline:none;transition:.15s}input:focus,select:focus,textarea:focus{border-color:var(--blue);box-shadow:0 0 0 3px rgba(22,131,255,.12)}textarea{min-height:90px;resize:vertical}
+    .btn{border:0;border-radius:12px;padding:11px 15px;font-weight:800;cursor:pointer;transition:.15s}.btn:hover{transform:translateY(-1px)}.btn:disabled{opacity:.45;cursor:not-allowed;transform:none}.btn-primary{background:var(--blue);color:white}.btn-secondary{background:#13253a;color:var(--text);border:1px solid var(--line)}.btn-danger{background:rgba(255,110,120,.12);color:#ff9aa1;border:1px solid rgba(255,110,120,.28)}.btn-small{padding:7px 10px;font-size:12px}.btn-row{display:flex;gap:10px;flex-wrap:wrap}.auth-card .btn{width:100%;margin-top:8px}.notice{background:#0e2135;border:1px solid var(--line);border-radius:13px;padding:12px 14px;font-size:12px;color:var(--muted);line-height:1.5;margin-top:16px}
+    .app{display:grid;grid-template-columns:238px 1fr;min-height:100vh}.sidebar{background:rgba(7,18,31,.96);border-right:1px solid var(--line);padding:22px 16px;position:sticky;top:0;height:100vh}.sidebar .brand{margin:4px 8px 27px}.nav{display:grid;gap:6px}.nav button{display:flex;align-items:center;gap:11px;width:100%;border:1px solid transparent;background:transparent;color:#c4ced9;padding:11px 12px;border-radius:12px;text-align:left;font-weight:700;cursor:pointer}.nav button:hover,.nav button.active{background:rgba(22,131,255,.11);color:white;border-color:rgba(22,131,255,.26)}.nav .icon{width:22px;text-align:center}.sidebar-note{position:absolute;left:16px;right:16px;bottom:18px;background:#0c1a2b;border:1px solid var(--line);border-radius:14px;padding:12px;font-size:11px;color:var(--muted)}
+    .main{min-width:0}.topbar{height:76px;display:flex;align-items:center;justify-content:space-between;padding:0 28px;border-bottom:1px solid var(--line);background:rgba(6,16,29,.82);backdrop-filter:blur(12px);position:sticky;top:0;z-index:3}.topbar h1{font-size:20px;margin:0}.user{display:flex;align-items:center;gap:12px;font-size:12px;color:var(--muted)}.content{padding:28px;max-width:1500px;margin:0 auto}.toolbar{display:flex;justify-content:space-between;gap:12px;align-items:center;margin-bottom:20px}.toolbar h2{margin:0;font-size:22px}.cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:14px}.metric{background:linear-gradient(145deg,#0c1b2d,#0b1726);border:1px solid var(--line);border-radius:18px;padding:18px;box-shadow:0 10px 28px rgba(0,0,0,.14)}.metric .value{font-size:28px;font-weight:900;margin-top:7px}.metric .label{font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:.8px;font-weight:800}
+    .section-card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:18px;margin-top:18px}.section-card h3{margin:0 0 14px}.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}.table-wrap{overflow:auto;border:1px solid var(--line);border-radius:16px;background:var(--panel)}table{width:100%;border-collapse:collapse;min-width:760px}th,td{padding:12px 14px;border-bottom:1px solid #152b42;text-align:left;font-size:12px;vertical-align:middle}th{color:#8fa3b9;text-transform:uppercase;letter-spacing:.6px;font-size:10px;background:#0b1929;position:sticky;top:0}tr:last-child td{border-bottom:0}.code{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#b8d9ff}.badge{display:inline-flex;align-items:center;border-radius:999px;padding:4px 8px;font-size:10px;font-weight:900;border:1px solid var(--line);background:#102035}.badge.on{color:#79e3b4;border-color:rgba(80,211,154,.32);background:rgba(80,211,154,.08)}.badge.off{color:#ff9ba2;border-color:rgba(255,110,120,.28);background:rgba(255,110,120,.08)}.actions{display:flex;gap:6px;flex-wrap:wrap}.empty{padding:30px;text-align:center;color:var(--muted)}
+    dialog{width:min(620px,calc(100% - 30px));border:1px solid var(--line);border-radius:20px;background:#0a1727;color:var(--text);padding:0;box-shadow:0 30px 90px rgba(0,0,0,.55)}dialog::backdrop{background:rgba(0,0,0,.68);backdrop-filter:blur(4px)}.modal-head{display:flex;justify-content:space-between;align-items:center;padding:18px 20px;border-bottom:1px solid var(--line)}.modal-head h3{margin:0}.modal-body{padding:20px}.modal-foot{display:flex;justify-content:flex-end;gap:9px;padding:16px 20px;border-top:1px solid var(--line)}.close-x{background:transparent;border:0;color:var(--muted);font-size:20px;cursor:pointer}.jsonbox{white-space:pre-wrap;background:#06111d;border:1px solid var(--line);border-radius:12px;padding:13px;font:11px/1.55 ui-monospace,SFMono-Regular,Menlo,monospace;max-height:330px;overflow:auto}.search{max-width:330px}
+    @media(max-width:980px){.app{grid-template-columns:78px 1fr}.sidebar{padding:18px 10px}.sidebar .brand-title,.sidebar .brand-sub,.nav .label,.sidebar-note{display:none}.sidebar .brand{justify-content:center;margin-left:0;margin-right:0}.nav button{justify-content:center}.cards{grid-template-columns:repeat(2,1fr)}}
+    @media(max-width:680px){.app{display:block}.sidebar{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line);padding:10px}.sidebar .brand,.sidebar-note{display:none}.nav{display:flex;overflow:auto}.nav button{min-width:54px}.topbar{padding:0 16px}.content{padding:18px 14px}.cards,.grid2{grid-template-columns:1fr 1fr}.user span{display:none}.toolbar{align-items:flex-start;flex-direction:column}.search{max-width:none}.table-wrap{border-radius:12px}}
+    @media(max-width:460px){.cards,.grid2{grid-template-columns:1fr}.topbar h1{font-size:17px}}
+  </style>
+</head>
+<body>
+  <section id="authView" class="auth-shell">
+    <div class="auth-card">
+      <div class="brand"><div class="brand-logo">▶</div><div><div class="brand-title">TV FULL <b>PRO</b></div><div class="brand-sub">REMOTE SERVICE</div></div></div>
+      <h2 style="margin:0 0 5px">Panel administrador</h2>
+      <p class="muted" style="margin:0 0 22px;font-size:13px">Administrá clientes, dispositivos y listas remotas.</p>
+      <div class="field"><label>Correo</label><input id="authEmail" type="email" autocomplete="email" placeholder="tu@correo.com"></div>
+      <div class="field"><label>Contraseña</label><input id="authPassword" type="password" autocomplete="current-password" placeholder="Mínimo 6 caracteres"></div>
+      <button id="loginBtn" class="btn btn-primary">Iniciar sesión</button>
+      <button id="signupBtn" class="btn btn-secondary">Crear cuenta inicial</button>
+      <div id="authMessage" class="notice">La opción <b>Crear cuenta inicial</b> se usa una sola vez. La primera cuenta confirmada se convierte en propietaria del panel.</div>
+    </div>
+  </section>
+
+  <section id="appView" class="app hidden">
+    <aside class="sidebar">
+      <div class="brand"><div class="brand-logo" style="width:46px;height:36px;border-radius:12px;font-size:18px">▶</div><div><div class="brand-title" style="font-size:17px">TV FULL <b style="font-size:12px">PRO</b></div><div class="brand-sub">PANEL</div></div></div>
+      <nav class="nav">
+        <button data-route="dashboard" class="active"><span class="icon">◫</span><span class="label">Dashboard</span></button>
+        <button data-route="customers"><span class="icon">👤</span><span class="label">Clientes</span></button>
+        <button data-route="devices"><span class="icon">▣</span><span class="label">Dispositivos</span></button>
+        <button data-route="services"><span class="icon">☁</span><span class="label">Servicios</span></button>
+        <button data-route="assignments"><span class="icon">↔</span><span class="label">Asignaciones</span></button>
+      </nav>
+      <div class="sidebar-note">Las credenciales sensibles quedan protegidas por RLS y nunca usan la clave de servicio en el navegador.</div>
+    </aside>
+    <main class="main">
+      <header class="topbar"><h1 id="pageTitle">Dashboard</h1><div class="user"><span id="userEmail"></span><button id="logoutBtn" class="btn btn-secondary btn-small">Salir</button></div></header>
+      <div id="content" class="content"></div>
+    </main>
+  </section>
+
+  <dialog id="modal"><div class="modal-head"><h3 id="modalTitle"></h3><button class="close-x" data-close>×</button></div><div id="modalBody" class="modal-body"></div></dialog>
+  <dialog id="resultModal"><div class="modal-head"><h3 id="resultTitle">Resultado</h3><button class="close-x" data-result-close>×</button></div><div class="modal-body"><div id="resultBody" class="jsonbox"></div></div><div class="modal-foot"><button class="btn btn-primary" data-result-close>Cerrar</button></div></dialog>
+
+  <script type="module">
+    import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
+
+    const SUPABASE_URL = 'https://ghsoudpjlnjmhiragkrm.supabase.co';
+    const SUPABASE_KEY = 'sb_publishable_-a8aS3V8-wtJhI0zMUvPqQ_it8QNLWF';
+    const supabase = createClient(SUPABASE_URL, SUPABASE_KEY, { auth: { persistSession: true, autoRefreshToken: true, detectSessionInUrl: true } });
+
+    const state = { session:null, admin:null, route:'dashboard', customers:[], devices:[], services:[], assignments:[], loading:false };
+    const $ = (s, root=document) => root.querySelector(s);
+    const esc = (v='') => String(v ?? '').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
+    const dt = v => v ? new Intl.DateTimeFormat('es-AR',{dateStyle:'short',timeStyle:'short'}).format(new Date(v)) : '—';
+    const dateOnly = v => v ? new Intl.DateTimeFormat('es-AR',{dateStyle:'medium'}).format(new Date(v)) : 'Sin vencimiento';
+    const customerName = id => state.customers.find(x=>x.id===id)?.name || 'Sin cliente';
+    const platformLabel = p => ({android_tv:'Android TV',android:'Android',macos:'macOS'}[p] || p || 'Desconocido');
+    const statusBadge = active => `<span class="badge ${active?'on':'off'}">${active?'ACTIVO':'INACTIVO'}</span>`;
+    const toast = msg => { const el=$('#authMessage'); if(!$('#authView').classList.contains('hidden')){el.textContent=msg;return;} alert(msg); };
+
+    async function boot(){
+      const { data:{ session } } = await supabase.auth.getSession();
+      if(session) await enterSession(session); else showAuth();
+      supabase.auth.onAuthStateChange(async (event, session)=>{ if(event==='SIGNED_OUT') showAuth(); else if(session && event==='SIGNED_IN') await enterSession(session); });
+    }
+
+    function showAuth(){ state.session=null; state.admin=null; $('#appView').classList.add('hidden'); $('#authView').classList.remove('hidden'); }
+
+    async function enterSession(session){
+      state.session=session;
+      $('#authView').classList.add('hidden');
+      $('#appView').classList.remove('hidden');
+      $('#userEmail').textContent=session.user.email || '';
+      let { data:admin, error } = await supabase.from('tvf_admins').select('user_id,role,active').eq('user_id',session.user.id).maybeSingle();
+      if(error) console.warn(error);
+      if(!admin){
+        const { data, error:bootstrapError } = await supabase.functions.invoke('tvf-admin-bootstrap',{ body:{} });
+        if(bootstrapError || data?.error){
+          $('#content').innerHTML=`<div class="section-card"><h3>Acceso no autorizado</h3><p class="muted">Esta cuenta no está autorizada para administrar TV FULL.</p><button id="forceLogout" class="btn btn-secondary">Cerrar sesión</button></div>`;
+          $('#forceLogout').onclick=()=>supabase.auth.signOut(); return;
+        }
+        ({ data:admin } = await supabase.from('tvf_admins').select('user_id,role,active').eq('user_id',session.user.id).maybeSingle());
+      }
+      if(!admin?.active){ toast('La cuenta administradora está desactivada.'); await supabase.auth.signOut(); return; }
+      state.admin=admin;
+      await loadAll();
+      render();
+    }
+
+    async function signIn(){
+      const email=$('#authEmail').value.trim(), password=$('#authPassword').value;
+      if(!email||!password) return toast('Ingresá correo y contraseña.');
+      $('#loginBtn').disabled=true;
+      const { error }=await supabase.auth.signInWithPassword({email,password});
+      $('#loginBtn').disabled=false;
+      if(error) toast(error.message); else toast('Sesión iniciada.');
+    }
+
+    async function signUp(){
+      const email=$('#authEmail').value.trim(), password=$('#authPassword').value;
+      if(!email||password.length<6) return toast('Ingresá un correo y una contraseña de al menos 6 caracteres.');
+      $('#signupBtn').disabled=true;
+      const { data,error }=await supabase.auth.signUp({email,password});
+      $('#signupBtn').disabled=false;
+      if(error) return toast(error.message);
+      if(data.session) toast('Cuenta creada. Ingresando…'); else toast('Cuenta creada. Revisá tu correo y confirmá la dirección; después volvé e iniciá sesión.');
+    }
+
+    async function loadAll(){
+      state.loading=true;
+      const [c,d,s,a]=await Promise.all([
+        supabase.from('tvf_customers').select('id,name,phone,notes,active,created_at').order('created_at',{ascending:false}),
+        supabase.from('tvf_devices').select('id,device_code,device_name,platform,app_version,active,last_seen_at,customer_id,created_at').order('created_at',{ascending:false}),
+        supabase.from('tvf_services').select('id,name,service_type,server_url,username,password,m3u_url,active,expires_at,customer_id,created_at').order('created_at',{ascending:false}),
+        supabase.from('tvf_device_services').select('id,device_id,service_id,enabled,display_order,assigned_at,tvf_devices(device_code,device_name,platform),tvf_services(name,service_type)').order('assigned_at',{ascending:false})
+      ]);
+      for(const r of [c,d,s,a]) if(r.error) throw r.error;
+      state.customers=c.data||[]; state.devices=d.data||[]; state.services=s.data||[]; state.assignments=a.data||[]; state.loading=false;
+    }
+
+    function render(){
+      document.querySelectorAll('[data-route]').forEach(b=>b.classList.toggle('active',b.dataset.route===state.route));
+      const titles={dashboard:'Dashboard',customers:'Clientes',devices:'Dispositivos',services:'Servicios',assignments:'Asignaciones'}; $('#pageTitle').textContent=titles[state.route];
+      ({dashboard:renderDashboard,customers:renderCustomers,devices:renderDevices,services:renderServices,assignments:renderAssignments}[state.route]||renderDashboard)();
+    }
+
+    function renderDashboard(){
+      const activeDevices=state.devices.filter(x=>x.active).length, activeServices=state.services.filter(x=>x.active).length;
+      $('#content').innerHTML=`
+        <div class="cards">
+          <div class="metric"><div class="label">Clientes</div><div class="value">${state.customers.length}</div></div>
+          <div class="metric"><div class="label">Dispositivos activos</div><div class="value">${activeDevices}</div></div>
+          <div class="metric"><div class="label">Servicios activos</div><div class="value">${activeServices}</div></div>
+          <div class="metric"><div class="label">Asignaciones</div><div class="value">${state.assignments.filter(x=>x.enabled).length}</div></div>
+        </div>
+        <div class="grid2">
+          <section class="section-card"><h3>Prueba del sistema</h3><p class="muted">Creá un dispositivo de prueba, asignale una lista y consultá exactamente lo que recibirá TV FULL.</p><div class="btn-row"><button class="btn btn-primary" data-action="test-device">Crear dispositivo de prueba</button><button class="btn btn-secondary" data-action="test-sync">Probar sincronización</button></div></section>
+          <section class="section-card"><h3>Estado del backend</h3><p><span class="badge on">ONLINE</span></p><p class="muted">Registro de dispositivo + configuración remota + RLS de administrador activos.</p><div class="code">${SUPABASE_URL}</div></section>
+        </div>
+        <section class="section-card"><h3>Últimos dispositivos</h3>${deviceMiniTable(state.devices.slice(0,5))}</section>`;
+    }
+
+    function deviceMiniTable(rows){ if(!rows.length)return '<div class="empty">Todavía no hay dispositivos.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Código</th><th>Nombre</th><th>Plataforma</th><th>Cliente</th><th>Estado</th></tr></thead><tbody>${rows.map(d=>`<tr><td class="code">${esc(d.device_code)}</td><td>${esc(d.device_name||'Sin nombre')}</td><td>${esc(platformLabel(d.platform))}</td><td>${esc(customerName(d.customer_id))}</td><td>${statusBadge(d.active)}</td></tr>`).join('')}</tbody></table></div>`; }
+
+    function renderCustomers(){
+      $('#content').innerHTML=`<div class="toolbar"><div><h2>Clientes</h2><div class="muted">Agrupá TV, Android y Mac bajo un mismo cliente.</div></div><button class="btn btn-primary" data-action="new-customer">+ Nuevo cliente</button></div>
+      ${state.customers.length?`<div class="table-wrap"><table><thead><tr><th>Cliente</th><th>Teléfono</th><th>Dispositivos</th><th>Servicios</th><th>Estado</th></tr></thead><tbody>${state.customers.map(c=>`<tr><td><b>${esc(c.name)}</b></td><td>${esc(c.phone||'—')}</td><td>${state.devices.filter(d=>d.customer_id===c.id).length}</td><td>${state.services.filter(s=>s.customer_id===c.id).length}</td><td>${statusBadge(c.active)}</td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay clientes todavía.</div>'}`;
+    }
+
+    function renderDevices(){
+      $('#content').innerHTML=`<div class="toolbar"><div><h2>Dispositivos</h2><div class="muted">Se registran desde TV FULL y aparecen acá por código.</div></div><input id="deviceSearch" class="search" placeholder="Buscar código o nombre…"></div><div id="deviceTable">${devicesTable(state.devices)}</div>`;
+      $('#deviceSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();$('#deviceTable').innerHTML=devicesTable(state.devices.filter(d=>(d.device_code+' '+(d.device_name||'')+' '+platformLabel(d.platform)).toLowerCase().includes(q)))});
+    }
+
+    function devicesTable(rows){ if(!rows.length)return '<div class="empty">No se encontraron dispositivos.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Código</th><th>Nombre</th><th>Plataforma</th><th>Cliente</th><th>Última conexión</th><th>Estado</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr><td class="code">${esc(d.device_code)}</td><td>${esc(d.device_name||'Sin nombre')}</td><td>${esc(platformLabel(d.platform))}</td><td>${esc(customerName(d.customer_id))}</td><td>${dt(d.last_seen_at)}</td><td>${statusBadge(d.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="edit-device" data-id="${d.id}">Editar</button></div></td></tr>`).join('')}</tbody></table></div>`; }
+
+    function renderServices(){
+      $('#content').innerHTML=`<div class="toolbar"><div><h2>Servicios</h2><div class="muted">Listas M3U y accesos Xtream administrados remotamente.</div></div><button class="btn btn-primary" data-action="new-service">+ Nuevo servicio</button></div>
+      ${state.services.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Tipo</th><th>Cliente</th><th>Servidor / URL</th><th>Credencial</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>${state.services.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td><span class="badge">${esc(s.service_type.toUpperCase())}</span></td><td>${esc(customerName(s.customer_id))}</td><td class="code">${esc(s.service_type==='m3u'?(s.m3u_url||''):(s.server_url||''))}</td><td>${s.service_type==='xtream'?`${esc(s.username||'')} · ••••••`:'—'}</td><td>${esc(dateOnly(s.expires_at))}</td><td>${statusBadge(s.active)}</td><td><button class="btn btn-secondary btn-small" data-action="toggle-service" data-id="${s.id}">${s.active?'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios todavía.</div>'}`;
+    }
+
+    function renderAssignments(){
+      $('#content').innerHTML=`<div class="toolbar"><div><h2>Asignaciones</h2><div class="muted">Decidí qué servicio recibe cada dispositivo.</div></div><button class="btn btn-primary" data-action="new-assignment">+ Asignar servicio</button></div>
+      ${state.assignments.length?`<div class="table-wrap"><table><thead><tr><th>Dispositivo</th><th>Plataforma</th><th>Servicio</th><th>Tipo</th><th>Orden</th><th>Estado</th><th></th></tr></thead><tbody>${state.assignments.map(a=>`<tr><td><b>${esc(a.tvf_devices?.device_name||a.tvf_devices?.device_code||'—')}</b><div class="code">${esc(a.tvf_devices?.device_code||'')}</div></td><td>${esc(platformLabel(a.tvf_devices?.platform))}</td><td>${esc(a.tvf_services?.name||'—')}</td><td>${esc((a.tvf_services?.service_type||'').toUpperCase())}</td><td>${a.display_order}</td><td>${statusBadge(a.enabled)}</td><td><button class="btn btn-danger btn-small" data-action="delete-assignment" data-id="${a.id}">Quitar</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios asignados.</div>'}`;
+    }
+
+    function customerOptions(selected=''){ return `<option value="">Sin cliente</option>${state.customers.filter(c=>c.active).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${esc(c.name)}</option>`).join('')}`; }
+    function deviceOptions(){ return state.devices.filter(d=>d.active).map(d=>`<option value="${d.id}">${esc(d.device_name||d.device_code)} · ${esc(platformLabel(d.platform))}</option>`).join(''); }
+    function serviceOptions(){ return state.services.filter(s=>s.active).map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.service_type.toUpperCase())}</option>`).join(''); }
+
+    function openModal(title, body){ $('#modalTitle').textContent=title; $('#modalBody').innerHTML=body; $('#modal').showModal(); }
+    function closeModal(){ $('#modal').close(); }
+    function showResult(title,obj){ $('#resultTitle').textContent=title; $('#resultBody').textContent=typeof obj==='string'?obj:JSON.stringify(obj,null,2); $('#resultModal').showModal(); }
+
+    function newCustomerModal(){ openModal('Nuevo cliente',`<form id="customerForm"><div class="field"><label>Nombre</label><input name="name" required autofocus></div><div class="field"><label>Teléfono</label><input name="phone" placeholder="Opcional"></div><div class="field"><label>Notas</label><textarea name="notes" placeholder="Opcional"></textarea></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Guardar cliente</button></div></form>`); $('#customerForm').onsubmit=createCustomer; }
+    async function createCustomer(e){ e.preventDefault(); const f=new FormData(e.currentTarget); const {error}=await supabase.from('tvf_customers').insert({name:String(f.get('name')).trim(),phone:String(f.get('phone')||'').trim()||null,notes:String(f.get('notes')||'').trim()||null}); if(error)return alert(error.message); closeModal(); await refresh(); }
+
+    function editDeviceModal(id){ const d=state.devices.find(x=>x.id===id); if(!d)return; openModal('Editar dispositivo',`<form id="deviceForm"><div class="field"><label>Código</label><input value="${esc(d.device_code)}" disabled></div><div class="field"><label>Nombre visible</label><input name="device_name" value="${esc(d.device_name||'')}"></div><div class="field"><label>Cliente</label><select name="customer_id">${customerOptions(d.customer_id||'')}</select></div><div class="field"><label>Estado</label><select name="active"><option value="true" ${d.active?'selected':''}>Activo</option><option value="false" ${!d.active?'selected':''}>Inactivo</option></select></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Guardar</button></div></form>`); $('#deviceForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {error}=await supabase.from('tvf_devices').update({device_name:String(f.get('device_name')||'').trim()||null,customer_id:String(f.get('customer_id')||'')||null,active:f.get('active')==='true'}).eq('id',id);if(error)return alert(error.message);closeModal();await refresh();}; }
+
+    function newServiceModal(){ openModal('Nuevo servicio remoto',`<form id="serviceForm"><div class="grid2"><div class="field"><label>Nombre</label><input name="name" required autofocus placeholder="Ej: FULL TV Juan"></div><div class="field"><label>Cliente</label><select name="customer_id">${customerOptions()}</select></div></div><div class="grid2"><div class="field"><label>Tipo</label><select id="serviceType" name="service_type"><option value="m3u">M3U</option><option value="xtream">Xtream</option></select></div><div class="field"><label>Vencimiento</label><input name="expires_at" type="date"></div></div><div id="m3uFields"><div class="field"><label>URL M3U</label><input name="m3u_url" placeholder="http://servidor/lista.m3u"></div></div><div id="xtreamFields" class="hidden"><div class="field"><label>Servidor / Host</label><input name="server_url" placeholder="http://servidor:puerto"></div><div class="grid2"><div class="field"><label>Usuario</label><input name="username"></div><div class="field"><label>Contraseña</label><input name="password" type="password"></div></div></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Guardar servicio</button></div></form>`); const t=$('#serviceType'); t.onchange=()=>{$('#m3uFields').classList.toggle('hidden',t.value!=='m3u');$('#xtreamFields').classList.toggle('hidden',t.value!=='xtream');}; $('#serviceForm').onsubmit=createService; }
+    async function createService(e){ e.preventDefault();const f=new FormData(e.currentTarget),type=String(f.get('service_type'));const expires=String(f.get('expires_at')||'');const row={name:String(f.get('name')).trim(),customer_id:String(f.get('customer_id')||'')||null,service_type:type,expires_at:expires?new Date(expires+'T23:59:59').toISOString():null,active:true,server_url:null,username:null,password:null,m3u_url:null};if(type==='m3u'){row.m3u_url=String(f.get('m3u_url')||'').trim();if(!row.m3u_url)return alert('Ingresá la URL M3U.');}else{row.server_url=String(f.get('server_url')||'').trim();row.username=String(f.get('username')||'').trim();row.password=String(f.get('password')||'');if(!row.server_url||!row.username||!row.password)return alert('Completá servidor, usuario y contraseña.');}const {error}=await supabase.from('tvf_services').insert(row);if(error)return alert(error.message);closeModal();await refresh();}
+
+    function assignmentModal(){ if(!state.devices.length||!state.services.length)return alert('Necesitás al menos un dispositivo y un servicio.'); openModal('Asignar servicio',`<form id="assignmentForm"><div class="field"><label>Dispositivo</label><select name="device_id" required>${deviceOptions()}</select></div><div class="field"><label>Servicio</label><select name="service_id" required>${serviceOptions()}</select></div><div class="field"><label>Orden</label><input name="display_order" type="number" value="0" min="0"></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Asignar</button></div></form>`); $('#assignmentForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {error}=await supabase.from('tvf_device_services').insert({device_id:String(f.get('device_id')),service_id:String(f.get('service_id')),display_order:Number(f.get('display_order')||0),enabled:true});if(error)return alert(error.message);closeModal();await refresh();}; }
+
+    async function toggleService(id){const s=state.services.find(x=>x.id===id);if(!s)return;const {error}=await supabase.from('tvf_services').update({active:!s.active}).eq('id',id);if(error)return alert(error.message);await refresh();}
+    async function deleteAssignment(id){if(!confirm('¿Quitar este servicio del dispositivo?'))return;const {error}=await supabase.from('tvf_device_services').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
+
+    async function createTestDevice(){
+      const {data,error}=await supabase.functions.invoke('tvf-device-register',{body:{platform:'android_tv',device_name:'Dispositivo de prueba',app_version:'panel-v1'}});
+      if(error||data?.error)return alert(error?.message||data?.error||'No se pudo registrar');
+      sessionStorage.setItem('tvf_test_code',data.device_code); sessionStorage.setItem('tvf_test_secret',data.device_secret);
+      await refresh(); showResult('Dispositivo de prueba creado',{device_code:data.device_code,device_secret:data.device_secret,nota:'Guardá este secreto solo para la prueba. El dispositivo real lo guardará internamente.'});
+    }
+
+    function testSyncModal(){ const code=sessionStorage.getItem('tvf_test_code')||'',secret=sessionStorage.getItem('tvf_test_secret')||''; openModal('Probar sincronización remota',`<form id="syncForm"><div class="field"><label>Código del dispositivo</label><input name="code" value="${esc(code)}" placeholder="TVF-XXXXXX-XXXXXX" required></div><div class="field"><label>Secreto del dispositivo</label><input name="secret" type="password" value="${esc(secret)}" required></div><div class="notice">La respuesta será exactamente la configuración que después consumirá TV FULL en Android, Android TV o macOS.</div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Consultar servidor</button></div></form>`); $('#syncForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {data,error}=await supabase.functions.invoke('tvf-device-config',{body:{device_code:String(f.get('code')).trim(),device_secret:String(f.get('secret'))}});if(error)return alert(error.message);closeModal();await refresh();showResult('Configuración recibida por TV FULL',data);}; }
+
+    async function refresh(){ await loadAll(); render(); }
+
+    document.addEventListener('click',async e=>{
+      const btn=e.target.closest('button'); if(!btn)return;
+      if(btn.dataset.route){state.route=btn.dataset.route;render();return;}
+      if(btn.hasAttribute('data-close')){closeModal();return;}
+      if(btn.hasAttribute('data-result-close')){$('#resultModal').close();return;}
+      const action=btn.dataset.action,id=btn.dataset.id;
+      if(action==='new-customer')newCustomerModal();
+      if(action==='edit-device')editDeviceModal(id);
+      if(action==='new-service')newServiceModal();
+      if(action==='toggle-service')await toggleService(id);
+      if(action==='new-assignment')assignmentModal();
+      if(action==='delete-assignment')await deleteAssignment(id);
+      if(action==='test-device')await createTestDevice();
+      if(action==='test-sync')testSyncModal();
+    });
+
+    $('#loginBtn').onclick=signIn; $('#signupBtn').onclick=signUp; $('#logoutBtn').onclick=()=>supabase.auth.signOut();
+    $('#authPassword').addEventListener('keydown',e=>{if(e.key==='Enter')signIn();});
+    boot().catch(err=>{console.error(err);toast('Error al iniciar el panel: '+err.message);});
+  </script>
+</body>
+</html>
