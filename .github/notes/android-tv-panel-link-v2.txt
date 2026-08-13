@@ -1,0 +1,1 @@
+Android TV V2 playback smoothness build prepared from Panel Link V1. Source playback changes are applied only in android-tv-panel-link-v2-playback-fix by GitHub Actions.
