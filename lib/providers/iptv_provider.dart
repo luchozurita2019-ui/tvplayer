@@ -8,6 +8,7 @@ import '../services/content_classifier.dart';
 import '../services/m3u_fetcher.dart';
 import '../services/m3u_parser.dart';
 import '../services/playback_settings_service.dart';
+import '../services/remote_provisioning_service.dart';
 import '../services/storage_service.dart';
 import '../services/xtream_service.dart';
 
@@ -15,6 +16,10 @@ class IptvProvider extends ChangeNotifier {
   final StorageService _storage = StorageService();
   final PlaybackSettingsService _playbackSettingsService =
       PlaybackSettingsService();
+  final RemoteProvisioningService _remoteProvisioning =
+      RemoteProvisioningService();
+
+  static const _remotePlaylistPrefix = 'tvf_remote_';
 
   List<Playlist> _playlists = [];
   List<Channel> _favorites = [];
@@ -22,6 +27,10 @@ class IptvProvider extends ChangeNotifier {
   String _searchQuery = '';
   bool _loading = false;
   String? _error;
+  String? _remoteDeviceCode;
+  bool _remoteSyncing = false;
+  String? _remoteSyncError;
+  DateTime? _remoteLastSyncedAt;
 
   List<Playlist> get playlists => _playlists;
   List<Channel> get favorites => _favorites;
@@ -29,6 +38,11 @@ class IptvProvider extends ChangeNotifier {
   String get searchQuery => _searchQuery;
   bool get loading => _loading;
   String? get error => _error;
+  bool get remoteProvisioningSupported => _remoteProvisioning.isSupported;
+  String? get remoteDeviceCode => _remoteDeviceCode;
+  bool get remoteSyncing => _remoteSyncing;
+  String? get remoteSyncError => _remoteSyncError;
+  DateTime? get remoteLastSyncedAt => _remoteLastSyncedAt;
 
   Future<void> init() async {
     final results = await Future.wait([
@@ -40,6 +54,12 @@ class IptvProvider extends ChangeNotifier {
     _favorites = results[1] as List<Channel>;
     _playbackSettings = results[2] as PlaybackSettings;
     notifyListeners();
+
+    // Android TV se registra automáticamente en el panel y sincroniza
+    // los servicios remotos asignados al dispositivo.
+    if (_remoteProvisioning.isSupported) {
+      await syncRemoteServices();
+    }
   }
 
   Playlist? playlistById(String playlistId) {
@@ -185,6 +205,169 @@ class IptvProvider extends ChangeNotifier {
       unique.putIfAbsent(channel.uniqueKey, () => channel);
     }
     return unique.values.toList(growable: false);
+  }
+
+  Future<void> syncRemoteServices() async {
+    if (!_remoteProvisioning.isSupported || _remoteSyncing) return;
+
+    _remoteSyncing = true;
+    _remoteSyncError = null;
+    notifyListeners();
+
+    try {
+      var credentials = await _remoteProvisioning.ensureRegistered();
+      _remoteDeviceCode = credentials.code;
+      notifyListeners();
+
+      RemoteProvisioningConfiguration configuration;
+      try {
+        configuration = await _remoteProvisioning.fetchConfiguration(
+          credentials,
+        );
+      } on RemoteDeviceCredentialsInvalidException {
+        // Si el administrador borró este dispositivo del panel, olvidamos
+        // únicamente la identidad remota local y pedimos un código nuevo.
+        // Un dispositivo marcado como INACTIVO devuelve 403 y NO entra acá,
+        // por lo que sigue bloqueado hasta que el administrador lo reactive.
+        await _remoteProvisioning.clearCredentials();
+        credentials = await _remoteProvisioning.ensureRegistered();
+        _remoteDeviceCode = credentials.code;
+        notifyListeners();
+        configuration = await _remoteProvisioning.fetchConfiguration(
+          credentials,
+        );
+      }
+      _remoteDeviceCode = configuration.deviceCode;
+
+      final fingerprints = await _remoteProvisioning.loadFingerprints();
+      final activeServiceIds = configuration.services.map((s) => s.id).toSet();
+      final nextPlaylists = List<Playlist>.from(_playlists);
+      var storageChanged = false;
+
+      nextPlaylists.removeWhere((playlist) {
+        if (!playlist.id.startsWith(_remotePlaylistPrefix)) return false;
+        final serviceId = playlist.id.substring(_remotePlaylistPrefix.length);
+        if (activeServiceIds.contains(serviceId)) return false;
+        fingerprints.remove(serviceId);
+        storageChanged = true;
+        return true;
+      });
+
+      for (final service in configuration.services) {
+        final localId = '$_remotePlaylistPrefix${service.id}';
+        final index = nextPlaylists.indexWhere((p) => p.id == localId);
+        final fingerprint = service.fingerprint;
+
+        if (index != -1 && fingerprints[service.id] == fingerprint) {
+          final current = nextPlaylists[index];
+          if (current.name != service.name) {
+            nextPlaylists[index] = current.copyWith(name: service.name);
+            storageChanged = true;
+          }
+          continue;
+        }
+
+        try {
+          final playlist = await _buildRemotePlaylist(service, localId);
+          if (index == -1) {
+            nextPlaylists.add(playlist);
+          } else {
+            nextPlaylists[index] = playlist;
+          }
+          fingerprints[service.id] = fingerprint;
+          storageChanged = true;
+        } catch (error) {
+          _remoteSyncError ??=
+              'No se pudo actualizar ${service.name}: ${_friendlyConnectionError(error)}';
+        }
+      }
+
+      fingerprints.removeWhere((id, _) => !activeServiceIds.contains(id));
+      if (storageChanged) {
+        _playlists = nextPlaylists;
+        await _storage.savePlaylists(_playlists);
+      }
+      await _remoteProvisioning.saveFingerprints(fingerprints);
+      _remoteLastSyncedAt = configuration.syncedAt ?? DateTime.now();
+    } catch (error) {
+      _remoteSyncError = _friendlyConnectionError(error);
+    } finally {
+      _remoteSyncing = false;
+      notifyListeners();
+    }
+  }
+
+  Future<Playlist> _buildRemotePlaylist(
+    RemoteProvisionedService service,
+    String localId,
+  ) async {
+    if (service.type == 'm3u') {
+      final url = service.url?.trim() ?? '';
+      if (url.isEmpty) {
+        throw Exception('El servicio remoto M3U no tiene URL.');
+      }
+
+      final xtream = await XtreamService.tryConnectFromPlaylistUrl(url);
+      final List<Channel> channels;
+      final PlaylistSourceType detectedType;
+      if (xtream != null) {
+        channels = await _loadXtreamChannels(xtream);
+        detectedType = PlaylistSourceType.xtream;
+      } else {
+        final content = await M3uFetcher.fetch(url);
+        channels = await compute(parseM3uInBackground, content);
+        detectedType = PlaylistSourceType.m3u;
+      }
+
+      if (channels.isEmpty) {
+        throw Exception(
+          'El servicio remoto no devolvió contenido reproducible.',
+        );
+      }
+
+      return Playlist(
+        id: localId,
+        name: service.name.trim().isEmpty ? 'TV FULL' : service.name.trim(),
+        source: url,
+        isRemote: true,
+        channels: channels,
+        lastUpdated: DateTime.now(),
+        sourceType: detectedType,
+      );
+    }
+
+    if (service.type == 'xtream') {
+      final server = service.server?.trim() ?? '';
+      final username = service.username?.trim() ?? '';
+      final password = service.password ?? '';
+      if (server.isEmpty || username.isEmpty || password.isEmpty) {
+        throw Exception('El servicio remoto Xtream está incompleto.');
+      }
+
+      final connection = await XtreamService.connect(
+        serverUrl: server,
+        username: username,
+        password: password,
+      );
+      final channels = await _loadXtreamChannels(connection);
+      if (channels.isEmpty) {
+        throw Exception(
+          'El servicio remoto no devolvió contenido reproducible.',
+        );
+      }
+
+      return Playlist(
+        id: localId,
+        name: service.name.trim().isEmpty ? 'TV FULL' : service.name.trim(),
+        source: connection.playlistUrl,
+        isRemote: true,
+        channels: channels,
+        lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.xtream,
+      );
+    }
+
+    throw Exception('Tipo de servicio remoto no compatible.');
   }
 
   Future<void> renamePlaylist(String playlistId, String name) async {
