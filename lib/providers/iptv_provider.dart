@@ -215,13 +215,28 @@ class IptvProvider extends ChangeNotifier {
     notifyListeners();
 
     try {
-      final credentials = await _remoteProvisioning.ensureRegistered();
+      var credentials = await _remoteProvisioning.ensureRegistered();
       _remoteDeviceCode = credentials.code;
       notifyListeners();
 
-      final configuration = await _remoteProvisioning.fetchConfiguration(
-        credentials,
-      );
+      RemoteProvisioningConfiguration configuration;
+      try {
+        configuration = await _remoteProvisioning.fetchConfiguration(
+          credentials,
+        );
+      } on RemoteDeviceCredentialsInvalidException {
+        // Si el administrador borró este dispositivo del panel, olvidamos
+        // únicamente la identidad remota local y pedimos un código nuevo.
+        // Un dispositivo marcado como INACTIVO devuelve 403 y NO entra acá,
+        // por lo que sigue bloqueado hasta que el administrador lo reactive.
+        await _remoteProvisioning.clearCredentials();
+        credentials = await _remoteProvisioning.ensureRegistered();
+        _remoteDeviceCode = credentials.code;
+        notifyListeners();
+        configuration = await _remoteProvisioning.fetchConfiguration(
+          credentials,
+        );
+      }
       _remoteDeviceCode = configuration.deviceCode;
 
       final fingerprints = await _remoteProvisioning.loadFingerprints();

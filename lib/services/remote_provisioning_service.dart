@@ -12,6 +12,13 @@ class RemoteDeviceCredentials {
   const RemoteDeviceCredentials({required this.code, required this.secret});
 }
 
+class RemoteDeviceCredentialsInvalidException implements Exception {
+  const RemoteDeviceCredentialsInvalidException();
+
+  @override
+  String toString() => 'La vinculación de este dispositivo ya no es válida.';
+}
+
 class RemoteProvisionedService {
   final String id;
   final String name;
@@ -95,6 +102,13 @@ class RemoteProvisioningService {
     return RemoteDeviceCredentials(code: code, secret: secret);
   }
 
+  Future<void> clearCredentials() async {
+    if (!isSupported) return;
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.remove(_deviceCodeKey);
+    await prefs.remove(_deviceSecretKey);
+  }
+
   Future<RemoteDeviceCredentials> ensureRegistered() async {
     final existing = await loadCredentials();
     if (existing != null) return existing;
@@ -114,7 +128,7 @@ class RemoteProvisioningService {
           body: jsonEncode(const {
             'platform': 'macos',
             'device_name': 'TV FULL macOS',
-            'app_version': '1.0.0+1-mac-remote-v1',
+            'app_version': '1.0.0+1-mac-remote-v3',
           }),
         )
         .timeout(const Duration(seconds: 15));
@@ -166,7 +180,7 @@ class RemoteProvisioningService {
       );
     }
     if (response.statusCode == 401) {
-      throw Exception('La vinculación de este dispositivo ya no es válida.');
+      throw const RemoteDeviceCredentialsInvalidException();
     }
     if (response.statusCode != 200) {
       throw Exception(
