@@ -1,0 +1,1 @@
+Panel cleanup V2 baseline was remote-provisioning-panel-v1 before functional cleanup patch. Restore panel/index.html from the parent of the cleanup commit if needed.
