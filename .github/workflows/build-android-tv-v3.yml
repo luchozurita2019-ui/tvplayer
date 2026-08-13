@@ -1,0 +1,154 @@
+name: Build Android TV Form Navigation V3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-test-v3
+    paths:
+      - '.github/workflows/build-android-tv-v3.yml'
+      - '.github/scripts/apply_android_tv_form_navigation_v3.py'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-tv-v3:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Android TV V3 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-test-v3
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply Android TV form navigation V3 patch
+        run: python3 .github/scripts/apply_android_tv_form_navigation_v3.py
+
+      - name: Format changed Dart file
+        run: dart format lib/screens/add_source_screen.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify form-only source diff
+        shell: bash
+        run: |
+          git diff --name-only
+          unexpected=$(git diff --name-only | grep -vE '^lib/screens/add_source_screen.dart$' || true)
+          if [ -n "$unexpected" ]; then
+            echo "Unexpected files changed:"
+            echo "$unexpected"
+            exit 1
+          fi
+
+      - name: Commit Android TV form navigation V3
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No source changes to commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add lib/screens/add_source_screen.dart
+            git commit -m "Fix Android TV Enter navigation in provider forms"
+            git push origin HEAD:android-tv-test-v3
+          fi
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Configure Android TV package
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          additions = (
+              '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-feature android:name="android.software.leanback" android:required="true" />\n'
+              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+              '    <uses-feature android:name="android.hardware.faketouch" android:required="false" />'
+          )
+          if 'android.software.leanback' not in text:
+              text = text.replace(marker, additions, 1)
+          if 'android:usesCleartextTraffic' not in text:
+              text = text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          text = text.replace('android:label="iptv_player"', 'android:label="TV FULL PRO TV"', 1)
+          if 'android:banner=' not in text:
+              text = text.replace(
+                  'android:label="TV FULL PRO TV"',
+                  'android:label="TV FULL PRO TV"\n        android:banner="@mipmap/ic_launcher"',
+                  1,
+              )
+          if 'android:screenOrientation=' not in text:
+              text = text.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity"\n            android:screenOrientation="landscape"',
+                  1,
+              )
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in text:
+              text = text.replace(
+                  '<category android:name="android.intent.category.LAUNCHER"/>',
+                  '<category android:name="android.intent.category.LAUNCHER"/>\n'
+                  '                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>',
+                  1,
+              )
+          manifest.write_text(text)
+
+          gradle = Path('android/app/build.gradle.kts')
+          gradle_text = gradle.read_text().replace(
+              'applicationId = "com.example.iptv_player"',
+              'applicationId = "com.tvfull.pro.tv"',
+          )
+          gradle.write_text(gradle_text)
+          PY
+
+      - name: Build Android TV V3 release APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "Android TV V3 build attempt $attempt/2"
+            if flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Prepare Android TV V3 artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-Android-TV-Test-V3.apk
+          sha256sum artifact/TV-FULL-PRO-Android-TV-Test-V3.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload Android TV V3 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-Android-TV-Test-V3
+          path: artifact/
+          retention-days: 30
