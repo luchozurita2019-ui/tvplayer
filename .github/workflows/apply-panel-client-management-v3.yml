@@ -1,0 +1,61 @@
+name: Apply Panel Client Management V3
+
+on:
+  push:
+    branches:
+      - panel-client-management-v3
+    paths:
+      - '.github/scripts/apply_panel_client_management_v3.py'
+      - '.github/workflows/apply-panel-client-management-v3.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout feature branch
+        uses: actions/checkout@v4
+        with:
+          ref: panel-client-management-v3
+
+      - name: Apply client-management patch
+        run: python3 .github/scripts/apply_panel_client_management_v3.py
+
+      - name: Validate expected UI markers
+        run: |
+          grep -q 'Gestión de clientes' panel/index.html
+          grep -q 'Exportar CSV' panel/index.html
+          grep -q 'CADUCA PRONTO' panel/index.html
+          grep -q "route:'customers'" panel/index.html
+          if grep -q '<h3>Prueba del sistema</h3>' panel/index.html; then
+            echo 'Development test card is still visible'
+            exit 1
+          fi
+
+      - name: Check JavaScript syntax
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text = Path('panel/index.html').read_text()
+          m = re.search(r'<script type="module">(.*?)</script>', text, re.S)
+          if not m:
+              raise SystemExit('module script not found')
+          Path('/tmp/panel.mjs').write_text(m.group(1))
+          PY
+          node --check /tmp/panel.mjs
+
+      - name: Commit generated panel
+        run: |
+          if git diff --quiet -- panel/index.html; then
+            echo 'No panel changes generated'
+            exit 1
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add panel/index.html
+          git commit -m 'Redesign panel around client management V3'
+          git push origin HEAD:panel-client-management-v3
