@@ -1,0 +1,1 @@
+TV FULL PRO Panel V2 - delete controls, device codes, masked sync preview, correct auth redirect.
