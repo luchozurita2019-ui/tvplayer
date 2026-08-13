@@ -115,7 +115,7 @@
       const email=$('#authEmail').value.trim(), password=$('#authPassword').value;
       if(!email||password.length<6) return toast('Ingresá un correo y una contraseña de al menos 6 caracteres.');
       $('#signupBtn').disabled=true;
-      const { data,error }=await supabase.auth.signUp({email,password});
+      const { data,error }=await supabase.auth.signUp({email,password,options:{emailRedirectTo:'https://luchozurita2019-ui.github.io/tvplayer/'}});
       $('#signupBtn').disabled=false;
       if(error) return toast(error.message);
       if(data.session) toast('Cuenta creada. Ingresando…'); else toast('Cuenta creada. Revisá tu correo y confirmá la dirección; después volvé e iniciá sesión.');
@@ -167,11 +167,11 @@
       $('#deviceSearch')?.addEventListener('input',e=>{const q=e.target.value.toLowerCase();$('#deviceTable').innerHTML=devicesTable(state.devices.filter(d=>(d.device_code+' '+(d.device_name||'')+' '+platformLabel(d.platform)).toLowerCase().includes(q)))});
     }
 
-    function devicesTable(rows){ if(!rows.length)return '<div class="empty">No se encontraron dispositivos.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Código</th><th>Nombre</th><th>Plataforma</th><th>Cliente</th><th>Última conexión</th><th>Estado</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr><td class="code">${esc(d.device_code)}</td><td>${esc(d.device_name||'Sin nombre')}</td><td>${esc(platformLabel(d.platform))}</td><td>${esc(customerName(d.customer_id))}</td><td>${dt(d.last_seen_at)}</td><td>${statusBadge(d.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="edit-device" data-id="${d.id}">Editar</button></div></td></tr>`).join('')}</tbody></table></div>`; }
+    function devicesTable(rows){ if(!rows.length)return '<div class="empty">No se encontraron dispositivos.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Código</th><th>Nombre</th><th>Plataforma</th><th>Cliente</th><th>Última conexión</th><th>Estado</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr><td class="code">${esc(d.device_code)}</td><td>${esc(d.device_name||'Sin nombre')}</td><td>${esc(platformLabel(d.platform))}</td><td>${esc(customerName(d.customer_id))}</td><td>${dt(d.last_seen_at)}</td><td>${statusBadge(d.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="edit-device" data-id="${d.id}">Editar</button><button class="btn btn-danger btn-small" data-action="delete-device" data-id="${d.id}">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>`; }
 
     function renderServices(){
       $('#content').innerHTML=`<div class="toolbar"><div><h2>Servicios</h2><div class="muted">Listas M3U y accesos Xtream administrados remotamente.</div></div><button class="btn btn-primary" data-action="new-service">+ Nuevo servicio</button></div>
-      ${state.services.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Tipo</th><th>Cliente</th><th>Servidor / URL</th><th>Credencial</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>${state.services.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td><span class="badge">${esc(s.service_type.toUpperCase())}</span></td><td>${esc(customerName(s.customer_id))}</td><td class="code">${esc(s.service_type==='m3u'?(s.m3u_url||''):(s.server_url||''))}</td><td>${s.service_type==='xtream'?`${esc(s.username||'')} · ••••••`:'—'}</td><td>${esc(dateOnly(s.expires_at))}</td><td>${statusBadge(s.active)}</td><td><button class="btn btn-secondary btn-small" data-action="toggle-service" data-id="${s.id}">${s.active?'Desactivar':'Activar'}</button></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios todavía.</div>'}`;
+      ${state.services.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Tipo</th><th>Cliente</th><th>Servidor / URL</th><th>Credencial</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>${state.services.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td><span class="badge">${esc(s.service_type.toUpperCase())}</span></td><td>${esc(customerName(s.customer_id))}</td><td class="code">${esc(s.service_type==='m3u'?(s.m3u_url||''):(s.server_url||''))}</td><td>${s.service_type==='xtream'?`${esc(s.username||'')} · ••••••`:'—'}</td><td>${esc(dateOnly(s.expires_at))}</td><td>${statusBadge(s.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="toggle-service" data-id="${s.id}">${s.active?'Desactivar':'Activar'}</button><button class="btn btn-danger btn-small" data-action="delete-service" data-id="${s.id}">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios todavía.</div>'}`;
     }
 
     function renderAssignments(){
@@ -180,7 +180,7 @@
     }
 
     function customerOptions(selected=''){ return `<option value="">Sin cliente</option>${state.customers.filter(c=>c.active).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${esc(c.name)}</option>`).join('')}`; }
-    function deviceOptions(){ return state.devices.filter(d=>d.active).map(d=>`<option value="${d.id}">${esc(d.device_name||d.device_code)} · ${esc(platformLabel(d.platform))}</option>`).join(''); }
+    function deviceOptions(){ return state.devices.filter(d=>d.active).map(d=>`<option value="${d.id}">${esc(d.device_name||d.device_code)} · ${esc(platformLabel(d.platform))} · ${esc(d.device_code)}</option>`).join(''); }
     function serviceOptions(){ return state.services.filter(s=>s.active).map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.service_type.toUpperCase())}</option>`).join(''); }
 
     function openModal(title, body){ $('#modalTitle').textContent=title; $('#modalBody').innerHTML=body; $('#modal').showModal(); }
@@ -199,6 +199,8 @@
 
     async function toggleService(id){const s=state.services.find(x=>x.id===id);if(!s)return;const {error}=await supabase.from('tvf_services').update({active:!s.active}).eq('id',id);if(error)return alert(error.message);await refresh();}
     async function deleteAssignment(id){if(!confirm('¿Quitar este servicio del dispositivo?'))return;const {error}=await supabase.from('tvf_device_services').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
+    async function deleteDevice(id){const d=state.devices.find(x=>x.id===id);if(!d)return;if(!confirm(`¿Borrar el dispositivo ${d.device_code}? Sus asignaciones también se eliminarán.`))return;const {error}=await supabase.from('tvf_devices').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
+    async function deleteService(id){const s=state.services.find(x=>x.id===id);if(!s)return;if(!confirm(`¿Borrar el servicio ${s.name}? Se quitará de todos los dispositivos asignados.`))return;const {error}=await supabase.from('tvf_services').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
 
     async function createTestDevice(){
       const {data,error}=await supabase.functions.invoke('tvf-device-register',{body:{platform:'android_tv',device_name:'Dispositivo de prueba',app_version:'panel-v1'}});
@@ -207,7 +209,7 @@
       await refresh(); showResult('Dispositivo de prueba creado',{device_code:data.device_code,device_secret:data.device_secret,nota:'Guardá este secreto solo para la prueba. El dispositivo real lo guardará internamente.'});
     }
 
-    function testSyncModal(){ const code=sessionStorage.getItem('tvf_test_code')||'',secret=sessionStorage.getItem('tvf_test_secret')||''; openModal('Probar sincronización remota',`<form id="syncForm"><div class="field"><label>Código del dispositivo</label><input name="code" value="${esc(code)}" placeholder="TVF-XXXXXX-XXXXXX" required></div><div class="field"><label>Secreto del dispositivo</label><input name="secret" type="password" value="${esc(secret)}" required></div><div class="notice">La respuesta será exactamente la configuración que después consumirá TV FULL en Android, Android TV o macOS.</div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Consultar servidor</button></div></form>`); $('#syncForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {data,error}=await supabase.functions.invoke('tvf-device-config',{body:{device_code:String(f.get('code')).trim(),device_secret:String(f.get('secret'))}});if(error)return alert(error.message);closeModal();await refresh();showResult('Configuración recibida por TV FULL',data);}; }
+    function testSyncModal(){ const code=sessionStorage.getItem('tvf_test_code')||'',secret=sessionStorage.getItem('tvf_test_secret')||''; openModal('Probar sincronización remota',`<form id="syncForm"><div class="field"><label>Código del dispositivo</label><input name="code" value="${esc(code)}" placeholder="TVF-XXXXXX-XXXXXX" required></div><div class="field"><label>Secreto del dispositivo</label><input name="secret" type="password" value="${esc(secret)}" required></div><div class="notice">La respuesta será exactamente la configuración que después consumirá TV FULL en Android, Android TV o macOS.</div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Consultar servidor</button></div></form>`); $('#syncForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {data,error}=await supabase.functions.invoke('tvf-device-config',{body:{device_code:String(f.get('code')).trim(),device_secret:String(f.get('secret'))}});if(error)return alert(error.message);closeModal();await refresh();const safe=JSON.parse(JSON.stringify(data||{}));if(Array.isArray(safe.services)){safe.services=safe.services.map(s=>{const c={...s};if(c.url){try{const u=new URL(c.url);if(u.searchParams.has('username'))u.searchParams.set('username','***');if(u.searchParams.has('password'))u.searchParams.set('password','***');c.url=u.toString();}catch(_){c.url='URL protegida';}}if(c.username)c.username='***';if(c.password)c.password='***';return c;});}showResult('Configuración recibida por TV FULL',safe);}; }
 
     async function refresh(){ await loadAll(); render(); }
 
@@ -219,8 +221,10 @@
       const action=btn.dataset.action,id=btn.dataset.id;
       if(action==='new-customer')newCustomerModal();
       if(action==='edit-device')editDeviceModal(id);
+      if(action==='delete-device')await deleteDevice(id);
       if(action==='new-service')newServiceModal();
       if(action==='toggle-service')await toggleService(id);
+      if(action==='delete-service')await deleteService(id);
       if(action==='new-assignment')assignmentModal();
       if(action==='delete-assignment')await deleteAssignment(id);
       if(action==='test-device')await createTestDevice();
