@@ -1,0 +1,160 @@
+name: Build Android TV Panel Link V2 Playback Fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-panel-link-v2-playback-fix
+    paths:
+      - '.github/workflows/build-android-tv-panel-link-v2.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  build-android-tv-panel-link-v2:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout Android TV V2 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-panel-link-v2-playback-fix
+          fetch-depth: 0
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply Android TV playback smoothness fix
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          p = Path('lib/screens/player_screen.dart')
+          s = p.read_text()
+          anchor = "        await platform.setProperty('demuxer-thread', 'yes');\n"
+          patch = """        await platform.setProperty('demuxer-thread', 'yes');
+
+        // Android TV: priorizamos decodificación por hardware y evitamos que
+        // un equipo justo de CPU intente reproducir todos los cuadros atrasados.
+        // Si el decodificador no alcanza el FPS del canal, mpv descarta cuadros
+        // de video manteniendo audio/tiempo real en lugar de verse en cámara lenta.
+        if (_isAndroidRuntime) {
+          try {
+            await platform.setProperty('hwdec', 'mediacodec-copy');
+          } catch (_) {
+            // Algunos TV Box no exponen MediaCodec a libmpv; continúa con auto.
+            try {
+              await platform.setProperty('hwdec', 'auto-safe');
+            } catch (_) {}
+          }
+          try {
+            await platform.setProperty('framedrop', 'decoder+vo');
+          } catch (_) {}
+          try {
+            await platform.setProperty('video-sync', 'audio');
+          } catch (_) {}
+          try {
+            await platform.setProperty('interpolation', 'no');
+          } catch (_) {}
+        }
+"""
+          if 'mediacodec-copy' not in s:
+              if anchor not in s:
+                  raise SystemExit('Playback anchor not found')
+              s = s.replace(anchor, patch, 1)
+          p.write_text(s)
+          PY
+
+      - name: Format source
+        run: dart format lib/screens/player_screen.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify fix markers
+        shell: bash
+        run: |
+          grep -q "mediacodec-copy" lib/screens/player_screen.dart
+          grep -q "decoder+vo" lib/screens/player_screen.dart
+          grep -q "video-sync" lib/screens/player_screen.dart
+          grep -q "RemoteProvisioningService" lib/providers/iptv_provider.dart
+
+      - name: Commit Android TV playback fix
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No source changes to commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add lib/screens/player_screen.dart
+            git commit -m "Fix slow-motion playback on Android TV"
+            git push origin HEAD:android-tv-panel-link-v2-playback-fix
+          fi
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Configure Android TV package
+        shell: bash
+        run: |
+          python3 <<'PY'
+          from pathlib import Path
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
+          additions = (
+              marker + '\n'
+              '    <uses-permission android:name="android.permission.INTERNET" />\n'
+              '    <uses-feature android:name="android.software.leanback" android:required="true" />\n'
+              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+              '    <uses-feature android:name="android.hardware.faketouch" android:required="false" />'
+          )
+          if 'android.permission.INTERNET' not in text:
+              text = text.replace(marker, additions, 1)
+          if 'android:usesCleartextTraffic' not in text:
+              text = text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          text = text.replace('android:label="iptv_player"', 'android:label="TV FULL PRO TV"', 1)
+          if 'android:banner=' not in text:
+              text = text.replace('android:label="TV FULL PRO TV"', 'android:label="TV FULL PRO TV"\n        android:banner="@mipmap/ic_launcher"', 1)
+          if 'android:screenOrientation=' not in text:
+              text = text.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"', 1)
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in text:
+              text = text.replace('<category android:name="android.intent.category.LAUNCHER"/>', '<category android:name="android.intent.category.LAUNCHER"/>\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>', 1)
+          manifest.write_text(text)
+
+          gradle = Path('android/app/build.gradle.kts')
+          gt = gradle.read_text().replace('applicationId = "com.example.iptv_player"', 'applicationId = "com.tvfull.pro.tv"')
+          gradle.write_text(gt)
+          PY
+
+      - name: Build Android TV V2 APK
+        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-Android-TV-Panel-Link-V2-Playback-Fix.apk
+          sha256sum artifact/TV-FULL-PRO-Android-TV-Panel-Link-V2-Playback-Fix.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-Android-TV-Panel-Link-V2-Playback-Fix
+          path: artifact/
+          retention-days: 30
