@@ -9,10 +9,7 @@ class RemoteDeviceCredentials {
   final String code;
   final String secret;
 
-  const RemoteDeviceCredentials({
-    required this.code,
-    required this.secret,
-  });
+  const RemoteDeviceCredentials({required this.code, required this.secret});
 }
 
 class RemoteProvisionedService {
@@ -102,7 +99,9 @@ class RemoteProvisioningService {
     final existing = await loadCredentials();
     if (existing != null) return existing;
     if (!isSupported) {
-      throw StateError('La vinculación remota todavía está habilitada solo en macOS.');
+      throw StateError(
+        'La vinculación remota todavía está habilitada solo en macOS.',
+      );
     }
 
     final response = await http
@@ -128,13 +127,17 @@ class RemoteProvisioningService {
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map) {
-      throw Exception('El servidor de TV FULL devolvió una respuesta inválida.');
+      throw Exception(
+        'El servidor de TV FULL devolvió una respuesta inválida.',
+      );
     }
     final data = Map<String, dynamic>.from(decoded);
     final code = data['device_code']?.toString().trim() ?? '';
     final secret = data['device_secret']?.toString().trim() ?? '';
     if (code.isEmpty || secret.isEmpty) {
-      throw Exception('El servidor no devolvió las credenciales del dispositivo.');
+      throw Exception(
+        'El servidor no devolvió las credenciales del dispositivo.',
+      );
     }
 
     final prefs = await SharedPreferences.getInstance();
@@ -158,7 +161,9 @@ class RemoteProvisioningService {
         .timeout(const Duration(seconds: 15));
 
     if (response.statusCode == 403) {
-      throw Exception('Este dispositivo fue desactivado desde el panel TV FULL.');
+      throw Exception(
+        'Este dispositivo fue desactivado desde el panel TV FULL.',
+      );
     }
     if (response.statusCode == 401) {
       throw Exception('La vinculación de este dispositivo ya no es válida.');
@@ -171,7 +176,9 @@ class RemoteProvisioningService {
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map) {
-      throw Exception('El servidor de TV FULL devolvió una configuración inválida.');
+      throw Exception(
+        'El servidor de TV FULL devolvió una configuración inválida.',
+      );
     }
     final data = Map<String, dynamic>.from(decoded);
     final rawDevice = data['device'];
