@@ -34,46 +34,8 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Apply Android TV playback smoothness fix
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import Path
-          p = Path('lib/screens/player_screen.dart')
-          s = p.read_text()
-          anchor = "        await platform.setProperty('demuxer-thread', 'yes');\n"
-          patch = """        await platform.setProperty('demuxer-thread', 'yes');
-
-        // Android TV: priorizamos decodificación por hardware y evitamos que
-        // un equipo justo de CPU intente reproducir todos los cuadros atrasados.
-        // Si el decodificador no alcanza el FPS del canal, mpv descarta cuadros
-        // de video manteniendo audio/tiempo real en lugar de verse en cámara lenta.
-        if (_isAndroidRuntime) {
-          try {
-            await platform.setProperty('hwdec', 'mediacodec-copy');
-          } catch (_) {
-            // Algunos TV Box no exponen MediaCodec a libmpv; continúa con auto.
-            try {
-              await platform.setProperty('hwdec', 'auto-safe');
-            } catch (_) {}
-          }
-          try {
-            await platform.setProperty('framedrop', 'decoder+vo');
-          } catch (_) {}
-          try {
-            await platform.setProperty('video-sync', 'audio');
-          } catch (_) {}
-          try {
-            await platform.setProperty('interpolation', 'no');
-          } catch (_) {}
-        }
-"""
-          if 'mediacodec-copy' not in s:
-              if anchor not in s:
-                  raise SystemExit('Playback anchor not found')
-              s = s.replace(anchor, patch, 1)
-          p.write_text(s)
-          PY
+      - name: Apply Android TV slow-motion fix
+        run: python3 .github/scripts/apply_android_tv_slow_motion_fix.py
 
       - name: Format source
         run: dart format lib/screens/player_screen.dart
@@ -111,34 +73,27 @@ jobs:
       - name: Configure Android TV package
         shell: bash
         run: |
-          python3 <<'PY'
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.faketouch" android:required="false" />' "$MANIFEST"
+          fi
+          sed -i 's/android:label="iptv_player"/android:label="TV FULL PRO TV"/' "$MANIFEST"
+          python3 - <<'PY'
           from pathlib import Path
-          manifest = Path('android/app/src/main/AndroidManifest.xml')
-          text = manifest.read_text()
-          marker = '<manifest xmlns:android="http://schemas.android.com/apk/res/android">'
-          additions = (
-              marker + '\n'
-              '    <uses-permission android:name="android.permission.INTERNET" />\n'
-              '    <uses-feature android:name="android.software.leanback" android:required="true" />\n'
-              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
-              '    <uses-feature android:name="android.hardware.faketouch" android:required="false" />'
-          )
-          if 'android.permission.INTERNET' not in text:
-              text = text.replace(marker, additions, 1)
-          if 'android:usesCleartextTraffic' not in text:
-              text = text.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
-          text = text.replace('android:label="iptv_player"', 'android:label="TV FULL PRO TV"', 1)
-          if 'android:banner=' not in text:
-              text = text.replace('android:label="TV FULL PRO TV"', 'android:label="TV FULL PRO TV"\n        android:banner="@mipmap/ic_launcher"', 1)
-          if 'android:screenOrientation=' not in text:
-              text = text.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"', 1)
-          if 'android.intent.category.LEANBACK_LAUNCHER' not in text:
-              text = text.replace('<category android:name="android.intent.category.LAUNCHER"/>', '<category android:name="android.intent.category.LAUNCHER"/>\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>', 1)
-          manifest.write_text(text)
-
-          gradle = Path('android/app/build.gradle.kts')
-          gt = gradle.read_text().replace('applicationId = "com.example.iptv_player"', 'applicationId = "com.tvfull.pro.tv"')
-          gradle.write_text(gt)
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          if 'android:usesCleartextTraffic' not in s:
+              s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          if 'android:banner=' not in s:
+              s = s.replace('android:label="TV FULL PRO TV"', 'android:label="TV FULL PRO TV"\n        android:banner="@mipmap/ic_launcher"', 1)
+          if 'android:screenOrientation=' not in s:
+              s = s.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"', 1)
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in s:
+              s = s.replace('<category android:name="android.intent.category.LAUNCHER"/>', '<category android:name="android.intent.category.LAUNCHER"/>\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>', 1)
+          p.write_text(s)
+          g = Path('android/app/build.gradle.kts')
+          gs = g.read_text().replace('applicationId = "com.example.iptv_player"', 'applicationId = "com.tvfull.pro.tv"')
+          g.write_text(gs)
           PY
 
       - name: Build Android TV V2 APK
