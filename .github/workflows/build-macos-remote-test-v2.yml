@@ -1,0 +1,98 @@
+name: Build macOS Remote Test V2
+
+on:
+  push:
+    branches:
+      - mac-remote-provisioning-v1
+    paths:
+      - '.github/workflows/build-macos-remote-test-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-macos-remote-v2:
+    runs-on: macos-latest
+    steps:
+      - name: Checkout macOS remote branch
+        uses: actions/checkout@v4
+        with:
+          ref: mac-remote-provisioning-v1
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Enable macOS desktop
+        run: flutter config --enable-macos-desktop
+
+      - name: Generate native macOS project
+        run: flutter create --platforms=macos .
+
+      - name: Enable outgoing Internet access
+        run: |
+          for file in macos/Runner/DebugProfile.entitlements macos/Runner/Release.entitlements; do
+            /usr/libexec/PlistBuddy -c "Add :com.apple.security.network.client bool true" "$file" 2>/dev/null || \
+            /usr/libexec/PlistBuddy -c "Set :com.apple.security.network.client true" "$file"
+          done
+
+      - name: Set macOS deployment target
+        run: |
+          sed -i '' 's/MACOSX_DEPLOYMENT_TARGET = 10.14/MACOSX_DEPLOYMENT_TARGET = 10.15/g' macos/Runner.xcodeproj/project.pbxproj || true
+
+      - name: Build release app
+        run: flutter build macos --release
+
+      - name: Prepare TV FULL PRO application
+        run: |
+          mkdir -p dist
+          APP_PATH=$(find build/macos/Build/Products/Release -maxdepth 1 -name "*.app" | head -n 1)
+          echo "Application: $APP_PATH"
+          if [ -z "$APP_PATH" ]; then
+            echo "No macOS .app was produced"
+            exit 1
+          fi
+          cp -R "$APP_PATH" "dist/TV FULL PRO.app"
+
+      - name: Create real PKG installer
+        run: |
+          pkgbuild \
+            --component "dist/TV FULL PRO.app" \
+            --install-location /Applications \
+            --identifier com.tvfull.pro.remote.test \
+            --version 1.0.0 \
+            "dist/TV-FULL-PRO-macOS-Remote-Test-V2.pkg"
+
+      - name: Create drag-and-drop DMG fallback
+        run: |
+          mkdir -p dmg-root
+          cp -R "dist/TV FULL PRO.app" dmg-root/
+          ln -s /Applications dmg-root/Applications
+          hdiutil create \
+            -volname "TV FULL PRO" \
+            -srcfolder dmg-root \
+            -ov \
+            -format UDZO \
+            "dist/TV-FULL-PRO-macOS-Remote-Test-V2.dmg"
+
+      - name: SHA-256
+        run: |
+          shasum -a 256 "dist/TV-FULL-PRO-macOS-Remote-Test-V2.pkg"
+          shasum -a 256 "dist/TV-FULL-PRO-macOS-Remote-Test-V2.dmg"
+
+      - name: Upload macOS V2 artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-macOS-Remote-Test-V2
+          path: |
+            dist/TV-FULL-PRO-macOS-Remote-Test-V2.pkg
+            dist/TV-FULL-PRO-macOS-Remote-Test-V2.dmg
+          if-no-files-found: error
