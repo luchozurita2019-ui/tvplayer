@@ -1,0 +1,45 @@
+name: Apply TV FULL Panel Cleanup V2
+
+on:
+  push:
+    branches:
+      - remote-provisioning-panel-v1
+    paths:
+      - '.github/scripts/apply_panel_cleanup_v2.py'
+      - '.github/workflows/apply-panel-cleanup-v2.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout panel branch
+        uses: actions/checkout@v4
+        with:
+          ref: remote-provisioning-panel-v1
+          fetch-depth: 0
+
+      - name: Apply cleanup controls
+        run: python3 .github/scripts/apply_panel_cleanup_v2.py
+
+      - name: Verify panel changes
+        run: |
+          grep -q 'data-action="delete-device"' panel/index.html
+          grep -q 'data-action="delete-service"' panel/index.html
+          grep -q 'emailRedirectTo' panel/index.html
+          grep -q 'device_code)}</option>' panel/index.html
+
+      - name: Commit panel V2 cleanup
+        run: |
+          if git diff --quiet; then
+            echo "No panel changes to commit"
+          else
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add panel/index.html
+            git commit -m "Add panel delete controls and safer sync preview"
+            git push origin HEAD:remote-provisioning-panel-v1
+          fi
