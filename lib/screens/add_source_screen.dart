@@ -4,6 +4,8 @@ import 'package:provider/provider.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
+
 class AddSourceScreen extends StatefulWidget {
   const AddSourceScreen({super.key});
 
@@ -22,6 +24,15 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   final _portalController = TextEditingController();
   final _macController = TextEditingController();
 
+  final _nameFocus = FocusNode();
+  final _m3uUrlFocus = FocusNode();
+  final _serverFocus = FocusNode();
+  final _usernameFocus = FocusNode();
+  final _passwordFocus = FocusNode();
+  final _portalFocus = FocusNode();
+  final _macFocus = FocusNode();
+  final _connectFocus = FocusNode();
+
   bool _obscurePassword = true;
 
   @override
@@ -33,6 +44,14 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
     _passwordController.dispose();
     _portalController.dispose();
     _macController.dispose();
+    _nameFocus.dispose();
+    _m3uUrlFocus.dispose();
+    _serverFocus.dispose();
+    _usernameFocus.dispose();
+    _passwordFocus.dispose();
+    _portalFocus.dispose();
+    _macFocus.dispose();
+    _connectFocus.dispose();
     super.dispose();
   }
 
@@ -55,16 +74,14 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
             children: [
               Text(
                 'Conectá tu proveedor',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
+                style: Theme.of(context).textTheme.headlineMedium
+                    ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 6),
               Text(
                 'Pegá el enlace que te dio tu proveedor. En M3U/M3U8, TV FULL detecta automáticamente si el enlace pertenece a Xtream. También podés elegir el tipo manualmente.',
-                style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                      color: Colors.white70,
-                    ),
+                style: Theme.of(context).textTheme.bodyLarge
+                    ?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 24),
               _SourceSelector(
@@ -92,6 +109,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               Align(
                 alignment: Alignment.centerRight,
                 child: FilledButton.icon(
+                  focusNode: _connectFocus,
+                  autofocus: false,
                   onPressed: provider.loading ? null : _submit,
                   icon: provider.loading
                       ? const SizedBox(
@@ -118,6 +137,13 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         const SizedBox(height: 22),
         TextField(
           controller: _nameController,
+          focusNode: _nameFocus,
+          textInputAction: _androidTvBuild
+              ? TextInputAction.next
+              : TextInputAction.done,
+          onSubmitted: (_) {
+            if (_androidTvBuild) _focusFirstProviderField();
+          },
           decoration: const InputDecoration(
             labelText: 'Nombre del servicio',
             hintText: 'Ej: Mi proveedor',
@@ -139,7 +165,12 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
       children: [
         TextField(
           controller: _m3uUrlController,
+          focusNode: _m3uUrlFocus,
           keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) {
+            if (_androidTvBuild) _submitFromKeyboard();
+          },
           decoration: const InputDecoration(
             labelText: 'URL del proveedor',
             hintText: 'https://servidor/get.php?username=... o lista.m3u',
@@ -148,8 +179,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         ),
         const SizedBox(height: 14),
         const _InfoBox(
-          text:
-              'Detección automática: si el enlace get.php contiene usuario y contraseña y player_api.php valida, TV FULL lo guarda como Xtream nativo. Si no, lo carga como M3U/M3U8 normal.',
+          text: 'Detección automática: si el enlace get.php contiene usuario y contraseña y player_api.php valida, TV FULL lo guarda como Xtream nativo. Si no, lo carga como M3U/M3U8 normal.',
         ),
       ],
     );
@@ -160,7 +190,14 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
       children: [
         TextField(
           controller: _serverController,
+          focusNode: _serverFocus,
           keyboardType: TextInputType.url,
+          textInputAction: _androidTvBuild
+              ? TextInputAction.next
+              : TextInputAction.done,
+          onSubmitted: (_) {
+            if (_androidTvBuild) _usernameFocus.requestFocus();
+          },
           decoration: const InputDecoration(
             labelText: 'Servidor / Host',
             hintText: 'http://servidor:puerto',
@@ -173,6 +210,13 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
             Expanded(
               child: TextField(
                 controller: _usernameController,
+                focusNode: _usernameFocus,
+                textInputAction: _androidTvBuild
+                    ? TextInputAction.next
+                    : TextInputAction.done,
+                onSubmitted: (_) {
+                  if (_androidTvBuild) _passwordFocus.requestFocus();
+                },
                 decoration: const InputDecoration(
                   labelText: 'Usuario',
                   prefixIcon: Icon(Icons.person_outline),
@@ -183,15 +227,19 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
             Expanded(
               child: TextField(
                 controller: _passwordController,
+                focusNode: _passwordFocus,
                 obscureText: _obscurePassword,
+                textInputAction: TextInputAction.done,
+                onSubmitted: (_) {
+                  if (_androidTvBuild) _submitFromKeyboard();
+                },
                 decoration: InputDecoration(
                   labelText: 'Contraseña',
                   prefixIcon: const Icon(Icons.lock_outline),
                   suffixIcon: IconButton(
                     tooltip: _obscurePassword ? 'Mostrar' : 'Ocultar',
-                    onPressed: () => setState(
-                      () => _obscurePassword = !_obscurePassword,
-                    ),
+                    onPressed: () =>
+                        setState(() => _obscurePassword = !_obscurePassword),
                     icon: Icon(
                       _obscurePassword
                           ? Icons.visibility_outlined
@@ -205,8 +253,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         ),
         const SizedBox(height: 14),
         const _InfoBox(
-          text:
-              'TV FULL valida primero las credenciales con player_api.php y después carga el catálogo del proveedor.',
+          text: 'TV FULL valida primero las credenciales con player_api.php y después carga el catálogo del proveedor.',
         ),
       ],
     );
@@ -217,7 +264,14 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
       children: [
         TextField(
           controller: _portalController,
+          focusNode: _portalFocus,
           keyboardType: TextInputType.url,
+          textInputAction: _androidTvBuild
+              ? TextInputAction.next
+              : TextInputAction.done,
+          onSubmitted: (_) {
+            if (_androidTvBuild) _macFocus.requestFocus();
+          },
           decoration: const InputDecoration(
             labelText: 'URL del portal',
             hintText: 'http://portal.example.com/c/',
@@ -227,7 +281,12 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         const SizedBox(height: 14),
         TextField(
           controller: _macController,
+          focusNode: _macFocus,
           textCapitalization: TextCapitalization.characters,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) {
+            if (_androidTvBuild) _connectFocus.requestFocus();
+          },
           decoration: const InputDecoration(
             labelText: 'MAC Address',
             hintText: '00:1A:79:XX:XX:XX',
@@ -236,11 +295,26 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         ),
         const SizedBox(height: 14),
         const _InfoBox(
-          text:
-              'La interfaz para Portal Stalker ya queda preparada. La conexión Stalker real se incorporará en la siguiente etapa para poder probar handshake, token y variantes de portal sin afectar M3U/Xtream.',
+          text: 'La interfaz para Portal Stalker ya queda preparada. La conexión Stalker real se incorporará en la siguiente etapa para poder probar handshake, token y variantes de portal sin afectar M3U/Xtream.',
         ),
       ],
     );
+  }
+
+  void _focusFirstProviderField() {
+    switch (_type) {
+      case PlaylistSourceType.m3u:
+        _m3uUrlFocus.requestFocus();
+      case PlaylistSourceType.xtream:
+        _serverFocus.requestFocus();
+      case PlaylistSourceType.stalker:
+        _portalFocus.requestFocus();
+    }
+  }
+
+  void _submitFromKeyboard() {
+    _connectFocus.requestFocus();
+    _submit();
   }
 
   Future<void> _submit() async {
@@ -277,9 +351,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   }
 
   void _showMessage(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message)),
-    );
+    ScaffoldMessenger.of(context)
+        .showSnackBar(SnackBar(content: Text(message)));
   }
 }
 
@@ -342,8 +415,9 @@ class _SourceSelector extends StatelessWidget {
                         style: TextStyle(
                           color: active ? Colors.white : Colors.white70,
                           fontSize: 16,
-                          fontWeight:
-                              active ? FontWeight.w800 : FontWeight.w600,
+                          fontWeight: active
+                              ? FontWeight.w800
+                              : FontWeight.w600,
                         ),
                       ),
                     ),
@@ -377,9 +451,8 @@ class _TitleRow extends StatelessWidget {
         const SizedBox(width: 12),
         Text(
           type.label,
-          style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                fontWeight: FontWeight.w900,
-              ),
+          style: Theme.of(context).textTheme.titleLarge
+              ?.copyWith(fontWeight: FontWeight.w900),
         ),
       ],
     );
