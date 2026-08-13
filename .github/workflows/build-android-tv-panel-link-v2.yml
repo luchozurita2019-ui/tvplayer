@@ -44,20 +44,21 @@ jobs:
           anchor = "        await platform.setProperty('demuxer-thread', 'yes');\n"
           patch = """        await platform.setProperty('demuxer-thread', 'yes');
 
-        // Android TV: el audio ya avanza a tiempo real, pero en equipos con CPU
-        // limitada el video puede quedar atrasado. Priorizamos MediaCodec por
-        // hardware y dejamos que mpv descarte cuadros de presentación tardíos.
+        // Android TV: priorizamos decodificación por hardware y evitamos que
+        // un equipo justo de CPU intente reproducir todos los cuadros atrasados.
+        // Si el decodificador no alcanza el FPS del canal, mpv descarta cuadros
+        // de video manteniendo audio/tiempo real en lugar de verse en cámara lenta.
         if (_isAndroidRuntime) {
           try {
-            await platform.setProperty('hwdec', 'mediacodec-copy,auto');
-            await platform.setProperty('hwdec-codecs', 'all');
+            await platform.setProperty('hwdec', 'mediacodec-copy');
           } catch (_) {
+            // Algunos TV Box no exponen MediaCodec a libmpv; continúa con auto.
             try {
-              await platform.setProperty('hwdec', 'auto');
+              await platform.setProperty('hwdec', 'auto-safe');
             } catch (_) {}
           }
           try {
-            await platform.setProperty('framedrop', 'vo');
+            await platform.setProperty('framedrop', 'decoder+vo');
           } catch (_) {}
           try {
             await platform.setProperty('video-sync', 'audio');
@@ -67,7 +68,7 @@ jobs:
           } catch (_) {}
         }
 """
-          if 'mediacodec-copy,auto' not in s:
+          if 'mediacodec-copy' not in s:
               if anchor not in s:
                   raise SystemExit('Playback anchor not found')
               s = s.replace(anchor, patch, 1)
@@ -86,9 +87,8 @@ jobs:
       - name: Verify fix markers
         shell: bash
         run: |
-          grep -q "mediacodec-copy,auto" lib/screens/player_screen.dart
-          grep -q "hwdec-codecs" lib/screens/player_screen.dart
-          grep -q "framedrop', 'vo" lib/screens/player_screen.dart
+          grep -q "mediacodec-copy" lib/screens/player_screen.dart
+          grep -q "decoder+vo" lib/screens/player_screen.dart
           grep -q "video-sync" lib/screens/player_screen.dart
           grep -q "RemoteProvisioningService" lib/providers/iptv_provider.dart
 
@@ -109,14 +109,6 @@ jobs:
         run: flutter create --platforms=android .
 
       - name: Configure Android TV package
-        shell: bash
-        run: |
-          python3 <<'PY'
-          from pathlib import import Path
-          PY
-        continue-on-error: true
-
-      - name: Configure Android TV package correctly
         shell: bash
         run: |
           python3 <<'PY'
