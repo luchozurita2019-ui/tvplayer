@@ -21,6 +21,19 @@ jobs:
         with:
           ref: panel-client-management-v3
 
+      - name: Fix CSS anchor for current panel source
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('.github/scripts/apply_panel_client_management_v3.py')
+          s=p.read_text()
+          old='css_anchor = "    .search{max-width:330px}\\n"'
+          new='css_anchor = ".search{max-width:330px}"'
+          if old not in s:
+              raise SystemExit('CSS anchor declaration not found')
+          p.write_text(s.replace(old,new,1))
+          PY
+
       - name: Apply client-management patch
         run: python3 .github/scripts/apply_panel_client_management_v3.py
 
