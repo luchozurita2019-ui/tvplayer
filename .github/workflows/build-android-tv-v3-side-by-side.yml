@@ -86,3 +86,5 @@ jobs:
           name: TV-FULL-PRO-V3-TEST-Side-By-Side
           path: artifact/
           retention-days: 30
+
+# Side-by-side test package: installs without replacing the currently installed TV FULL PRO.
