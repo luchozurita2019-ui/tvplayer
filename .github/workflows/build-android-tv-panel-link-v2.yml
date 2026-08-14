@@ -50,8 +50,16 @@ jobs:
       - name: Verify V3 markers
         shell: bash
         run: |
-          if grep -q "mediacodec-copy" lib/screens/player_screen.dart; then
-            echo "manual mediacodec-copy override is still present"
+          if grep -q "setProperty('hwdec'" lib/screens/player_screen.dart; then
+            echo "manual hwdec override is still present"
+            exit 1
+          fi
+          if grep -q "setProperty('framedrop'" lib/screens/player_screen.dart; then
+            echo "manual framedrop override is still present"
+            exit 1
+          fi
+          if grep -q "setProperty('video-sync'" lib/screens/player_screen.dart; then
+            echo "manual video-sync override is still present"
             exit 1
           fi
           grep -q "Timer.periodic(const Duration(seconds: 1)" lib/widgets/live_video_view.dart
