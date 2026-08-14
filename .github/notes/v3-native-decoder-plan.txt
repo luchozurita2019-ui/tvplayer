@@ -1,0 +1,1 @@
+Android TV V3 will remove the manual mediacodec-copy override and let media_kit use its native Android Surface hardware-decoding path. The panel-link provisioning remains unchanged.
