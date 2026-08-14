@@ -484,26 +484,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         await platform.setProperty('cache-pause-initial', 'no');
         await platform.setProperty('demuxer-thread', 'yes');
 
-        // Android TV: el audio avanza a tiempo real pero el video puede quedar
-        // atrasado si la CPU no alcanza a decodificar todos los cuadros.
-        if (_isAndroidRuntime) {
-          try {
-            await platform.setProperty('hwdec', 'mediacodec-copy');
-          } catch (_) {
-            try {
-              await platform.setProperty('hwdec', 'auto-safe');
-            } catch (_) {}
-          }
-          try {
-            await platform.setProperty('framedrop', 'decoder+vo');
-          } catch (_) {}
-          try {
-            await platform.setProperty('video-sync', 'audio');
-          } catch (_) {}
-          try {
-            await platform.setProperty('interpolation', 'no');
-          } catch (_) {}
-        }
+        // Android TV: no forzamos opciones de decodificación/sincronización
+        // desde la app. media_kit_video administra su Surface nativa y la ruta
+        // MediaCodec de Android para evitar copias innecesarias por CPU.
 
         // En TV en vivo no necesitamos conservar paquetes ya reproducidos.
         // Un back-buffer grande puede volver a mostrar escenas viejas después

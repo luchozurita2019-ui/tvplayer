@@ -106,7 +106,12 @@ class _LiveVideoViewState extends State<LiveVideoView> {
         _position = value;
         _lastProgressAt = DateTime.now();
       }
-      setState(() {});
+      // En TV en vivo la posición sólo sirve como señal de progreso. Evitamos
+      // reconstruir Video + controles varias veces por segundo: el timer de
+      // estado actualiza la insignia EN VIVO de forma mucho más barata.
+      if (!widget.isLiveContent) {
+        setState(() {});
+      }
     });
 
     _durationSub = widget.player.stream.duration.listen((value) {
@@ -162,7 +167,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
       });
     });
 
-    _statusTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {
+    _statusTimer = Timer.periodic(const Duration(seconds: 1), (_) {
       if (mounted && widget.isLiveContent) setState(() {});
     });
 

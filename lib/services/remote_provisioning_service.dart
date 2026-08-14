@@ -128,7 +128,7 @@ class RemoteProvisioningService {
           body: jsonEncode(const {
             'platform': 'android_tv',
             'device_name': 'TV FULL Android TV',
-            'app_version': '1.0.0+1-android-tv-panel-v1',
+            'app_version': '1.0.0+1-android-tv-panel-v3-native-hw',
           }),
         )
         .timeout(const Duration(seconds: 15));
