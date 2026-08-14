@@ -234,7 +234,7 @@
         const primary=devices[0];
         const seen=latestSeen(devices);
         const activeServices=services.filter(s=>s.active);
-        return `<tr><td><div class="code">${esc(primary?.device_code||'Sin dispositivo')}</div>${devices.length>1?`<div class="customer-meta">+${devices.length-1} equipo(s)</div>`:''}</td><td><div class="customer-main">${esc(c.name)}</div>${c.phone?`<div class="customer-meta">${esc(c.phone)}</div>`:''}${c.notes?`<div class="customer-note" title="${esc(c.notes)}">${esc(c.notes)}</div>`:''}</td><td><div class="stack">${platformTags(devices)}</div></td><td><div class="stack">${versionTags(devices)}</div></td><td>${customerStatusBadge(h)}</td><td class="${customerExpiryClass(h)}">${esc(customerExpiry(h))}</td><td>${seen?dt(new Date(seen).toISOString()):'—'}</td><td><b>${activeServices.length}</b><div class="customer-meta">${esc(activeServices.map(s=>s.name).join(', ')||'Sin servicio')}</div></td><td><div class="actions"><button class="btn btn-secondary btn-small icon-action" title="Editar cliente" data-action="edit-customer" data-id="${c.id}">✎</button><button class="btn btn-primary btn-small" data-action="renew-customer" data-id="${c.id}">Renovar</button><button class="btn btn-secondary btn-small" data-action="customer-service" data-id="${c.id}">+ Servicio</button><button class="btn btn-secondary btn-small icon-action" title="Ver dispositivos" data-action="customer-devices" data-id="${c.id}">⚙</button></div></td></tr>`;
+        return `<tr><td><div class="code">${esc(primary?.device_code||'Sin dispositivo')}</div>${devices.length>1?`<div class="customer-meta">+${devices.length-1} equipo(s)</div>`:''}</td><td><div class="customer-main">${esc(c.name)}</div>${c.phone?`<div class="customer-meta">${esc(c.phone)}</div>`:''}${c.notes?`<div class="customer-note" title="${esc(c.notes)}">${esc(c.notes)}</div>`:''}</td><td><div class="stack">${platformTags(devices)}</div></td><td><div class="stack">${versionTags(devices)}</div></td><td>${customerStatusBadge(h)}</td><td class="${customerExpiryClass(h)}">${esc(customerExpiry(h))}</td><td>${seen?dt(new Date(seen).toISOString()):'—'}</td><td><b>${activeServices.length}</b><div class="customer-meta">${esc(activeServices.map(s=>s.name).join(', ')||'Sin servicio')}</div></td><td><div class="actions"><button class="btn btn-secondary btn-small icon-action" title="Editar cliente" data-action="edit-customer" data-id="${c.id}">✎</button><button class="btn btn-primary btn-small" data-action="renew-customer" data-id="${c.id}">Renovar</button><button class="btn btn-secondary btn-small" data-action="customer-service" data-id="${c.id}">+ Servicio</button><button class="btn btn-secondary btn-small icon-action" title="Ver dispositivos" data-action="customer-devices" data-id="${c.id}">⚙</button><button class="btn btn-danger btn-small icon-action" title="Borrar cliente" data-action="delete-customer" data-id="${c.id}">🗑</button></div></td></tr>`;
       }).join('')}</tbody></table></div>`;
     }
 
@@ -297,6 +297,20 @@
 
     function assignmentModal(){ if(!state.devices.length||!state.services.length)return alert('Necesitás al menos un dispositivo y un servicio.'); openModal('Asignar servicio',`<form id="assignmentForm"><div class="field"><label>Dispositivo</label><select name="device_id" required>${deviceOptions()}</select></div><div class="field"><label>Servicio</label><select name="service_id" required>${serviceOptions()}</select></div><div class="field"><label>Orden</label><input name="display_order" type="number" value="0" min="0"></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Asignar</button></div></form>`); $('#assignmentForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {error}=await supabase.from('tvf_device_services').insert({device_id:String(f.get('device_id')),service_id:String(f.get('service_id')),display_order:Number(f.get('display_order')||0),enabled:true});if(error)return alert(error.message);closeModal();await refresh();}; }
 
+    async function deleteCustomer(id){
+      const c=state.customers.find(x=>x.id===id); if(!c)return;
+      const devices=customerDevices(id).length;
+      const services=customerServices(id).length;
+      const detail=[];
+      if(devices) detail.push(`${devices} dispositivo(s)`);
+      if(services) detail.push(`${services} servicio(s)`);
+      const linked=detail.length?`\n\n${detail.join(' y ')} quedarán sin cliente, pero NO se borrarán.`:'';
+      if(!confirm(`¿Borrar al cliente “${c.name}”?${linked}`))return;
+      const {error}=await supabase.from('tvf_customers').delete().eq('id',id);
+      if(error)return alert(`No se pudo borrar el cliente: ${error.message}`);
+      await refresh();
+    }
+
     async function toggleService(id){const s=state.services.find(x=>x.id===id);if(!s)return;const {error}=await supabase.from('tvf_services').update({active:!s.active}).eq('id',id);if(error)return alert(error.message);await refresh();}
     async function deleteAssignment(id){if(!confirm('¿Quitar este servicio del dispositivo?'))return;const {error}=await supabase.from('tvf_device_services').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
     async function deleteDevice(id){const d=state.devices.find(x=>x.id===id);if(!d)return;if(!confirm(`¿Borrar el dispositivo ${d.device_code}? Sus asignaciones también se eliminarán.`))return;const {error}=await supabase.from('tvf_devices').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
@@ -327,6 +341,7 @@
       if(action==='customer-devices'){state.deviceCustomerFilter=id;state.route='devices';render();}
       if(action==='clear-device-customer'){state.deviceCustomerFilter=null;renderDevices();}
       if(action==='export-customers')exportCustomersCsv();
+      if(action==='delete-customer')await deleteCustomer(id);
       if(action==='edit-device')editDeviceModal(id);
       if(action==='delete-device')await deleteDevice(id);
       if(action==='new-service')newServiceModal();
