@@ -1,25 +1,26 @@
-name: Build Android TV Panel Link V2 Playback Fix
+name: Build Android TV Panel Link V3 Native HW
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - android-tv-panel-link-v2-playback-fix
+      - android-tv-panel-link-v3-native-hw
     paths:
       - '.github/workflows/build-android-tv-panel-link-v2.yml'
+      - '.github/scripts/apply_android_tv_v3_native_hw.py'
 
 permissions:
   contents: write
 
 jobs:
-  build-android-tv-panel-link-v2:
+  build-android-tv-panel-link-v3:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Android TV V2 branch
+      - name: Checkout Android TV V3 branch
         uses: actions/checkout@v4
         with:
-          ref: android-tv-panel-link-v2-playback-fix
+          ref: android-tv-panel-link-v3-native-hw
           fetch-depth: 0
 
       - name: Set up Java
@@ -34,11 +35,11 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Apply Android TV slow-motion fix
-        run: python3 .github/scripts/apply_android_tv_slow_motion_fix.py
+      - name: Apply native Android hardware path and UI load fix
+        run: python3 .github/scripts/apply_android_tv_v3_native_hw.py
 
       - name: Format source
-        run: dart format lib/screens/player_screen.dart
+        run: dart format lib/screens/player_screen.dart lib/widgets/live_video_view.dart lib/services/remote_provisioning_service.dart
 
       - name: Get dependencies
         run: flutter pub get
@@ -46,15 +47,19 @@ jobs:
       - name: Analyze source
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Verify fix markers
+      - name: Verify V3 markers
         shell: bash
         run: |
-          grep -q "mediacodec-copy" lib/screens/player_screen.dart
-          grep -q "decoder+vo" lib/screens/player_screen.dart
-          grep -q "video-sync" lib/screens/player_screen.dart
+          if grep -q "mediacodec-copy" lib/screens/player_screen.dart; then
+            echo "manual mediacodec-copy override is still present"
+            exit 1
+          fi
+          grep -q "Timer.periodic(const Duration(seconds: 1)" lib/widgets/live_video_view.dart
+          grep -q "if (!widget.isLiveContent)" lib/widgets/live_video_view.dart
+          grep -q "android-tv-panel-v3-native-hw" lib/services/remote_provisioning_service.dart
           grep -q "RemoteProvisioningService" lib/providers/iptv_provider.dart
 
-      - name: Commit Android TV playback fix
+      - name: Commit V3 source fix
         shell: bash
         run: |
           if git diff --quiet; then
@@ -62,9 +67,9 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add lib/screens/player_screen.dart
-            git commit -m "Fix slow-motion playback on Android TV"
-            git push origin HEAD:android-tv-panel-link-v2-playback-fix
+            git add lib/screens/player_screen.dart lib/widgets/live_video_view.dart lib/services/remote_provisioning_service.dart
+            git commit -m "Use native Android video path and reduce live UI rebuilds"
+            git push origin HEAD:android-tv-panel-link-v3-native-hw
           fi
 
       - name: Generate Android project
@@ -96,20 +101,20 @@ jobs:
           g.write_text(gs)
           PY
 
-      - name: Build Android TV V2 APK
+      - name: Build Android TV V3 APK
         run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
 
       - name: Prepare artifact
         shell: bash
         run: |
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-Android-TV-Panel-Link-V2-Playback-Fix.apk
-          sha256sum artifact/TV-FULL-PRO-Android-TV-Panel-Link-V2-Playback-Fix.apk > artifact/SHA256.txt
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-Android-TV-Panel-Link-V3-Native-HW.apk
+          sha256sum artifact/TV-FULL-PRO-Android-TV-Panel-Link-V3-Native-HW.apk > artifact/SHA256.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-Android-TV-Panel-Link-V2-Playback-Fix
+          name: TV-FULL-PRO-Android-TV-Panel-Link-V3-Native-HW
           path: artifact/
           retention-days: 30
