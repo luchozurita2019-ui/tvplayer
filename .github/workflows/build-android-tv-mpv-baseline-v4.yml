@@ -117,3 +117,5 @@ jobs:
           name: TV-FULL-PRO-V4-MPV-Android-Baseline
           path: artifact/
           retention-days: 30
+
+# V4 baseline: mpv-android style MediaCodec no-copy first, copy fallback.
