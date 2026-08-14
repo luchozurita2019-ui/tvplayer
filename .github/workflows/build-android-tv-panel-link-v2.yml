@@ -1,27 +1,28 @@
-name: Build Android TV Panel Link V3 Native HW
+name: Build Android TV V5 Media3 HotPlayer Baseline
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - android-tv-panel-link-v3-native-hw
+      - android-tv-media3-hotplayer-v5
     paths:
       - '.github/workflows/build-android-tv-panel-link-v2.yml'
-      - '.github/scripts/apply_android_tv_v3_native_hw.py'
+      - '.github/scripts/apply_android_media3_hotplayer_v5.py'
+      - 'lib/**'
+      - 'pubspec.yaml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  build-android-tv-panel-link-v3:
+  build-android-tv-media3-v5:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout Android TV V3 branch
+      - name: Checkout V5 branch
         uses: actions/checkout@v4
         with:
-          ref: android-tv-panel-link-v3-native-hw
-          fetch-depth: 0
+          ref: android-tv-media3-hotplayer-v5
 
       - name: Set up Java
         uses: actions/setup-java@v5
@@ -35,94 +36,63 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Apply native Android hardware path and UI load fix
-        run: python3 .github/scripts/apply_android_tv_v3_native_hw.py
-
-      - name: Format source
-        run: dart format lib/screens/player_screen.dart lib/widgets/live_video_view.dart lib/services/remote_provisioning_service.dart
-
-      - name: Get dependencies
+      - name: Get Flutter dependencies
         run: flutter pub get
-
-      - name: Analyze source
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
-
-      - name: Verify V3 markers
-        shell: bash
-        run: |
-          if grep -q "setProperty('hwdec'" lib/screens/player_screen.dart; then
-            echo "manual hwdec override is still present"
-            exit 1
-          fi
-          if grep -q "setProperty('framedrop'" lib/screens/player_screen.dart; then
-            echo "manual framedrop override is still present"
-            exit 1
-          fi
-          if grep -q "setProperty('video-sync'" lib/screens/player_screen.dart; then
-            echo "manual video-sync override is still present"
-            exit 1
-          fi
-          grep -q "Timer.periodic(const Duration(seconds: 1)" lib/widgets/live_video_view.dart
-          grep -q "if (!widget.isLiveContent)" lib/widgets/live_video_view.dart
-          grep -q "android-tv-panel-v3-native-hw" lib/services/remote_provisioning_service.dart
-          grep -q "RemoteProvisioningService" lib/providers/iptv_provider.dart
-
-      - name: Commit V3 source fix
-        shell: bash
-        run: |
-          if git diff --quiet; then
-            echo "No source changes to commit"
-          else
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add lib/screens/player_screen.dart lib/widgets/live_video_view.dart lib/services/remote_provisioning_service.dart
-            git commit -m "Use native Android video path and reduce live UI rebuilds"
-            git push origin HEAD:android-tv-panel-link-v3-native-hw
-          fi
 
       - name: Generate Android project
         run: flutter create --platforms=android .
 
-      - name: Configure Android TV package
+      - name: Apply native Media3 HotPlayer-style engine
+        run: python3 .github/scripts/apply_android_media3_hotplayer_v5.py
+
+      - name: Format patched Dart source
+        run: dart format lib/screens/player_screen.dart lib/screens/android_media3_player_screen.dart lib/services/remote_provisioning_service.dart
+
+      - name: Analyze source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify Media3 V5 markers
         shell: bash
         run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
-            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.faketouch" android:required="false" />' "$MANIFEST"
-          fi
-          sed -i 's/android:label="iptv_player"/android:label="TV FULL PRO TV"/' "$MANIFEST"
-          python3 - <<'PY'
-          from pathlib import Path
-          p = Path('android/app/src/main/AndroidManifest.xml')
-          s = p.read_text()
-          if 'android:usesCleartextTraffic' not in s:
-              s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
-          if 'android:banner=' not in s:
-              s = s.replace('android:label="TV FULL PRO TV"', 'android:label="TV FULL PRO TV"\n        android:banner="@mipmap/ic_launcher"', 1)
-          if 'android:screenOrientation=' not in s:
-              s = s.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"', 1)
-          if 'android.intent.category.LEANBACK_LAUNCHER' not in s:
-              s = s.replace('<category android:name="android.intent.category.LAUNCHER"/>', '<category android:name="android.intent.category.LAUNCHER"/>\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>', 1)
-          p.write_text(s)
-          g = Path('android/app/build.gradle.kts')
-          gs = g.read_text().replace('applicationId = "com.example.iptv_player"', 'applicationId = "com.tvfull.pro.tv"')
-          g.write_text(gs)
-          PY
+          grep -q "class PlayerScreen extends StatelessWidget" lib/screens/player_screen.dart
+          grep -q "AndroidMedia3PlayerScreen" lib/screens/player_screen.dart
+          grep -q "tvfull/media3_player" lib/screens/android_media3_player_screen.dart
+          grep -q "android-tv-media3-hotplayer-v5" lib/services/remote_provisioning_service.dart
+          grep -q 'androidx.media3:media3-exoplayer:1.8.0' android/app/build.gradle.kts
+          grep -q 'androidx.media3:media3-exoplayer-hls:1.8.0' android/app/build.gradle.kts
+          grep -q 'nextlib-media3ext:1.8.0-0.9.0' android/app/build.gradle.kts
+          grep -q 'setEnableDecoderFallback(true)' android/app/src/main/kotlin/*/*/*/MainActivity.kt
+          grep -q 'EXTENSION_RENDERER_MODE_ON' android/app/src/main/kotlin/*/*/*/MainActivity.kt
+          grep -q 'setBufferDurationsMs(5000, 15000, 2500, 1000)' android/app/src/main/kotlin/*/*/*/MainActivity.kt
 
-      - name: Build Android TV V3 APK
-        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+      - name: Build split release APKs
+        run: flutter build apk --release --split-per-abi --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Verify APK package and signatures
+        shell: bash
+        run: |
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "===== $apk ====="
+            "$AAPT" dump badging "$apk" | head -10
+            "$APKSIGNER" verify --verbose "$apk"
+          done
 
       - name: Prepare artifact
         shell: bash
         run: |
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-Android-TV-Panel-Link-V3-Native-HW.apk
-          sha256sum artifact/TV-FULL-PRO-Android-TV-Panel-Link-V3-Native-HW.apk > artifact/SHA256.txt
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V5-MEDIA3-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V5-MEDIA3-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk artifact/TV-FULL-PRO-V5-MEDIA3-X86_64.apk
+          sha256sum artifact/*.apk > artifact/SHA256.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-Android-TV-Panel-Link-V3-Native-HW
+          name: TV-FULL-PRO-V5-MEDIA3-HotPlayer-Baseline
           path: artifact/
           retention-days: 30
