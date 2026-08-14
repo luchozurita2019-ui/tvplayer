@@ -6,6 +6,7 @@ on:
       - remote-provisioning-panel-v1
     paths:
       - 'panel/**'
+      - '.github/scripts/apply_panel_customer_delete_v4.py'
       - '.github/workflows/deploy-tv-full-panel.yml'
   workflow_dispatch:
 
@@ -27,6 +28,23 @@ jobs:
     steps:
       - name: Checkout panel branch
         uses: actions/checkout@v6
+
+      - name: Enable customer deletion
+        run: python3 .github/scripts/apply_panel_customer_delete_v4.py
+
+      - name: Validate panel JavaScript
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text=Path('panel/index.html').read_text(encoding='utf-8')
+          m=re.search(r'<script type="module">(.*?)</script>', text, re.S)
+          if not m:
+              raise SystemExit('module script not found')
+          Path('/tmp/panel.mjs').write_text(m.group(1), encoding='utf-8')
+          PY
+          node --check /tmp/panel.mjs
+          grep -q 'data-action="delete-customer"' panel/index.html
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
