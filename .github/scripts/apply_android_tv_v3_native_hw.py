@@ -24,14 +24,13 @@ old = '''        // Android TV: el audio avanza a tiempo real pero el video pued
           } catch (_) {}
         }
 '''
-new = '''        // Android TV: no forzamos hwdec/framedrop/video-sync desde la app.
-        // media_kit_video administra su Surface nativa y la ruta MediaCodec de
-        // Android. Forzar mediacodec-copy obliga a copiar frames al CPU y puede
-        // trabar tanto el video como la interfaz en TVs/TV Box modestos.
+new = '''        // Android TV: no forzamos opciones de decodificación/sincronización
+        // desde la app. media_kit_video administra su Surface nativa y la ruta
+        // MediaCodec de Android para evitar copias innecesarias por CPU.
 '''
 if old in s:
     s = s.replace(old, new, 1)
-elif 'mediacodec-copy' in s:
+elif "setProperty('hwdec'" in s:
     raise SystemExit('Unexpected Android hwdec block; refusing blind patch')
 player.write_text(s, encoding='utf-8')
 
@@ -61,14 +60,16 @@ new_pos = '''    _positionSub = widget.player.stream.position.listen((value) {
       }
     });
 '''
-if old_pos not in v:
+if old_pos in v:
+    v = v.replace(old_pos, new_pos, 1)
+elif 'if (!widget.isLiveContent)' not in v:
     raise SystemExit('Position listener anchor not found')
-v = v.replace(old_pos, new_pos, 1)
-v = v.replace(
-    "    _statusTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {\n",
-    "    _statusTimer = Timer.periodic(const Duration(seconds: 1), (_) {\n",
-    1,
-)
+if 'Duration(milliseconds: 500)' in v:
+    v = v.replace(
+        "    _statusTimer = Timer.periodic(const Duration(milliseconds: 500), (_) {\n",
+        "    _statusTimer = Timer.periodic(const Duration(seconds: 1), (_) {\n",
+        1,
+    )
 view.write_text(v, encoding='utf-8')
 
 # 3) Update registration version for fresh Android TV installs.
@@ -81,12 +82,16 @@ r = r.replace(
 )
 remote.write_text(r, encoding='utf-8')
 
-# Validation.
+# Validation checks executable calls, not comments.
 ps = player.read_text(encoding='utf-8')
 vv = view.read_text(encoding='utf-8')
 rr = remote.read_text(encoding='utf-8')
-if 'mediacodec-copy' in ps:
-    raise SystemExit('mediacodec-copy still present')
+if "setProperty('hwdec'" in ps:
+    raise SystemExit('manual hwdec override still present')
+if "setProperty('framedrop'" in ps:
+    raise SystemExit('manual framedrop override still present')
+if "setProperty('video-sync'" in ps:
+    raise SystemExit('manual video-sync override still present')
 if "Timer.periodic(const Duration(seconds: 1)" not in vv:
     raise SystemExit('live UI timer was not reduced')
 if 'if (!widget.isLiveContent)' not in vv:
