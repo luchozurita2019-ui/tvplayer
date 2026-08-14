@@ -1,0 +1,88 @@
+name: Build Android TV V3 Side By Side
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-panel-link-v3-side-by-side
+    paths:
+      - '.github/workflows/build-android-tv-v3-side-by-side.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-tv-v3-side-by-side:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout side-by-side branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-panel-link-v3-side-by-side
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Configure side-by-side Android TV package
+        shell: bash
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.faketouch" android:required="false" />' "$MANIFEST"
+          fi
+          sed -i 's/android:label="iptv_player"/android:label="TV FULL PRO V3 TEST"/' "$MANIFEST"
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          s = p.read_text()
+          if 'android:usesCleartextTraffic' not in s:
+              s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
+          if 'android:banner=' not in s:
+              s = s.replace('android:label="TV FULL PRO V3 TEST"', 'android:label="TV FULL PRO V3 TEST"\n        android:banner="@mipmap/ic_launcher"', 1)
+          if 'android:screenOrientation=' not in s:
+              s = s.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"', 1)
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in s:
+              s = s.replace('<category android:name="android.intent.category.LAUNCHER"/>', '<category android:name="android.intent.category.LAUNCHER"/>\n                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>', 1)
+          p.write_text(s)
+
+          g = Path('android/app/build.gradle.kts')
+          gs = g.read_text().replace('applicationId = "com.example.iptv_player"', 'applicationId = "com.tvfull.pro.tv.v3test"')
+          g.write_text(gs)
+          PY
+
+      - name: Build Android TV V3 test APK
+        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-V3-TEST-Side-By-Side.apk
+          sha256sum artifact/TV-FULL-PRO-V3-TEST-Side-By-Side.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-V3-TEST-Side-By-Side
+          path: artifact/
+          retention-days: 30
