@@ -1,4 +1,4 @@
-name: Build Android TV V3 Side By Side
+name: Build Android TV V3 Install Diagnostic
 
 on:
   workflow_dispatch:
@@ -12,11 +12,11 @@ permissions:
   contents: read
 
 jobs:
-  build-android-tv-v3-side-by-side:
+  build-android-tv-v3-install-diagnostic:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout side-by-side branch
+      - name: Checkout diagnostic branch
         uses: actions/checkout@v4
         with:
           ref: android-tv-panel-link-v3-side-by-side
@@ -42,14 +42,14 @@ jobs:
       - name: Generate Android project
         run: flutter create --platforms=android .
 
-      - name: Configure side-by-side Android TV package
+      - name: Configure clean diagnostic Android TV package
         shell: bash
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />\n    <uses-feature android:name="android.software.leanback" android:required="true" />\n    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n    <uses-feature android:name="android.hardware.faketouch" android:required="false" />' "$MANIFEST"
           fi
-          sed -i 's/android:label="iptv_player"/android:label="TV FULL PRO V3 TEST"/' "$MANIFEST"
+          sed -i 's/android:label="iptv_player"/android:label="TV FULL PRO V3 TEST 2"/' "$MANIFEST"
           python3 - <<'PY'
           from pathlib import Path
           p = Path('android/app/src/main/AndroidManifest.xml')
@@ -57,7 +57,7 @@ jobs:
           if 'android:usesCleartextTraffic' not in s:
               s = s.replace('<application', '<application android:usesCleartextTraffic="true"', 1)
           if 'android:banner=' not in s:
-              s = s.replace('android:label="TV FULL PRO V3 TEST"', 'android:label="TV FULL PRO V3 TEST"\n        android:banner="@mipmap/ic_launcher"', 1)
+              s = s.replace('android:label="TV FULL PRO V3 TEST 2"', 'android:label="TV FULL PRO V3 TEST 2"\n        android:banner="@mipmap/ic_launcher"', 1)
           if 'android:screenOrientation=' not in s:
               s = s.replace('android:name=".MainActivity"', 'android:name=".MainActivity"\n            android:screenOrientation="landscape"', 1)
           if 'android.intent.category.LEANBACK_LAUNCHER' not in s:
@@ -65,26 +65,39 @@ jobs:
           p.write_text(s)
 
           g = Path('android/app/build.gradle.kts')
-          gs = g.read_text().replace('applicationId = "com.example.iptv_player"', 'applicationId = "com.tvfull.pro.tv.v3test"')
+          gs = g.read_text().replace('applicationId = "com.example.iptv_player"', 'applicationId = "com.tvfull.pro.tv.v3test2"')
           g.write_text(gs)
           PY
 
-      - name: Build Android TV V3 test APK
-        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+      - name: Build smaller split APKs
+        run: flutter build apk --release --split-per-abi --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Verify package and signatures
+        shell: bash
+        run: |
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+          echo "Android build tools: $BUILD_TOOLS"
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "===== $apk ====="
+            "$AAPT" dump badging "$apk" | head -20
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+          done
 
       - name: Prepare artifact
         shell: bash
         run: |
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-V3-TEST-Side-By-Side.apk
-          sha256sum artifact/TV-FULL-PRO-V3-TEST-Side-By-Side.apk > artifact/SHA256.txt
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V3-TEST2-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V3-TEST2-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk artifact/TV-FULL-PRO-V3-TEST2-X86_64.apk
+          sha256sum artifact/*.apk > artifact/SHA256.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V3-TEST-Side-By-Side
+          name: TV-FULL-PRO-V3-TEST2-Install-Diagnostic
           path: artifact/
           retention-days: 30
-
-# Side-by-side test package: installs without replacing the currently installed TV FULL PRO.
