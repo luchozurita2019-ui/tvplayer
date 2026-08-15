@@ -24,6 +24,12 @@
         <activity
             android:name=".LoginActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
+            android:name=".ProvisioningActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
             android:exported="true"
             android:screenOrientation="landscape">
             <intent-filter>
