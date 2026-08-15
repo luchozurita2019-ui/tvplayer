@@ -56,7 +56,7 @@ class LoginActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(dp(620), dp(60)))
 
         root.addView(TextView(this).apply {
-            text = "Tu contenido. Un solo reproductor."
+            text = "Configuración manual de respaldo"
             textSize = 16f
             setTextColor(Color.rgb(185, 193, 204))
             gravity = Gravity.CENTER
@@ -170,8 +170,9 @@ class LoginActivity : AppCompatActivity() {
             runOnUiThread {
                 connect.isEnabled = true
                 if (ok) {
+                    RemotePrefs.disableRemote(this)
                     Prefs.save(this, config)
-                    status.text = "Conectado"
+                    status.text = "Conectado en modo manual"
                     startActivity(Intent(this, MainActivity::class.java))
                     finish()
                 } else {
