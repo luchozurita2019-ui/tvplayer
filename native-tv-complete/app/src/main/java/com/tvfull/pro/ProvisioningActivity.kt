@@ -192,7 +192,7 @@ class ProvisioningActivity : AppCompatActivity() {
                         openMain()
                     }
                     RemoteConfigState.UNASSIGNED -> {
-                        statusText.text = "Esperando que asignes un servicio a $${credentials.code}".replace("$${credentials.code}", credentials.code)
+                        statusText.text = "Esperando que asignes un servicio a ${credentials.code}"
                         schedulePoll(5_000)
                     }
                     RemoteConfigState.DISABLED -> {
