@@ -1,0 +1,1 @@
+V6 queda preservada como experimento. El siguiente trabajo debe continuar en un branch único de Player Core basado en la V4 estable de carga/listas.
