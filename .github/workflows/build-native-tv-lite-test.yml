@@ -69,6 +69,19 @@ jobs:
           theme_text = theme_text.replace('        <item name="headersVerticalGridStyle">@style/Headers</item>\n', '')
           theme_text = theme_text.replace('\n    <style name="Headers" parent="Widget.Leanback.Headers.VerticalGridStyle" />\n', '\n')
           themes.write_text(theme_text)
+
+          player_layout = Path('native-tv-lite/work/TVStreamCatalog/app/src/main/res/layout/activity_player.xml')
+          player_text = player_layout.read_text()
+          old = (
+              '        app:show_buffering="when_playing"\n'
+              '        app:controller_auto_show="false"\n'
+              '        app:controller_hide_on_touch="true"\n'
+              '        app:controller_show_timeout="2500" />'
+          )
+          new = '        app:show_buffering="when_playing" />'
+          if old not in player_text:
+              raise SystemExit('Unexpected PlayerView controller attributes')
+          player_layout.write_text(player_text.replace(old, new, 1))
           PY
 
       - name: Build optimized release APK
