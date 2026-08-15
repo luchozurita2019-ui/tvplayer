@@ -1,4 +1,4 @@
-name: Build Android TV Player Core
+name: Build Android TV Player Core Universal
 
 on:
   workflow_dispatch:
@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  build-player-core:
+  build-player-core-universal:
     runs-on: ubuntu-latest
 
     steps:
@@ -71,34 +71,40 @@ jobs:
           grep -q 'nextlib-media3ext:1.10.1-0.13.0' android/app/build.gradle.kts
           grep -q 'com.tvfull.pro.tv.playercore' android/app/build.gradle.kts
 
-      - name: Build split release APKs
-        run: flutter build apk --release --split-per-abi --dart-define=TV_FULL_ANDROID_TV=true
+      - name: Build one universal release APK
+        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
 
-      - name: Verify APK package and signatures
+      - name: Verify universal ABI coverage and signature
         shell: bash
         run: |
+          APK="build/app/outputs/flutter-apk/app-release.apk"
           BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
           APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
-          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
-            echo "===== $apk ====="
-            "$AAPT" dump badging "$apk" | head -10
-            "$APKSIGNER" verify --verbose --print-certs "$apk"
-          done
 
-      - name: Prepare artifact
+          "$AAPT" dump badging "$APK" | head -12
+          "$APKSIGNER" verify --verbose --print-certs "$APK"
+
+          echo "===== ABI libraries packaged in universal APK ====="
+          unzip -l "$APK" | grep -E 'lib/(armeabi-v7a|arm64-v8a|x86_64)/.*\.so$' | head -80
+
+          unzip -l "$APK" | grep -q 'lib/armeabi-v7a/'
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/'
+          unzip -l "$APK" | grep -q 'lib/x86_64/'
+
+          echo "Universal APK contains ARM32, ARM64 and x86_64 native libraries."
+
+      - name: Prepare single universal artifact
         shell: bash
         run: |
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-PLAYER-CORE-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-PLAYER-CORE-ARM64.apk
-          cp build/app/outputs/flutter-apk/app-x86_64-release.apk artifact/TV-FULL-PRO-PLAYER-CORE-X86_64.apk
-          sha256sum artifact/*.apk > artifact/SHA256.txt
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-PLAYER-CORE-UNIVERSAL.apk
+          sha256sum artifact/TV-FULL-PRO-PLAYER-CORE-UNIVERSAL.apk > artifact/SHA256.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
-      - name: Upload APKs
+      - name: Upload universal APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-PLAYER-CORE
+          name: TV-FULL-PRO-PLAYER-CORE-UNIVERSAL
           path: artifact/
           retention-days: 30
