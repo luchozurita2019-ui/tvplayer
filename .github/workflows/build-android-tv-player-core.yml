@@ -1,0 +1,104 @@
+name: Build Android TV Player Core
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-native-multiplayer-v6
+    paths:
+      - '.github/scripts/apply_android_player_core.py'
+      - '.github/workflows/build-android-tv-player-core.yml'
+      - 'lib/**'
+      - 'pubspec.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-player-core:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout working branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-native-multiplayer-v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get Flutter dependencies
+        run: flutter pub get
+
+      - name: Keep current MPV fallback baseline
+        run: python3 .github/scripts/apply_mpv_android_baseline_v4.py
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+
+      - name: Apply Player Core architecture
+        run: python3 .github/scripts/apply_android_player_core.py
+
+      - name: Format Dart patches
+        run: dart format lib/screens/player_screen.dart lib/screens/android_player_core_launcher.dart lib/services/remote_provisioning_service.dart
+
+      - name: Analyze app source
+        run: flutter analyze lib --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify core markers
+        shell: bash
+        run: |
+          grep -q "tvfull/player_core" lib/screens/android_player_core_launcher.dart
+          grep -q "fallback_mpv" android/app/src/main/kotlin/com/example/iptv_player/TvFullPlayerCoreActivity.kt
+          grep -q "Media3PlaybackEngine" android/app/src/main/kotlin/com/example/iptv_player/TvFullPlayerCoreActivity.kt
+          grep -q "AndroidMediaPlaybackEngine" android/app/src/main/kotlin/com/example/iptv_player/TvFullPlayerCoreActivity.kt
+          grep -q "onDroppedVideoFrames" android/app/src/main/kotlin/com/example/iptv_player/Media3PlaybackEngine.kt
+          grep -q "onVideoDecoderInitialized" android/app/src/main/kotlin/com/example/iptv_player/Media3PlaybackEngine.kt
+          grep -q "setBufferDurationsMs(3000, 12000, 800, 1200)" android/app/src/main/kotlin/com/example/iptv_player/Media3PlaybackEngine.kt
+          grep -q 'androidx.media3:media3-exoplayer:1.10.1' android/app/build.gradle.kts
+          grep -q 'nextlib-media3ext:1.10.1-0.13.0' android/app/build.gradle.kts
+          grep -q 'com.tvfull.pro.tv.playercore' android/app/build.gradle.kts
+
+      - name: Build split release APKs
+        run: flutter build apk --release --split-per-abi --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Verify APK package and signatures
+        shell: bash
+        run: |
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
+          APKSIGNER="$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner"
+          for apk in build/app/outputs/flutter-apk/app-*-release.apk; do
+            echo "===== $apk ====="
+            "$AAPT" dump badging "$apk" | head -10
+            "$APKSIGNER" verify --verbose --print-certs "$apk"
+          done
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-PLAYER-CORE-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-PLAYER-CORE-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-x86_64-release.apk artifact/TV-FULL-PRO-PLAYER-CORE-X86_64.apk
+          sha256sum artifact/*.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-PLAYER-CORE
+          path: artifact/
+          retention-days: 30
