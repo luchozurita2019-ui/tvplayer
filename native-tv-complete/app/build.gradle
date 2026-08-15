@@ -7,6 +7,10 @@ android {
     namespace 'com.tvfull.pro'
     compileSdk 35
 
+    buildFeatures {
+        buildConfig true
+    }
+
     defaultConfig {
         applicationId 'com.tvfull.pro'
         minSdk 21
