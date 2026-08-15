@@ -15,8 +15,8 @@ android {
         applicationId 'com.tvfull.pro'
         minSdk 21
         targetSdk 34
-        versionCode 3
-        versionName '1.2-native-pro-ui'
+        versionCode 4
+        versionName '1.3-native-hierarchical-ui'
     }
 
     signingConfigs {
