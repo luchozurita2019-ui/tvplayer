@@ -1,0 +1,1 @@
+Player Core will use native Android SurfaceView playback, health-driven backend selection, local diagnostics, and MPV fallback while keeping Flutter list/panel logic unchanged.
