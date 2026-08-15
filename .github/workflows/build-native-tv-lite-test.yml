@@ -1,0 +1,67 @@
+name: Build TV FULL Native Lite Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - native-tv-lite-test-v1
+    paths:
+      - 'native-tv-lite/source/**'
+      - '.github/workflows/build-native-tv-lite-test.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-native-tv-lite:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout test branch
+        uses: actions/checkout@v4
+
+      - name: Set up Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle 8.6
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.6'
+
+      - name: Rebuild native source package
+        shell: bash
+        run: |
+          mkdir -p native-tv-lite/work
+          cat native-tv-lite/source/part* > native-tv-lite/work/project.b64
+          base64 -d native-tv-lite/work/project.b64 > native-tv-lite/work/project.zip
+          echo '1724571cbdc52ff50e40a67e4cce9af0815ee2393b0582a31d28d38078fc57e5  native-tv-lite/work/project.zip' | sha256sum -c -
+          unzip -q native-tv-lite/work/project.zip -d native-tv-lite/work
+
+      - name: Build optimized release APK
+        working-directory: native-tv-lite/work/TVStreamCatalog
+        run: gradle --no-daemon --stacktrace :app:assembleRelease
+
+      - name: Verify APK
+        shell: bash
+        run: |
+          APK='native-tv-lite/work/TVStreamCatalog/app/build/outputs/apk/release/app-release.apk'
+          test -f "$APK"
+          ls -lh "$APK"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -20
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          mkdir -p native-tv-lite/artifact
+          cp "$APK" native-tv-lite/artifact/TV-FULL-NATIVE-LITE-TEST-V1.apk
+          sha256sum native-tv-lite/artifact/TV-FULL-NATIVE-LITE-TEST-V1.apk > native-tv-lite/artifact/SHA256.txt
+          stat -c '%s' native-tv-lite/artifact/TV-FULL-NATIVE-LITE-TEST-V1.apk > native-tv-lite/artifact/SIZE_BYTES.txt
+          git rev-parse HEAD > native-tv-lite/artifact/COMMIT.txt
+
+      - name: Upload test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-NATIVE-LITE-TEST-V1
+          path: native-tv-lite/artifact/
+          retention-days: 30
