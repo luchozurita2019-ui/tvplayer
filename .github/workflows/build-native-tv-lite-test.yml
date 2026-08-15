@@ -40,6 +40,20 @@ jobs:
           echo '1724571cbdc52ff50e40a67e4cce9af0815ee2393b0582a31d28d38078fc57e5  native-tv-lite/work/project.zip' | sha256sum -c -
           unzip -q native-tv-lite/work/project.zip -d native-tv-lite/work
 
+      - name: Fix Gradle repositories from prototype
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('native-tv-lite/work/TVStreamCatalog/build.gradle')
+          text = path.read_text()
+          needle = 'buildscript {\n    ext.kotlin_version'
+          replacement = 'buildscript {\n    repositories {\n        google()\n        mavenCentral()\n    }\n    ext.kotlin_version'
+          if needle not in text:
+              raise SystemExit('Unexpected root build.gradle format')
+          path.write_text(text.replace(needle, replacement, 1))
+          PY
+
       - name: Build optimized release APK
         working-directory: native-tv-lite/work/TVStreamCatalog
         run: gradle --no-daemon --stacktrace :app:assembleRelease
