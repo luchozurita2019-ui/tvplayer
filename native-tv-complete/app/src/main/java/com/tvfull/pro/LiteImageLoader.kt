@@ -20,8 +20,8 @@ import java.util.concurrent.Future
  *
  * Design goals:
  * - no third-party image dependency
- * - only starts a network request when the adapter marks an item as visible
- * - cancels work when a recycled ImageView receives another URL
+ * - only starts a network request when a holder is attached/visible
+ * - cancels work when a recycled ImageView leaves the screen
  * - keeps a very small memory cache
  * - keeps compressed source bytes in the app cache so logos/posters are not downloaded again
  */
@@ -43,7 +43,7 @@ class LiteImageLoader(context: Context) {
             return
         }
 
-        val key = "$clean@$targetWidthx$targetHeight"
+        val key = "${clean}@${targetWidth}x${targetHeight}"
         memory.get(key)?.let {
             view.setImageBitmap(it)
             return
@@ -95,7 +95,6 @@ class LiteImageLoader(context: Context) {
                     val n = input.read(buffer)
                     if (n <= 0) break
                     total += n
-                    // Protect low-end TVs from giant/broken artwork. 3 MiB compressed is enough for logos/posters.
                     if (total > 3 * 1024 * 1024) throw IllegalStateException("image_too_large")
                     output.write(buffer, 0, n)
                 }
