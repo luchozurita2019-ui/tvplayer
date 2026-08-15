@@ -40,18 +40,25 @@ jobs:
           echo '1724571cbdc52ff50e40a67e4cce9af0815ee2393b0582a31d28d38078fc57e5  native-tv-lite/work/project.zip' | sha256sum -c -
           unzip -q native-tv-lite/work/project.zip -d native-tv-lite/work
 
-      - name: Fix Gradle repositories from prototype
+      - name: Normalize prototype build for TV compatibility
         shell: bash
         run: |
           python3 - <<'PY'
           from pathlib import Path
-          path = Path('native-tv-lite/work/TVStreamCatalog/build.gradle')
-          text = path.read_text()
+
+          root = Path('native-tv-lite/work/TVStreamCatalog/build.gradle')
+          text = root.read_text()
           needle = 'buildscript {\n    ext.kotlin_version'
           replacement = 'buildscript {\n    repositories {\n        google()\n        mavenCentral()\n    }\n    ext.kotlin_version'
           if needle not in text:
               raise SystemExit('Unexpected root build.gradle format')
-          path.write_text(text.replace(needle, replacement, 1))
+          root.write_text(text.replace(needle, replacement, 1))
+
+          app = Path('native-tv-lite/work/TVStreamCatalog/app/build.gradle')
+          app_text = app.read_text()
+          if '1.10.1' not in app_text:
+              raise SystemExit('Expected Media3 1.10.1 dependencies not found')
+          app.write_text(app_text.replace('1.10.1', '1.8.0'))
           PY
 
       - name: Build optimized release APK
