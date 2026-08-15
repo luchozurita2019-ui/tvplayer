@@ -63,6 +63,12 @@ jobs:
           app_text = app_text.replace('1.10.1', '1.8.0')
           app_text = app_text.replace('compileSdk 34', 'compileSdk 35')
           app.write_text(app_text)
+
+          themes = Path('native-tv-lite/work/TVStreamCatalog/app/src/main/res/values/themes.xml')
+          theme_text = themes.read_text()
+          theme_text = theme_text.replace('        <item name="headersVerticalGridStyle">@style/Headers</item>\n', '')
+          theme_text = theme_text.replace('\n    <style name="Headers" parent="Widget.Leanback.Headers.VerticalGridStyle" />\n', '\n')
+          themes.write_text(theme_text)
           PY
 
       - name: Build optimized release APK
