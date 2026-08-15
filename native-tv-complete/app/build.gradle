@@ -11,8 +11,8 @@ android {
         applicationId 'com.tvfull.pro'
         minSdk 21
         targetSdk 34
-        versionCode 1
-        versionName '1.0-native-complete'
+        versionCode 2
+        versionName '1.1-native-complete-remote'
     }
 
     signingConfigs {
