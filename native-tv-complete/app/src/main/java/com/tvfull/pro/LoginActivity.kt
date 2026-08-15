@@ -134,11 +134,10 @@ class LoginActivity : AppCompatActivity() {
     private fun field(hintText: String): EditText {
         return EditText(this).apply {
             hint = hintText
-            hintTextColors
             setHintTextColor(Color.rgb(145, 155, 170))
             setTextColor(Color.WHITE)
             textSize = 18f
-            singleLine = true
+            setSingleLine(true)
             isFocusable = true
             setPadding(dp(16), 0, dp(16), 0)
             backgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(140, 150, 165))
