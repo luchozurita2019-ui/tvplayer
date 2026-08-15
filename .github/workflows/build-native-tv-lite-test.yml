@@ -62,6 +62,10 @@ jobs:
               raise SystemExit('Expected Media3 1.10.1 dependencies not found')
           app_text = app_text.replace('1.10.1', '1.8.0')
           app_text = app_text.replace('compileSdk 34', 'compileSdk 35')
+          # Diagnostic release: keep R8/shrinkResources, but use Android's debug
+          # signing key so the APK is immediately installable on the test TV.
+          if 'release {' in app_text and 'signingConfig signingConfigs.debug' not in app_text:
+              app_text = app_text.replace('release {', 'release {\n            signingConfig signingConfigs.debug', 1)
           app.write_text(app_text)
 
           themes = Path('native-tv-lite/work/TVStreamCatalog/app/src/main/res/values/themes.xml')
@@ -84,7 +88,7 @@ jobs:
           player_layout.write_text(player_text.replace(old, new, 1))
           PY
 
-      - name: Build optimized release APK
+      - name: Build optimized signed release APK
         working-directory: native-tv-lite/work/TVStreamCatalog
         run: gradle --no-daemon --stacktrace :app:assembleRelease
 
