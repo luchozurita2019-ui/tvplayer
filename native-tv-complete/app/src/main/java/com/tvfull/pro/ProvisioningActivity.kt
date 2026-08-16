@@ -233,7 +233,7 @@ class ProvisioningActivity : AppCompatActivity() {
         if (launching || stopped) return
         launching = true
         handler.removeCallbacksAndMessages(null)
-        startActivity(Intent(this, MainActivity::class.java))
+        startActivity(Intent(this, TvHomeActivity::class.java))
         finish()
     }
 
