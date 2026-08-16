@@ -15,8 +15,8 @@ android {
         applicationId 'com.tvfull.pro'
         minSdk 21
         targetSdk 34
-        versionCode 6
-        versionName '1.5-native-playlists-live-vod'
+        versionCode 7
+        versionName '1.6-native-xtream-movie-settings'
     }
 
     signingConfigs {
