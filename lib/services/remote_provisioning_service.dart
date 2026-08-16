@@ -19,6 +19,23 @@ class RemoteDeviceCredentialsInvalidException implements Exception {
   String toString() => 'La vinculación de este dispositivo ya no es válida.';
 }
 
+class RemoteDeviceAccessBlockedException implements Exception {
+  final String reason;
+  final String title;
+  final String message;
+
+  const RemoteDeviceAccessBlockedException({
+    required this.reason,
+    required this.title,
+    required this.message,
+  });
+
+  bool get isPaymentDue => reason == 'payment_due';
+
+  @override
+  String toString() => message;
+}
+
 class RemoteProvisionedService {
   final String id;
   final String name;
@@ -128,7 +145,7 @@ class RemoteProvisioningService {
           body: jsonEncode(const {
             'platform': 'macos',
             'device_name': 'TV FULL macOS',
-            'app_version': '1.0.0+1-mac-remote-v3',
+            'app_version': '1.0.0+1-mac-payment-status-v1',
           }),
         )
         .timeout(const Duration(seconds: 15));
@@ -175,8 +192,30 @@ class RemoteProvisioningService {
         .timeout(const Duration(seconds: 15));
 
     if (response.statusCode == 403) {
-      throw Exception(
-        'Este dispositivo fue desactivado desde el panel TV FULL.',
+      String reason = 'device_disabled';
+      String title = 'Acceso suspendido';
+      String message = 'Este dispositivo fue desactivado desde el panel TV FULL.';
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) {
+          final data = Map<String, dynamic>.from(decoded);
+          reason = data['error']?.toString().trim().isNotEmpty == true
+              ? data['error'].toString().trim()
+              : reason;
+          title = data['title']?.toString().trim().isNotEmpty == true
+              ? data['title'].toString().trim()
+              : title;
+          message = data['message']?.toString().trim().isNotEmpty == true
+              ? data['message'].toString().trim()
+              : message;
+        }
+      } catch (_) {
+        // Conserva el mensaje genérico si el servidor no devolvió JSON.
+      }
+      throw RemoteDeviceAccessBlockedException(
+        reason: reason,
+        title: title,
+        message: message,
       );
     }
     if (response.statusCode == 401) {
