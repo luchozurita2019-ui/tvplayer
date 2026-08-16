@@ -2,6 +2,7 @@ package com.tvfull.pro
 
 import android.content.Context
 import android.os.Build
+import org.json.JSONArray
 import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
@@ -14,13 +15,18 @@ data class RemoteDeviceCredentials(
     val secret: String
 )
 
+data class RemoteService(
+    val id: String,
+    val name: String,
+    val config: SourceConfig,
+    val expiresAt: String = ""
+)
+
 enum class RemoteConfigState { READY, UNASSIGNED, DISABLED, INVALID, ERROR }
 
 data class RemoteConfigResult(
     val state: RemoteConfigState,
-    val config: SourceConfig? = null,
-    val serviceId: String = "",
-    val serviceName: String = "",
+    val services: List<RemoteService> = emptyList(),
     val message: String = ""
 )
 
@@ -51,6 +57,57 @@ object RemotePrefs {
             .apply()
     }
 
+    fun saveServices(context: Context, services: List<RemoteService>) {
+        val arr = JSONArray()
+        services.forEach { service ->
+            arr.put(JSONObject().apply {
+                put("id", service.id)
+                put("name", service.name)
+                put("expires_at", service.expiresAt)
+                put("mode", service.config.mode.name)
+                put("m3u", service.config.m3uUrl)
+                put("server", service.config.server)
+                put("username", service.config.username)
+                put("password", service.config.password)
+                put("fallback_m3u", service.config.fallbackM3uUrl)
+            })
+        }
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).edit()
+            .putString("services_json", arr.toString())
+            .putBoolean("remote_enabled", true)
+            .apply()
+    }
+
+    fun loadServices(context: Context): List<RemoteService> {
+        val raw = context.getSharedPreferences(FILE, Context.MODE_PRIVATE)
+            .getString("services_json", "").orEmpty()
+        if (raw.isBlank()) return emptyList()
+        return runCatching {
+            val arr = JSONArray(raw)
+            buildList {
+                for (i in 0 until arr.length()) {
+                    val o = arr.optJSONObject(i) ?: continue
+                    val mode = runCatching { SourceMode.valueOf(o.optString("mode")) }.getOrDefault(SourceMode.M3U)
+                    add(
+                        RemoteService(
+                            id = o.optString("id"),
+                            name = o.optString("name", "Lista ${i + 1}"),
+                            expiresAt = o.optString("expires_at"),
+                            config = SourceConfig(
+                                mode = mode,
+                                m3uUrl = o.optString("m3u"),
+                                server = o.optString("server"),
+                                username = o.optString("username"),
+                                password = o.optString("password"),
+                                fallbackM3uUrl = o.optString("fallback_m3u")
+                            )
+                        )
+                    )
+                }
+            }
+        }.getOrDefault(emptyList())
+    }
+
     fun serviceName(context: Context): String =
         context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("service_name", "").orEmpty()
 
@@ -73,6 +130,7 @@ object RemotePrefs {
             .remove("device_secret")
             .remove("service_id")
             .remove("service_name")
+            .remove("services_json")
             .putBoolean("remote_enabled", true)
             .apply()
     }
@@ -142,32 +200,33 @@ object RemoteProvisioningClient {
             return RemoteConfigResult(RemoteConfigState.UNASSIGNED, message = "Esperando servicio desde el panel")
         }
 
-        val service = services.optJSONObject(0)
-            ?: return RemoteConfigResult(RemoteConfigState.UNASSIGNED, message = "Esperando servicio desde el panel")
-        val type = service.optString("type").trim().lowercase()
-        val id = service.optString("id").trim()
-        val name = service.optString("name").trim()
+        val parsed = buildList {
+            for (i in 0 until services.length()) {
+                val service = services.optJSONObject(i) ?: continue
+                val type = service.optString("type").trim().lowercase()
+                val id = service.optString("id").trim()
+                val name = service.optString("name").trim().ifBlank { "Lista ${i + 1}" }
+                val expires = service.optString("expires_at")
 
-        val config = if (type == "m3u") {
-            val url = service.optString("url").trim()
-            if (url.isBlank()) return RemoteConfigResult(RemoteConfigState.ERROR, message = "Servicio M3U sin URL")
-            SourceConfig(SourceMode.M3U, m3uUrl = url)
-        } else {
-            val server = service.optString("server").trim().trimEnd('/')
-            val username = service.optString("username").trim()
-            val password = service.optString("password")
-            if (server.isBlank() || username.isBlank() || password.isBlank()) {
-                return RemoteConfigResult(RemoteConfigState.ERROR, message = "Servicio Xtream incompleto")
+                val config = if (type == "m3u") {
+                    val url = service.optString("url").trim()
+                    if (url.isBlank()) continue
+                    SourceConfig(SourceMode.M3U, m3uUrl = url)
+                } else {
+                    val server = service.optString("server").trim().trimEnd('/')
+                    val username = service.optString("username").trim()
+                    val password = service.optString("password")
+                    if (server.isBlank() || username.isBlank() || password.isBlank()) continue
+                    SourceConfig(SourceMode.XTREAM, server = server, username = username, password = password)
+                }
+                add(RemoteService(id = id, name = name, config = config, expiresAt = expires))
             }
-            SourceConfig(SourceMode.XTREAM, server = server, username = username, password = password)
         }
 
-        return RemoteConfigResult(
-            state = RemoteConfigState.READY,
-            config = config,
-            serviceId = id,
-            serviceName = name
-        )
+        if (parsed.isEmpty()) {
+            return RemoteConfigResult(RemoteConfigState.ERROR, message = "No hay listas válidas asignadas")
+        }
+        return RemoteConfigResult(RemoteConfigState.READY, services = parsed)
     }
 
     private fun readResponse(conn: HttpURLConnection): String {
