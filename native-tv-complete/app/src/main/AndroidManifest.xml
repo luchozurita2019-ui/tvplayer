@@ -16,6 +16,12 @@
         android:usesCleartextTraffic="true">
 
         <activity
+            android:name=".TvHomeActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
             android:name=".MainActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
             android:exported="false"
