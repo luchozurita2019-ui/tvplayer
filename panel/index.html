@@ -76,6 +76,7 @@
     const customerName = id => state.customers.find(x=>x.id===id)?.name || 'Sin cliente';
     const platformLabel = p => ({android_tv:'Android TV',android:'Android',macos:'macOS'}[p] || p || 'Desconocido');
     const statusBadge = active => `<span class="badge ${active?'on':'off'}">${active?'ACTIVO':'INACTIVO'}</span>`;
+    const validationBadge = service => { const status=service.validation_status||'unknown'; const title=esc(service.validation_message||'Sin validar'); if(status==='online') return `<span class="badge on" title="${title}">ONLINE</span>${service.validation_latency_ms!=null?`<div class="customer-meta">${Number(service.validation_latency_ms)} ms</div>`:''}`; if(status==='error') return `<span class="badge off" title="${title}">ERROR</span>`; return `<span class="badge neutral" title="${title}">SIN VALIDAR</span>`; };
     const toast = msg => { const el=$('#authMessage'); if(!$('#authView').classList.contains('hidden')){el.textContent=msg;return;} alert(msg); };
 
 
@@ -163,7 +164,7 @@
       const [c,d,s,a]=await Promise.all([
         supabase.from('tvf_customers').select('id,name,phone,notes,active,created_at').order('created_at',{ascending:false}),
         supabase.from('tvf_devices').select('id,device_code,device_name,platform,app_version,active,last_seen_at,customer_id,created_at').order('created_at',{ascending:false}),
-        supabase.from('tvf_services').select('id,name,service_type,server_url,username,password,m3u_url,active,expires_at,customer_id,created_at').order('created_at',{ascending:false}),
+        supabase.from('tvf_services').select('id,name,service_type,server_url,username,password,m3u_url,active,expires_at,customer_id,created_at,validation_status,validated_at,validation_message,validation_latency_ms').order('created_at',{ascending:false}),
         supabase.from('tvf_device_services').select('id,device_id,service_id,enabled,display_order,assigned_at,tvf_devices(device_code,device_name,platform),tvf_services(name,service_type)').order('assigned_at',{ascending:false})
       ]);
       for(const r of [c,d,s,a]) if(r.error) throw r.error;
@@ -249,8 +250,8 @@
     function devicesTable(rows){ if(!rows.length)return '<div class="empty">No se encontraron dispositivos.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Código</th><th>Nombre</th><th>Plataforma</th><th>Cliente</th><th>Última conexión</th><th>Estado</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr><td class="code">${esc(d.device_code)}</td><td>${esc(d.device_name||'Sin nombre')}</td><td>${esc(platformLabel(d.platform))}</td><td>${esc(customerName(d.customer_id))}</td><td>${dt(d.last_seen_at)}</td><td>${statusBadge(d.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="edit-device" data-id="${d.id}">Editar</button><button class="btn btn-danger btn-small" data-action="delete-device" data-id="${d.id}">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>`; }
 
     function renderServices(){
-      $('#content').innerHTML=`<div class="toolbar"><div><h2>Servicios</h2><div class="muted">Listas M3U y accesos Xtream administrados remotamente.</div></div><button class="btn btn-primary" data-action="new-service">+ Nuevo servicio</button></div>
-      ${state.services.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Tipo</th><th>Cliente</th><th>Servidor / URL</th><th>Credencial</th><th>Vence</th><th>Estado</th><th></th></tr></thead><tbody>${state.services.map(s=>`<tr><td><b>${esc(s.name)}</b></td><td><span class="badge">${esc(s.service_type.toUpperCase())}</span></td><td>${esc(customerName(s.customer_id))}</td><td class="code">${esc(s.service_type==='m3u'?(s.m3u_url||''):(s.server_url||''))}</td><td>${s.service_type==='xtream'?`${esc(s.username||'')} · ••••••`:'—'}</td><td>${esc(dateOnly(s.expires_at))}</td><td>${statusBadge(s.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="toggle-service" data-id="${s.id}">${s.active?'Desactivar':'Activar'}</button><button class="btn btn-danger btn-small" data-action="delete-service" data-id="${s.id}">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios todavía.</div>'}`;
+      $('#content').innerHTML=`<div class="toolbar"><div><h2>Servicios</h2><div class="muted">Las listas se validan antes de habilitarse. “Habilitado” indica permiso administrativo; “Conexión” confirma si la fuente respondió correctamente.</div></div><button class="btn btn-primary" data-action="new-service">+ Nuevo servicio</button></div>
+      ${state.services.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Tipo</th><th>Cliente</th><th>Servidor / URL</th><th>Credencial</th><th>Vence</th><th>Conexión</th><th>Habilitado</th><th></th></tr></thead><tbody>${state.services.map(s=>`<tr><td><b>${esc(s.name)}</b>${s.validated_at?`<div class="customer-meta">Validado: ${dt(s.validated_at)}</div>`:''}</td><td><span class="badge">${esc(s.service_type.toUpperCase())}</span></td><td>${esc(customerName(s.customer_id))}</td><td class="code">${esc(s.service_type==='m3u'?(s.m3u_url||''):(s.server_url||''))}</td><td>${s.service_type==='xtream'?`${esc(s.username||'')} · ••••••`:'—'}</td><td>${esc(dateOnly(s.expires_at))}</td><td>${validationBadge(s)}</td><td>${statusBadge(s.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="validate-service" data-id="${s.id}">Validar</button><button class="btn btn-secondary btn-small" data-action="toggle-service" data-id="${s.id}">${s.active?'Desactivar':'Activar'}</button><button class="btn btn-danger btn-small" data-action="delete-service" data-id="${s.id}">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios todavía.</div>'}`;
     }
 
     function renderAssignments(){
@@ -260,7 +261,7 @@
 
     function customerOptions(selected=''){ return `<option value="">Sin cliente</option>${state.customers.filter(c=>c.active).map(c=>`<option value="${c.id}" ${c.id===selected?'selected':''}>${esc(c.name)}</option>`).join('')}`; }
     function deviceOptions(){ return state.devices.filter(d=>d.active).map(d=>`<option value="${d.id}">${esc(d.device_name||d.device_code)} · ${esc(platformLabel(d.platform))} · ${esc(d.device_code)}</option>`).join(''); }
-    function serviceOptions(){ return state.services.filter(s=>s.active).map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.service_type.toUpperCase())}</option>`).join(''); }
+    function serviceOptions(){ return state.services.filter(s=>s.active&&s.validation_status!=='error').map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.service_type.toUpperCase())}</option>`).join(''); }
 
     function openModal(title, body){ $('#modalTitle').textContent=title; $('#modalBody').innerHTML=body; $('#modal').showModal(); }
     function closeModal(){ $('#modal').close(); }
@@ -280,7 +281,7 @@
       if(!services.length) return alert('Este cliente todavía no tiene servicios. Usá “+ Servicio” para crear uno.');
       const plus30=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
       openModal('Renovar servicio',`<form id="renewCustomerForm"><div class="notice" style="margin:0 0 16px">Cliente: <b>${esc(c.name)}</b></div><div class="field"><label>Servicio</label><select name="service_id">${services.map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.service_type.toUpperCase())}</option>`).join('')}</select></div><div class="field"><label>Nueva fecha de vencimiento</label><input name="expires_at" type="date" value="${plus30}" required></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Renovar</button></div></form>`);
-      $('#renewCustomerForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const serviceId=String(f.get('service_id'));const expires=String(f.get('expires_at'));const {error}=await supabase.from('tvf_services').update({expires_at:new Date(expires+'T23:59:59').toISOString(),active:true}).eq('id',serviceId);if(error)return alert(error.message);closeModal();await refresh();};
+      $('#renewCustomerForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const serviceId=String(f.get('service_id'));const expires=String(f.get('expires_at'));const result=await runServiceValidation({service_id:serviceId});const update={expires_at:new Date(expires+'T23:59:59').toISOString(),active:!!result.ok,...validationFields(result)};const {error}=await supabase.from('tvf_services').update(update).eq('id',serviceId);if(error)return alert(error.message);closeModal();await refresh();if(!result.ok)alert(`La fecha se renovó, pero el servicio quedó INACTIVO porque no superó la validación.\n\n${result.message}`);};
     }
 
     function exportCustomersCsv(){
@@ -292,8 +293,63 @@
 
     function editDeviceModal(id){ const d=state.devices.find(x=>x.id===id); if(!d)return; openModal('Editar dispositivo',`<form id="deviceForm"><div class="field"><label>Código</label><input value="${esc(d.device_code)}" disabled></div><div class="field"><label>Nombre visible</label><input name="device_name" value="${esc(d.device_name||'')}"></div><div class="field"><label>Cliente</label><select name="customer_id">${customerOptions(d.customer_id||'')}</select></div><div class="field"><label>Estado</label><select name="active"><option value="true" ${d.active?'selected':''}>Activo</option><option value="false" ${!d.active?'selected':''}>Inactivo</option></select></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Guardar</button></div></form>`); $('#deviceForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {error}=await supabase.from('tvf_devices').update({device_name:String(f.get('device_name')||'').trim()||null,customer_id:String(f.get('customer_id')||'')||null,active:f.get('active')==='true'}).eq('id',id);if(error)return alert(error.message);closeModal();await refresh();}; }
 
-    function newServiceModal(customerId=''){ openModal('Nuevo servicio remoto',`<form id="serviceForm"><div class="grid2"><div class="field"><label>Nombre</label><input name="name" required autofocus placeholder="Ej: FULL TV Juan"></div><div class="field"><label>Cliente</label><select name="customer_id">${customerOptions(customerId)}</select></div></div><div class="grid2"><div class="field"><label>Tipo</label><select id="serviceType" name="service_type"><option value="m3u">M3U</option><option value="xtream">Xtream</option></select></div><div class="field"><label>Vencimiento</label><input name="expires_at" type="date"></div></div><div id="m3uFields"><div class="field"><label>URL M3U</label><input name="m3u_url" placeholder="http://servidor/lista.m3u"></div></div><div id="xtreamFields" class="hidden"><div class="field"><label>Servidor / Host</label><input name="server_url" placeholder="http://servidor:puerto"></div><div class="grid2"><div class="field"><label>Usuario</label><input name="username"></div><div class="field"><label>Contraseña</label><input name="password" type="password"></div></div></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Guardar servicio</button></div></form>`); const t=$('#serviceType'); t.onchange=()=>{$('#m3uFields').classList.toggle('hidden',t.value!=='m3u');$('#xtreamFields').classList.toggle('hidden',t.value!=='xtream');}; $('#serviceForm').onsubmit=createService; }
-    async function createService(e){ e.preventDefault();const f=new FormData(e.currentTarget),type=String(f.get('service_type'));const expires=String(f.get('expires_at')||'');const row={name:String(f.get('name')).trim(),customer_id:String(f.get('customer_id')||'')||null,service_type:type,expires_at:expires?new Date(expires+'T23:59:59').toISOString():null,active:true,server_url:null,username:null,password:null,m3u_url:null};if(type==='m3u'){row.m3u_url=String(f.get('m3u_url')||'').trim();if(!row.m3u_url)return alert('Ingresá la URL M3U.');}else{row.server_url=String(f.get('server_url')||'').trim();row.username=String(f.get('username')||'').trim();row.password=String(f.get('password')||'');if(!row.server_url||!row.username||!row.password)return alert('Completá servidor, usuario y contraseña.');}const {error}=await supabase.from('tvf_services').insert(row);if(error)return alert(error.message);closeModal();await refresh();}
+    async function runServiceValidation(payload){
+      const {data,error}=await supabase.functions.invoke('tvf-service-validate',{body:payload});
+      if(error) return {ok:false,status:'error',message:error.message||'No se pudo ejecutar la validación.',checked_at:new Date().toISOString()};
+      return data||{ok:false,status:'error',message:'El validador no devolvió una respuesta.',checked_at:new Date().toISOString()};
+    }
+
+    function validationFields(result){
+      const latency=Number(result?.latency_ms);
+      return {
+        validation_status:result?.ok?'online':'error',
+        validated_at:result?.checked_at||new Date().toISOString(),
+        validation_message:String(result?.message|| (result?.ok?'Validación correcta.':'La fuente no respondió correctamente.')).slice(0,500),
+        validation_latency_ms:Number.isFinite(latency)?Math.round(latency):null,
+      };
+    }
+
+    async function validateExistingService(id,{showMessage=true,refreshAfter=true}={}){
+      const service=state.services.find(x=>x.id===id);
+      if(!service) return {ok:false,status:'error',message:'Servicio no encontrado.'};
+      const result=await runServiceValidation({service_id:id});
+      const update={...validationFields(result)};
+      if(!result.ok) update.active=false;
+      const {error}=await supabase.from('tvf_services').update(update).eq('id',id);
+      if(error){ if(showMessage) alert(error.message); return {ok:false,status:'error',message:error.message}; }
+      if(showMessage) alert(result.ok?`✓ ${result.message}`:`✕ ${result.message}
+
+El servicio quedó INACTIVO para que no se entregue a los dispositivos.`);
+      if(refreshAfter) await refresh();
+      return result;
+    }
+
+    function newServiceModal(customerId=''){ openModal('Nuevo servicio remoto',`<form id="serviceForm"><div class="grid2"><div class="field"><label>Nombre</label><input name="name" required autofocus placeholder="Ej: FULL TV Juan"></div><div class="field"><label>Cliente</label><select name="customer_id">${customerOptions(customerId)}</select></div></div><div class="grid2"><div class="field"><label>Tipo</label><select id="serviceType" name="service_type"><option value="m3u">M3U</option><option value="xtream">Xtream</option></select></div><div class="field"><label>Vencimiento</label><input name="expires_at" type="date"></div></div><div id="m3uFields"><div class="field"><label>URL M3U</label><input name="m3u_url" placeholder="http://servidor/lista.m3u"></div></div><div id="xtreamFields" class="hidden"><div class="field"><label>Servidor / Host</label><input name="server_url" placeholder="http://servidor:puerto"></div><div class="grid2"><div class="field"><label>Usuario</label><input name="username"></div><div class="field"><label>Contraseña</label><input name="password" type="password"></div></div></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Validar y guardar</button></div></form>`); const t=$('#serviceType'); t.onchange=()=>{$('#m3uFields').classList.toggle('hidden',t.value!=='m3u');$('#xtreamFields').classList.toggle('hidden',t.value!=='xtream');}; $('#serviceForm').onsubmit=createService; }
+    async function createService(e){
+      e.preventDefault();
+      const form=e.currentTarget,submit=form.querySelector('button[type="submit"],button:not([type])');
+      const f=new FormData(form),type=String(f.get('service_type')),expires=String(f.get('expires_at')||'');
+      const row={name:String(f.get('name')).trim(),customer_id:String(f.get('customer_id')||'')||null,service_type:type,expires_at:expires?new Date(expires+'T23:59:59').toISOString():null,active:false,server_url:null,username:null,password:null,m3u_url:null};
+      if(type==='m3u'){
+        row.m3u_url=String(f.get('m3u_url')||'').trim();
+        if(!row.m3u_url)return alert('Ingresá la URL M3U.');
+      }else{
+        row.server_url=String(f.get('server_url')||'').trim();row.username=String(f.get('username')||'').trim();row.password=String(f.get('password')||'');
+        if(!row.server_url||!row.username||!row.password)return alert('Completá servidor, usuario y contraseña.');
+      }
+      if(submit){submit.disabled=true;submit.textContent='Validando…';}
+      const result=await runServiceValidation({service_type:row.service_type,m3u_url:row.m3u_url,server_url:row.server_url,username:row.username,password:row.password});
+      if(!result.ok){
+        if(submit){submit.disabled=false;submit.textContent='Validar y guardar';}
+        return alert(`No se guardó el servicio porque la fuente no pudo validarse.
+
+${result.message}`);
+      }
+      Object.assign(row,validationFields(result),{active:true});
+      const {error}=await supabase.from('tvf_services').insert(row);
+      if(error){if(submit){submit.disabled=false;submit.textContent='Validar y guardar';}return alert(error.message);}
+      closeModal();await refresh();
+    }
 
     function assignmentModal(){ if(!state.devices.length||!state.services.length)return alert('Necesitás al menos un dispositivo y un servicio.'); openModal('Asignar servicio',`<form id="assignmentForm"><div class="field"><label>Dispositivo</label><select name="device_id" required>${deviceOptions()}</select></div><div class="field"><label>Servicio</label><select name="service_id" required>${serviceOptions()}</select></div><div class="field"><label>Orden</label><input name="display_order" type="number" value="0" min="0"></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Asignar</button></div></form>`); $('#assignmentForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {error}=await supabase.from('tvf_device_services').insert({device_id:String(f.get('device_id')),service_id:String(f.get('service_id')),display_order:Number(f.get('display_order')||0),enabled:true});if(error)return alert(error.message);closeModal();await refresh();}; }
 
@@ -311,7 +367,21 @@
       await refresh();
     }
 
-    async function toggleService(id){const s=state.services.find(x=>x.id===id);if(!s)return;const {error}=await supabase.from('tvf_services').update({active:!s.active}).eq('id',id);if(error)return alert(error.message);await refresh();}
+    async function toggleService(id){
+      const s=state.services.find(x=>x.id===id);if(!s)return;
+      if(s.active){
+        const {error}=await supabase.from('tvf_services').update({active:false}).eq('id',id);
+        if(error)return alert(error.message);await refresh();return;
+      }
+      const result=await runServiceValidation({service_id:id});
+      const update={...validationFields(result),active:!!result.ok};
+      const {error}=await supabase.from('tvf_services').update(update).eq('id',id);
+      if(error)return alert(error.message);
+      if(!result.ok)alert(`No se pudo activar el servicio.
+
+${result.message}`);
+      await refresh();
+    }
     async function deleteAssignment(id){if(!confirm('¿Quitar este servicio del dispositivo?'))return;const {error}=await supabase.from('tvf_device_services').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
     async function deleteDevice(id){const d=state.devices.find(x=>x.id===id);if(!d)return;if(!confirm(`¿Borrar el dispositivo ${d.device_code}? Sus asignaciones también se eliminarán.`))return;const {error}=await supabase.from('tvf_devices').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
     async function deleteService(id){const s=state.services.find(x=>x.id===id);if(!s)return;if(!confirm(`¿Borrar el servicio ${s.name}? Se quitará de todos los dispositivos asignados.`))return;const {error}=await supabase.from('tvf_services').delete().eq('id',id);if(error)return alert(error.message);await refresh();}
@@ -345,6 +415,7 @@
       if(action==='edit-device')editDeviceModal(id);
       if(action==='delete-device')await deleteDevice(id);
       if(action==='new-service')newServiceModal();
+      if(action==='validate-service')await validateExistingService(id);
       if(action==='toggle-service')await toggleService(id);
       if(action==='delete-service')await deleteService(id);
       if(action==='new-assignment')assignmentModal();
