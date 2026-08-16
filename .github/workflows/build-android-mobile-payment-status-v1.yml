@@ -6,6 +6,7 @@ on:
     branches:
       - android-mobile-payment-status-v1
     paths:
+      - '.github/scripts/apply_android_mobile_remote_sync_v2.py'
       - '.github/workflows/build-android-mobile-payment-status-v1.yml'
       - 'lib/**'
       - 'pubspec.yaml'
@@ -38,19 +39,31 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Format payment files
-        run: dart format lib/main.dart lib/screens/remote_access_gate.dart lib/services/remote_provisioning_service.dart
+      - name: Apply macOS-style panel list sync
+        run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
+
+      - name: Format payment and remote sync files
+        run: dart format lib/main.dart lib/screens/remote_access_gate.dart lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart
 
       - name: Analyze app
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
 
-      - name: Verify payment status markers
+      - name: Verify payment and panel sync markers
         shell: bash
         run: |
           grep -q 'RemoteAccessGate' lib/main.dart
           grep -q 'RemoteDeviceAccessBlockedException' lib/services/remote_provisioning_service.dart
           grep -q "reason == 'payment_due'" lib/services/remote_provisioning_service.dart
           grep -q "'platform': 'android'" lib/services/remote_provisioning_service.dart
+          grep -q 'RemoteProvisioningConfiguration' lib/services/remote_provisioning_service.dart
+          grep -q 'RemoteProvisionedService' lib/services/remote_provisioning_service.dart
+          grep -q "service.type != 'm3u' && service.type != 'xtream'" lib/services/remote_provisioning_service.dart
+          grep -q 'loadFingerprints' lib/services/remote_provisioning_service.dart
+          grep -q 'syncRemoteServices' lib/providers/iptv_provider.dart
+          grep -q 'tvf_remote_' lib/providers/iptv_provider.dart
+          grep -q 'XtreamService.tryConnectFromPlaylistUrl(url)' lib/providers/iptv_provider.dart
+          grep -q 'PlaylistSourceType.xtream' lib/providers/iptv_provider.dart
+          grep -q 'PlaylistSourceType.m3u' lib/providers/iptv_provider.dart
           grep -q 'paymentDue' lib/screens/remote_access_gate.dart
           grep -q 'Reintentar' lib/screens/remote_access_gate.dart
 
@@ -83,14 +96,14 @@ jobs:
         shell: bash
         run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-PRO-Android-Mobile-Payment-V1.apk
-          sha256sum dist/TV-FULL-PRO-Android-Mobile-Payment-V1.apk > dist/SHA256.txt
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-PRO-Android-Mobile-Panel-Sync-Payment-V2.apk
+          sha256sum dist/TV-FULL-PRO-Android-Mobile-Panel-Sync-Payment-V2.apk > dist/SHA256.txt
           git rev-parse HEAD > dist/COMMIT.txt
 
       - name: Upload Android APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-Android-Mobile-Payment-V1
+          name: TV-FULL-PRO-Android-Mobile-Panel-Sync-Payment-V2
           path: dist/
           if-no-files-found: error
           retention-days: 30
