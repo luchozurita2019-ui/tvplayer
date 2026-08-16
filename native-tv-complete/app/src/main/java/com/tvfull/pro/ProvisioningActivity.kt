@@ -76,7 +76,7 @@ class ProvisioningActivity : AppCompatActivity() {
         }, LinearLayout.LayoutParams(dp(760), dp(46)))
 
         root.addView(TextView(this).apply {
-            text = "Asigná este dispositivo desde el panel de TV FULL.\nLa lista y el servicio se cargarán automáticamente."
+            text = "Asigná este dispositivo desde el panel de TV FULL.\nLas listas y servicios se cargarán automáticamente."
             textSize = 18f
             gravity = Gravity.CENTER
             setTextColor(Color.rgb(185, 193, 204))
@@ -184,12 +184,10 @@ class ProvisioningActivity : AppCompatActivity() {
                 retry.isEnabled = true
                 when (result.state) {
                     RemoteConfigState.READY -> {
-                        val config = result.config ?: return@runOnUiThread
                         RemotePrefs.enableRemote(this)
-                        RemotePrefs.saveService(this, result.serviceId, result.serviceName)
-                        Prefs.save(this, config)
-                        statusText.text = if (result.serviceName.isBlank()) "Servicio recibido. Iniciando…" else "${result.serviceName} · conectado"
-                        openMain()
+                        RemotePrefs.saveServices(this, result.services)
+                        statusText.text = "${result.services.size} lista(s) recibida(s). Iniciando…"
+                        openPlaylists()
                     }
                     RemoteConfigState.UNASSIGNED -> {
                         statusText.text = "Esperando que asignes un servicio a ${credentials.code}"
@@ -205,7 +203,7 @@ class ProvisioningActivity : AppCompatActivity() {
                         handler.postDelayed({ registerDevice() }, 1_000)
                     }
                     RemoteConfigState.ERROR -> {
-                        statusText.text = "Sin conexión con el panel. Reintentando…"
+                        statusText.text = result.message.ifBlank { "Sin conexión con el panel. Reintentando…" }
                         schedulePoll(8_000)
                     }
                 }
@@ -221,6 +219,14 @@ class ProvisioningActivity : AppCompatActivity() {
     private fun showCode(code: String) {
         codeText.text = code
         codeText.setTextColor(Color.WHITE)
+    }
+
+    private fun openPlaylists() {
+        if (launching || stopped) return
+        launching = true
+        handler.removeCallbacksAndMessages(null)
+        startActivity(Intent(this, PlaylistActivity::class.java))
+        finish()
     }
 
     private fun openMain() {
