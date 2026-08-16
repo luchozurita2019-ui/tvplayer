@@ -8,19 +8,21 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 enum class SourceMode { M3U, XTREAM }
-enum class ContentSection { LIVE, MOVIES, SERIES }
+enum class ContentSection { LIVE, MOVIES, SERIES, RADIO }
 
 data class SourceConfig(
     val mode: SourceMode,
     val m3uUrl: String = "",
     val server: String = "",
     val username: String = "",
-    val password: String = ""
+    val password: String = "",
+    val fallbackM3uUrl: String = ""
 )
 
 data class TvCategory(val id: String, val name: String, val count: Int = 0)
@@ -49,6 +51,7 @@ object Prefs {
             .putString("server", config.server)
             .putString("username", config.username)
             .putString("password", config.password)
+            .putString("fallback_m3u", config.fallbackM3uUrl)
             .apply()
     }
 
@@ -60,7 +63,8 @@ object Prefs {
             m3uUrl = p.getString("m3u", "") ?: "",
             server = p.getString("server", "") ?: "",
             username = p.getString("username", "") ?: "",
-            password = p.getString("password", "") ?: ""
+            password = p.getString("password", "") ?: "",
+            fallbackM3uUrl = p.getString("fallback_m3u", "") ?: ""
         )
     }
 
@@ -69,8 +73,59 @@ object Prefs {
     }
 }
 
+object SourceResolver {
+    fun resolve(input: SourceConfig): SourceConfig {
+        if (input.mode == SourceMode.XTREAM) {
+            return input.copy(server = input.server.trim().trimEnd('/'))
+        }
+
+        val original = input.m3uUrl.trim()
+        val candidate = xtreamCandidate(original) ?: return input.copy(m3uUrl = original)
+        val valid = runCatching { CatalogRepository(candidate).validate() }.getOrDefault(false)
+        return if (valid) candidate.copy(fallbackM3uUrl = original) else input.copy(m3uUrl = original)
+    }
+
+    fun looksLikeXtreamUrl(url: String): Boolean = xtreamCandidate(url) != null
+
+    private fun xtreamCandidate(raw: String): SourceConfig? {
+        if (raw.isBlank()) return null
+        return runCatching {
+            val u = URL(raw)
+            val params = queryParams(u.query.orEmpty())
+            val username = params["username"].orEmpty().trim()
+            val password = params["password"].orEmpty()
+            val path = u.path.orEmpty().lowercase(Locale.ROOT)
+            val type = params["type"].orEmpty().lowercase(Locale.ROOT)
+            val likelyXtream = path.endsWith("/get.php") || path.endsWith("get.php") || type.contains("m3u")
+            if (!likelyXtream || username.isBlank() || password.isBlank()) return null
+            val port = if (u.port >= 0) ":${u.port}" else ""
+            val server = "${u.protocol}://${u.host}$port"
+            SourceConfig(
+                mode = SourceMode.XTREAM,
+                server = server,
+                username = username,
+                password = password,
+                fallbackM3uUrl = raw
+            )
+        }.getOrNull()
+    }
+
+    private fun queryParams(query: String): Map<String, String> {
+        if (query.isBlank()) return emptyMap()
+        return query.split('&').mapNotNull { part ->
+            val idx = part.indexOf('=')
+            if (idx <= 0) return@mapNotNull null
+            val key = URLDecoder.decode(part.substring(0, idx), "UTF-8").lowercase(Locale.ROOT)
+            val value = URLDecoder.decode(part.substring(idx + 1), "UTF-8")
+            key to value
+        }.toMap()
+    }
+}
+
 class CatalogRepository(private val config: SourceConfig) {
     private var m3uCache: List<ContentItem>? = null
+    private var xtreamLiveCache: List<ContentItem>? = null
+    private var xtreamLiveCategoryNames: Map<String, String> = emptyMap()
 
     fun validate(): Boolean {
         return when (config.mode) {
@@ -88,27 +143,28 @@ class CatalogRepository(private val config: SourceConfig) {
 
     fun loadCategories(section: ContentSection): List<TvCategory> {
         return when (config.mode) {
-            SourceMode.M3U -> {
-                val items = ensureM3u().filter { it.section == section }
-                val groups = items.groupBy { it.categoryId.ifBlank { "Sin categoría" } }
-                    .map { TvCategory(it.key, it.key, it.value.size) }
-                    .sortedBy { it.name.lowercase(Locale.getDefault()) }
-                listOf(TvCategory("__all__", "Todos", items.size)) + groups
-            }
+            SourceMode.M3U -> categoriesFromItems(ensureM3u().filter { it.section == section })
             SourceMode.XTREAM -> {
-                val action = when (section) {
-                    ContentSection.LIVE -> "get_live_categories"
-                    ContentSection.MOVIES -> "get_vod_categories"
-                    ContentSection.SERIES -> "get_series_categories"
+                when (section) {
+                    ContentSection.LIVE, ContentSection.RADIO -> {
+                        val items = loadXtreamLiveAll().filter { it.section == section }
+                        val groups = items.groupBy { it.categoryId.ifBlank { "Sin categoría" } }
+                            .map { (id, values) -> TvCategory(id, xtreamLiveCategoryNames[id] ?: "Sin categoría", values.size) }
+                            .sortedBy { it.name.lowercase(Locale.getDefault()) }
+                        listOf(TvCategory("__all__", "Todos", items.size)) + groups
+                    }
+                    ContentSection.MOVIES, ContentSection.SERIES -> {
+                        val action = if (section == ContentSection.MOVIES) "get_vod_categories" else "get_series_categories"
+                        val arr = JSONArray(fetchText(apiUrl(action), 8_000, 15_000))
+                        val out = ArrayList<TvCategory>(arr.length() + 1)
+                        out += TvCategory("__all__", "Todos")
+                        for (i in 0 until arr.length()) {
+                            val o = arr.optJSONObject(i) ?: continue
+                            out += TvCategory(o.optString("category_id"), o.optString("category_name", "Categoría"))
+                        }
+                        out
+                    }
                 }
-                val arr = JSONArray(fetchText(apiUrl(action), 8_000, 15_000))
-                val out = ArrayList<TvCategory>(arr.length() + 1)
-                out += TvCategory("__all__", "Todos")
-                for (i in 0 until arr.length()) {
-                    val o = arr.optJSONObject(i) ?: continue
-                    out += TvCategory(o.optString("category_id"), o.optString("category_name", "Categoría"))
-                }
-                out
             }
         }
     }
@@ -118,7 +174,15 @@ class CatalogRepository(private val config: SourceConfig) {
             SourceMode.M3U -> ensureM3u().filter {
                 it.section == section && (categoryId == "__all__" || it.categoryId == categoryId)
             }
-            SourceMode.XTREAM -> loadXtreamItems(section, categoryId)
+            SourceMode.XTREAM -> {
+                if (section == ContentSection.LIVE || section == ContentSection.RADIO) {
+                    loadXtreamLiveAll().filter {
+                        it.section == section && (categoryId == "__all__" || it.categoryId == categoryId)
+                    }
+                } else {
+                    loadXtreamItems(section, categoryId)
+                }
+            }
         }
     }
 
@@ -169,31 +233,73 @@ class CatalogRepository(private val config: SourceConfig) {
         }.getOrDefault(emptyList())
     }
 
+    private fun categoriesFromItems(items: List<ContentItem>): List<TvCategory> {
+        val groups = items.groupBy { it.categoryId.ifBlank { "Sin categoría" } }
+            .map { TvCategory(it.key, it.key, it.value.size) }
+            .sortedBy { it.name.lowercase(Locale.getDefault()) }
+        return listOf(TvCategory("__all__", "Todos", items.size)) + groups
+    }
+
+    private fun loadXtreamLiveAll(): List<ContentItem> {
+        xtreamLiveCache?.let { return it }
+
+        val categoryArr = JSONArray(fetchText(apiUrl("get_live_categories"), 8_000, 15_000))
+        val names = mutableMapOf<String, String>()
+        for (i in 0 until categoryArr.length()) {
+            val o = categoryArr.optJSONObject(i) ?: continue
+            names[o.optString("category_id")] = o.optString("category_name", "Categoría")
+        }
+        xtreamLiveCategoryNames = names
+
+        val arr = JSONArray(fetchText(apiUrl("get_live_streams"), 8_000, 20_000))
+        val out = ArrayList<ContentItem>(arr.length())
+        for (i in 0 until arr.length()) {
+            val o = arr.optJSONObject(i) ?: continue
+            val id = o.optString("stream_id")
+            if (id.isBlank()) continue
+            val name = o.optString("name", "Sin nombre")
+            val cat = o.optString("category_id")
+            val catName = names[cat].orEmpty()
+            val streamType = o.optString("stream_type")
+            val isRadio = isRadioStream(streamType, catName, name)
+            out += ContentItem(
+                id = id,
+                name = name,
+                url = "${server()}/live/${enc(config.username)}/${enc(config.password)}/$id.ts",
+                logo = o.optString("stream_icon"),
+                categoryId = cat,
+                section = if (isRadio) ContentSection.RADIO else ContentSection.LIVE,
+                tvgId = o.optString("epg_channel_id")
+            )
+        }
+        xtreamLiveCache = out
+        return out
+    }
+
     private fun loadXtreamItems(section: ContentSection, categoryId: String): List<ContentItem> {
         val action = when (section) {
-            ContentSection.LIVE -> "get_live_streams"
             ContentSection.MOVIES -> "get_vod_streams"
             ContentSection.SERIES -> "get_series"
+            ContentSection.LIVE, ContentSection.RADIO -> return loadXtreamLiveAll().filter {
+                it.section == section && (categoryId == "__all__" || it.categoryId == categoryId)
+            }
         }
         val extras = if (categoryId == "__all__") emptyMap() else mapOf("category_id" to categoryId)
         val arr = JSONArray(fetchText(apiUrl(action, extras), 8_000, 20_000))
         val out = ArrayList<ContentItem>(arr.length())
         for (i in 0 until arr.length()) {
             val o = arr.optJSONObject(i) ?: continue
-            val id = when (section) {
-                ContentSection.SERIES -> o.optString("series_id")
-                else -> o.optString("stream_id")
-            }
+            val id = if (section == ContentSection.SERIES) o.optString("series_id") else o.optString("stream_id")
             val name = o.optString("name", "Sin nombre")
             val cat = o.optString("category_id")
             val logo = o.optString("stream_icon", o.optString("cover"))
             val url = when (section) {
-                ContentSection.LIVE -> "${server()}/live/${enc(config.username)}/${enc(config.password)}/$id.ts"
                 ContentSection.MOVIES -> {
                     val ext = o.optString("container_extension", "mp4").ifBlank { "mp4" }
                     "${server()}/movie/${enc(config.username)}/${enc(config.password)}/$id.$ext"
                 }
                 ContentSection.SERIES -> ""
+                else -> ""
             }
             out += ContentItem(
                 id = id,
@@ -253,10 +359,21 @@ class CatalogRepository(private val config: SourceConfig) {
     private fun classify(group: String, name: String): ContentSection {
         val s = "$group $name".lowercase(Locale.ROOT)
         return when {
+            isRadioText(s) -> ContentSection.RADIO
             listOf("movie", "movies", "pelicula", "película", "cine", "vod").any { s.contains(it) } -> ContentSection.MOVIES
             listOf("series", "serie", "temporada").any { s.contains(it) } -> ContentSection.SERIES
             else -> ContentSection.LIVE
         }
+    }
+
+    private fun isRadioStream(streamType: String, category: String, name: String): Boolean {
+        val s = "$streamType $category $name".lowercase(Locale.ROOT)
+        return streamType.lowercase(Locale.ROOT).contains("radio") || isRadioText(s)
+    }
+
+    private fun isRadioText(text: String): Boolean {
+        val s = text.lowercase(Locale.ROOT)
+        return listOf("radio", " fm", "fm ", " am", "am ", "emisora", "música", "musica").any { s.contains(it) }
     }
 
     private fun apiUrl(action: String? = null, extras: Map<String, String> = emptyMap()): String {
@@ -297,7 +414,7 @@ class CatalogRepository(private val config: SourceConfig) {
             connectTimeout = connect
             readTimeout = read
             instanceFollowRedirects = true
-            setRequestProperty("User-Agent", "TV-FULL-PRO/1.0 AndroidTV")
+            setRequestProperty("User-Agent", "TV-FULL-PRO/1.5 AndroidTV")
             setRequestProperty("Accept", "*/*")
         }
     }
