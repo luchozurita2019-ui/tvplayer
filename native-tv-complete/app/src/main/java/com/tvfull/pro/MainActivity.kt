@@ -54,6 +54,11 @@ class MainActivity : AppCompatActivity() {
         private val TEXT = Color.rgb(240, 244, 249)
         private val MUTED = Color.rgb(149, 162, 181)
         private val ACCENT = Color.rgb(229, 9, 20)
+
+        private const val LIVE_STARTUP_TIMEOUT_MS = 8_000L
+        private const val LIVE_REBUFFER_NOTICE_MS = 1_200L
+        private const val LIVE_STALL_RECONNECT_MS = 25_000L
+        private const val LIVE_MAX_RECONNECTS = 4
     }
 
     private enum class BrowseLevel { CATEGORIES, ITEMS, EPISODES }
@@ -87,10 +92,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var videoHud: LinearLayout
     private lateinit var videoTitle: TextView
     private lateinit var videoMeta: TextView
+    private lateinit var fullscreenChannelPanel: LinearLayout
+    private lateinit var fullscreenChannelRecycler: RecyclerView
+    private lateinit var fullscreenChannelTitle: TextView
 
     private val sectionButtons = linkedMapOf<ContentSection, Button>()
     private var categoryAdapter: CategoryAdapter? = null
     private var contentAdapter: ContentAdapter? = null
+    private var fullscreenChannelAdapter: ContentAdapter? = null
 
     private var player: ExoPlayer? = null
     private var currentSection = ContentSection.LIVE
@@ -105,9 +114,12 @@ class MainActivity : AppCompatActivity() {
     private var reconnectToken = 0L
     private var reconnectAttempts = 0
     private var isFullscreen = false
+    private var fullscreenChannelListVisible = false
 
     private val hideHud = Runnable {
-        if (!waitingFirstFrame && ::videoHud.isInitialized) videoHud.visibility = View.GONE
+        if (!waitingFirstFrame && ::videoHud.isInitialized && !fullscreenChannelListVisible) {
+            videoHud.visibility = View.GONE
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -376,6 +388,44 @@ class MainActivity : AppCompatActivity() {
                 topMargin = dp(12)
                 marginEnd = dp(12)
             })
+
+            fullscreenChannelPanel = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.VERTICAL
+                setPadding(dp(12), dp(16), dp(12), dp(12))
+                setBackgroundColor(Color.argb(242, 8, 13, 22))
+                visibility = View.GONE
+
+                fullscreenChannelTitle = TextView(this@MainActivity).apply {
+                    text = "CANALES"
+                    textSize = 18f
+                    setTextColor(Color.WHITE)
+                    setTypeface(typeface, Typeface.BOLD)
+                    maxLines = 1
+                }
+                addView(fullscreenChannelTitle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)))
+
+                addView(TextView(this@MainActivity).apply {
+                    text = "↑ ↓ navegar · OK cambiar · BACK cerrar"
+                    textSize = 11f
+                    setTextColor(MUTED)
+                    maxLines = 1
+                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28)))
+
+                fullscreenChannelRecycler = RecyclerView(this@MainActivity).apply {
+                    setBackgroundColor(Color.TRANSPARENT)
+                    setPadding(0, dp(5), 0, 0)
+                    clipToPadding = false
+                    clipChildren = false
+                    isVerticalScrollBarEnabled = false
+                    setItemViewCacheSize(2)
+                }
+                addView(fullscreenChannelRecycler, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            }
+            videoFrame.addView(
+                fullscreenChannelPanel,
+                FrameLayout.LayoutParams(dp(390), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START)
+            )
+
             addView(videoFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.68f))
 
             infoCard = LinearLayout(this@MainActivity).apply {
@@ -628,10 +678,10 @@ class MainActivity : AppCompatActivity() {
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
 
         val dataSource = DefaultHttpDataSource.Factory()
-            .setUserAgent("TV-FULL-PRO/1.3 AndroidTV")
+            .setUserAgent("TV-FULL-PRO/1.4 AndroidTV")
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(8_000)
-            .setReadTimeoutMs(15_000)
+            .setReadTimeoutMs(25_000)
 
         val p = ExoPlayer.Builder(this, renderers)
             .setLoadControl(loadControl)
@@ -642,8 +692,13 @@ class MainActivity : AppCompatActivity() {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
                     Player.STATE_BUFFERING -> {
-                        showLoading(if (waitingFirstFrame) "Inicializando…" else "Reconectando…")
-                        if (isCurrentLive()) scheduleStallRecovery()
+                        if (waitingFirstFrame) {
+                            showLoading("Inicializando…")
+                        } else if (isCurrentLive()) {
+                            scheduleStallRecovery()
+                        } else {
+                            showLoading("Cargando…")
+                        }
                     }
                     Player.STATE_READY -> {
                         cancelStallRecovery()
@@ -651,7 +706,7 @@ class MainActivity : AppCompatActivity() {
                     }
                     Player.STATE_ENDED -> {
                         cancelStallRecovery()
-                        if (isCurrentLive()) scheduleReconnect("Reconectando…", 450L)
+                        if (isCurrentLive()) scheduleReconnect("Reconectando…", 350L)
                         else showLoading("Finalizado")
                     }
                     Player.STATE_IDLE -> Unit
@@ -669,7 +724,7 @@ class MainActivity : AppCompatActivity() {
             override fun onPlayerError(error: PlaybackException) {
                 cancelStallRecovery()
                 if (isCurrentLive()) {
-                    scheduleReconnect("Reconectando…", 650L)
+                    scheduleReconnect("Reconectando…", 450L)
                 } else {
                     waitingFirstFrame = false
                     showLoading("No se pudo reproducir")
@@ -705,27 +760,37 @@ class MainActivity : AppCompatActivity() {
         p.prepare()
         p.playWhenReady = true
 
+        val startupTimeout = if (reconnect) 6_000L else LIVE_STARTUP_TIMEOUT_MS
         handler.postDelayed({
             if (token == startupToken && waitingFirstFrame && lastPlayed?.url == item.url) {
-                if (item.section == ContentSection.LIVE) scheduleReconnect("Reconectando…", 300L)
+                if (item.section == ContentSection.LIVE) scheduleReconnect("Reconectando…", 250L)
                 else {
                     p.stop()
                     waitingFirstFrame = false
                     showLoading("No se pudo iniciar")
                 }
             }
-        }, 6_000)
+        }, startupTimeout)
     }
 
     private fun scheduleStallRecovery() {
-        if (!isCurrentLive()) return
+        if (!isCurrentLive() || waitingFirstFrame) return
         stallToken++
         val token = stallToken
+
         handler.postDelayed({
-            if (token == stallToken && player?.playbackState == Player.STATE_BUFFERING && isCurrentLive()) {
-                scheduleReconnect("Reconectando…", 100L)
+            if (token == stallToken && player?.playbackState == Player.STATE_BUFFERING && isCurrentLive() && !waitingFirstFrame) {
+                showLoading("Recuperando señal…")
+                infoTitle.text = lastPlayed?.name.orEmpty()
+                infoBody.text = "Esperando datos del canal sin cerrar la conexión."
             }
-        }, 8_000)
+        }, LIVE_REBUFFER_NOTICE_MS)
+
+        handler.postDelayed({
+            if (token == stallToken && player?.playbackState == Player.STATE_BUFFERING && isCurrentLive() && !waitingFirstFrame) {
+                scheduleReconnect("Reconectando…", 200L)
+            }
+        }, LIVE_STALL_RECONNECT_MS)
     }
 
     private fun cancelStallRecovery() {
@@ -735,7 +800,7 @@ class MainActivity : AppCompatActivity() {
     private fun scheduleReconnect(message: String, delayMs: Long) {
         val item = lastPlayed ?: return
         if (item.section != ContentSection.LIVE) return
-        if (reconnectAttempts >= 4) {
+        if (reconnectAttempts >= LIVE_MAX_RECONNECTS) {
             waitingFirstFrame = false
             player?.stop()
             showLoading("Canal no disponible")
@@ -750,17 +815,35 @@ class MainActivity : AppCompatActivity() {
         player?.stop()
         showLoading(message)
         infoTitle.text = item.name
-        infoBody.text = "Reconectando canal · intento $reconnectAttempts de 4"
+        infoBody.text = "Reconectando canal · intento $reconnectAttempts de $LIVE_MAX_RECONNECTS"
 
-        val extra = ((reconnectAttempts - 1) * 350L).coerceAtMost(1_050L)
+        val backoff = when (reconnectAttempts) {
+            1 -> 700L
+            2 -> 1_500L
+            3 -> 3_000L
+            else -> 5_000L
+        }
         handler.postDelayed({
             if (token == reconnectToken && lastPlayed?.url == item.url) {
                 startPlayback(item, reconnect = true)
             }
-        }, delayMs + extra)
+        }, delayMs + backoff)
     }
 
     private fun isCurrentLive(): Boolean = lastPlayed?.section == ContentSection.LIVE
+
+    private fun stopNonLivePlayback() {
+        if (lastPlayed?.section == ContentSection.LIVE) return
+        startupToken++
+        reconnectToken++
+        cancelStallRecovery()
+        waitingFirstFrame = false
+        reconnectAttempts = 0
+        player?.stop()
+        player?.clearMediaItems()
+        lastPlayed = null
+        hideLoading()
+    }
 
     private fun releasePlayer() {
         startupToken++
@@ -784,8 +867,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun showVideoHud() {
         val item = lastPlayed ?: return
+        if (fullscreenChannelListVisible) return
         videoTitle.text = item.name
-        videoMeta.text = if (item.section == ContentSection.LIVE) "OK pausa · ▲▼ cambia canal · BACK vuelve" else "OK pausa · BACK vuelve"
+        videoMeta.text = if (item.section == ContentSection.LIVE) {
+            "↓ canales · OK pausa · BACK vuelve"
+        } else {
+            "OK pausa · BACK vuelve"
+        }
         videoHud.visibility = View.VISIBLE
         handler.removeCallbacks(hideHud)
         handler.postDelayed(hideHud, 3_500)
@@ -794,6 +882,7 @@ class MainActivity : AppCompatActivity() {
     private fun enterFullscreen() {
         if (isFullscreen || lastPlayed == null) return
         isFullscreen = true
+        hideFullscreenChannelList(showHudAfter = false)
         immersive()
         topBar.visibility = View.GONE
         navRail.visibility = View.GONE
@@ -821,6 +910,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun exitFullscreen() {
         if (!isFullscreen) return
+        hideFullscreenChannelList(showHudAfter = false)
         isFullscreen = false
         topBar.visibility = View.VISIBLE
         navRail.visibility = View.VISIBLE
@@ -848,12 +938,40 @@ class MainActivity : AppCompatActivity() {
         browseRecycler.post { browseRecycler.requestFocus() }
     }
 
-    private fun playAdjacentChannel(delta: Int) {
-        if (lastPlayed?.section != ContentSection.LIVE || currentItems.isEmpty()) return
-        val index = currentItems.indexOfFirst { it.id == lastPlayed?.id }
-        if (index < 0) return
-        val next = (index + delta).coerceIn(0, currentItems.lastIndex)
-        if (next != index) startPlayback(currentItems[next], reconnect = false)
+    private fun showFullscreenChannelList() {
+        if (!isFullscreen || !isCurrentLive() || currentItems.isEmpty()) return
+        fullscreenChannelListVisible = true
+        handler.removeCallbacks(hideHud)
+        videoHud.visibility = View.GONE
+        fullscreenChannelTitle.text = selectedCategory?.name?.let { "CANALES · $it" } ?: "CANALES"
+        fullscreenChannelRecycler.layoutManager = verticalLayoutManager()
+        fullscreenChannelAdapter = ContentAdapter(
+            data = currentItems,
+            grid = false,
+            clickOverride = { item ->
+                startPlayback(item, reconnect = false)
+                hideFullscreenChannelList(showHudAfter = true)
+            },
+            showFocusInfo = false
+        )
+        fullscreenChannelRecycler.adapter = fullscreenChannelAdapter
+        fullscreenChannelPanel.visibility = View.VISIBLE
+
+        val index = currentItems.indexOfFirst { it.id == lastPlayed?.id }.coerceAtLeast(0)
+        fullscreenChannelRecycler.scrollToPosition(index)
+        fullscreenChannelRecycler.post {
+            fullscreenChannelRecycler.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus()
+                ?: fullscreenChannelRecycler.requestFocus()
+        }
+    }
+
+    private fun hideFullscreenChannelList(showHudAfter: Boolean = true) {
+        if (!::fullscreenChannelPanel.isInitialized) return
+        fullscreenChannelListVisible = false
+        fullscreenChannelPanel.visibility = View.GONE
+        fullscreenChannelRecycler.adapter = null
+        fullscreenChannelAdapter = null
+        if (showHudAfter && isFullscreen) showVideoHud()
     }
 
     private fun showSearch() {
@@ -942,6 +1060,11 @@ class MainActivity : AppCompatActivity() {
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> {
                     when {
+                        fullscreenChannelListVisible -> hideFullscreenChannelList(showHudAfter = true)
+                        isFullscreen && lastPlayed?.section != ContentSection.LIVE -> {
+                            stopNonLivePlayback()
+                            exitFullscreen()
+                        }
                         isFullscreen -> exitFullscreen()
                         browseLevel == BrowseLevel.EPISODES -> restoreSeriesGrid()
                         browseLevel == BrowseLevel.ITEMS -> showCategories(currentSection)
@@ -949,19 +1072,19 @@ class MainActivity : AppCompatActivity() {
                     }
                     return true
                 }
-                KeyEvent.KEYCODE_DPAD_UP -> if (isFullscreen && isCurrentLive()) {
-                    playAdjacentChannel(-1)
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> if (isFullscreen && isCurrentLive()) {
-                    playAdjacentChannel(1)
+                KeyEvent.KEYCODE_DPAD_DOWN -> if (isFullscreen && isCurrentLive() && !fullscreenChannelListVisible) {
+                    showFullscreenChannelList()
                     return true
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER,
-                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> if (isFullscreen) {
+                KeyEvent.KEYCODE_ENTER -> if (isFullscreen && !fullscreenChannelListVisible) {
                     player?.let { if (it.isPlaying) it.pause() else it.play() }
                     showVideoHud()
+                    return true
+                }
+                KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> if (isFullscreen) {
+                    player?.let { if (it.isPlaying) it.pause() else it.play() }
+                    if (!fullscreenChannelListVisible) showVideoHud()
                     return true
                 }
             }
@@ -1024,7 +1147,9 @@ class MainActivity : AppCompatActivity() {
 
     private inner class ContentAdapter(
         private val data: List<ContentItem>,
-        private val grid: Boolean
+        private val grid: Boolean,
+        private val clickOverride: ((ContentItem) -> Unit)? = null,
+        private val showFocusInfo: Boolean = true
     ) : RecyclerView.Adapter<ContentAdapter.Holder>() {
 
         override fun onCreateViewHolder(parent: ViewGroup, viewType: Int): Holder {
@@ -1092,10 +1217,12 @@ class MainActivity : AppCompatActivity() {
             holder.text.text = item.name
             holder.image.setImageDrawable(null)
             holder.image.visibility = if (!holder.grid && item.logo.isBlank() && browseLevel == BrowseLevel.EPISODES) View.GONE else View.VISIBLE
-            holder.root.setOnClickListener { openItem(item) }
+            holder.root.setOnClickListener {
+                clickOverride?.invoke(item) ?: openItem(item)
+            }
             holder.root.setOnFocusChangeListener { v, focused ->
                 v.background = roundedBg(if (focused) ACCENT else CARD, if (holder.grid) 11f else 10f, if (focused) ACCENT else BORDER, 1)
-                if (focused) showItemInfo(item)
+                if (focused && showFocusInfo) showItemInfo(item)
             }
         }
 
