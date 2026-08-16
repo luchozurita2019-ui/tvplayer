@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:media_kit/media_kit.dart';
 import 'providers/iptv_provider.dart';
-import 'screens/home_screen.dart';
+import 'screens/remote_access_gate.dart';
 
 void main() {
   // Inicializa el motor nativo de media_kit antes de correr la app.
@@ -70,7 +70,7 @@ class IptvPlayerApp extends StatelessWidget {
             ),
           ),
         ),
-        home: const HomeScreen(),
+        home: const RemoteAccessGate(),
       ),
     );
   }
