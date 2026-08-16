@@ -10,6 +10,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.text.InputType
+import android.util.Log
 import android.view.Gravity
 import android.view.KeyEvent
 import android.view.View
@@ -21,13 +22,17 @@ import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
+import android.widget.SeekBar
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -45,6 +50,14 @@ import java.util.concurrent.Executors
 @UnstableApi
 class MainActivity : AppCompatActivity() {
     companion object {
+        private const val TAG = "TVFullPlayback"
+        private const val LIVE_STARTUP_TIMEOUT_MS = 10_000L
+        private const val LIVE_RECONNECT_STARTUP_TIMEOUT_MS = 8_000L
+        private const val LIVE_REBUFFER_NOTICE_MS = 1_400L
+        private const val LIVE_MAX_RECOVERIES = 4
+        private const val HUD_HIDE_MS = 4_000L
+        private const val VOD_SEEK_MS = 10_000L
+
         private val BG = Color.rgb(6, 10, 18)
         private val TOP = Color.rgb(10, 16, 27)
         private val PANEL = Color.rgb(13, 21, 34)
@@ -54,14 +67,22 @@ class MainActivity : AppCompatActivity() {
         private val TEXT = Color.rgb(240, 244, 249)
         private val MUTED = Color.rgb(149, 162, 181)
         private val ACCENT = Color.rgb(229, 9, 20)
-
-        private const val LIVE_STARTUP_TIMEOUT_MS = 8_000L
-        private const val LIVE_REBUFFER_NOTICE_MS = 1_200L
-        private const val LIVE_STALL_RECONNECT_MS = 25_000L
-        private const val LIVE_MAX_RECONNECTS = 4
+        private val LIVE_GREEN = Color.rgb(31, 176, 91)
+        private val WARNING = Color.rgb(241, 174, 38)
     }
 
     private enum class BrowseLevel { CATEGORIES, ITEMS, EPISODES }
+
+    private data class PlaybackDiagnostics(
+        var bufferingCount: Int = 0,
+        var bufferingStartedAt: Long = 0L,
+        var bufferingTotalMs: Long = 0L,
+        var recoveries: Int = 0,
+        var lastError: String = "",
+        var width: Int = 0,
+        var height: Int = 0,
+        var transport: String = ""
+    )
 
     private lateinit var repository: CatalogRepository
     private lateinit var sourceConfig: SourceConfig
@@ -89,12 +110,25 @@ class MainActivity : AppCompatActivity() {
     private lateinit var clock: TextView
     private lateinit var sourceBadge: TextView
     private lateinit var fullscreenButton: Button
+
     private lateinit var videoHud: LinearLayout
-    private lateinit var videoTitle: TextView
-    private lateinit var videoMeta: TextView
+    private lateinit var hudLogo: ImageView
+    private lateinit var hudBadge: TextView
+    private lateinit var hudTitle: TextView
+    private lateinit var hudSubtitle: TextView
+    private lateinit var hudHint: TextView
+    private lateinit var liveEpgRow: LinearLayout
+    private lateinit var liveEpgStart: TextView
+    private lateinit var liveEpgEnd: TextView
+    private lateinit var liveEpgProgress: SeekBar
+    private lateinit var vodProgressRow: LinearLayout
+    private lateinit var vodCurrent: TextView
+    private lateinit var vodDuration: TextView
+    private lateinit var vodProgress: SeekBar
+
     private lateinit var fullscreenChannelPanel: LinearLayout
-    private lateinit var fullscreenChannelRecycler: RecyclerView
     private lateinit var fullscreenChannelTitle: TextView
+    private lateinit var fullscreenChannelRecycler: RecyclerView
 
     private val sectionButtons = linkedMapOf<ContentSection, Button>()
     private var categoryAdapter: CategoryAdapter? = null
@@ -108,17 +142,29 @@ class MainActivity : AppCompatActivity() {
     private var currentItems: List<ContentItem> = emptyList()
     private var seriesItemsBeforeEpisodes: List<ContentItem> = emptyList()
     private var lastPlayed: ContentItem? = null
+    private var currentEpg: EpgEntry? = null
+
     private var waitingFirstFrame = false
+    private var hasPlayedCurrent = false
     private var startupToken = 0L
     private var stallToken = 0L
     private var reconnectToken = 0L
-    private var reconnectAttempts = 0
+    private var recoveryAttempts = 0
+    private var recoveryPending = false
     private var isFullscreen = false
     private var fullscreenChannelListVisible = false
+    private var diagnostics = PlaybackDiagnostics()
 
     private val hideHud = Runnable {
-        if (!waitingFirstFrame && ::videoHud.isInitialized && !fullscreenChannelListVisible) {
+        if (::videoHud.isInitialized && !fullscreenChannelListVisible && !waitingFirstFrame) {
             videoHud.visibility = View.GONE
+        }
+    }
+
+    private val vodProgressTick = object : Runnable {
+        override fun run() {
+            updateVodProgress()
+            handler.postDelayed(this, 500L)
         }
     }
 
@@ -138,6 +184,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(buildUi(config))
         updateClock()
         showCategories(ContentSection.LIVE)
+        handler.post(vodProgressTick)
     }
 
     override fun onStart() {
@@ -166,14 +213,10 @@ class MainActivity : AppCompatActivity() {
         root.addView(body, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
 
         navRail = buildNavRail(config)
-        body.addView(navRail, LinearLayout.LayoutParams(dp(154), ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            marginEnd = dp(10)
-        })
+        body.addView(navRail, LinearLayout.LayoutParams(dp(158), ViewGroup.LayoutParams.MATCH_PARENT).apply { marginEnd = dp(10) })
 
         browsePanel = buildBrowsePanel()
-        body.addView(browsePanel, LinearLayout.LayoutParams(dp(390), ViewGroup.LayoutParams.MATCH_PARENT).apply {
-            marginEnd = dp(10)
-        })
+        body.addView(browsePanel, LinearLayout.LayoutParams(dp(390), ViewGroup.LayoutParams.MATCH_PARENT).apply { marginEnd = dp(10) })
 
         rightPanel = buildRightPanel()
         body.addView(rightPanel, LinearLayout.LayoutParams(0, ViewGroup.LayoutParams.MATCH_PARENT, 1f))
@@ -231,7 +274,7 @@ class MainActivity : AppCompatActivity() {
                 maxLines = 1
                 background = roundedBg(PANEL_ALT, 9f, BORDER, 1)
             }
-            addView(sourceBadge, LinearLayout.LayoutParams(dp(170), dp(34)).apply { marginEnd = dp(14) })
+            addView(sourceBadge, LinearLayout.LayoutParams(dp(190), dp(34)).apply { marginEnd = dp(14) })
 
             clock = TextView(this@MainActivity).apply {
                 textSize = 18f
@@ -246,7 +289,7 @@ class MainActivity : AppCompatActivity() {
     private fun buildNavRail(config: SourceConfig): LinearLayout {
         return LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setPadding(dp(8), dp(10), dp(8), dp(10))
+            setPadding(dp(8), dp(8), dp(8), dp(8))
             background = roundedBg(PANEL, 14f, BORDER, 1)
 
             addView(TextView(this@MainActivity).apply {
@@ -257,22 +300,16 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER_VERTICAL
                 setPadding(dp(10), 0, 0, 0)
                 letterSpacing = 0.12f
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(38)))
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(32)))
 
             addView(sectionButton(ContentSection.LIVE, "TV EN VIVO"))
             addView(sectionButton(ContentSection.MOVIES, "PELÍCULAS"))
             addView(sectionButton(ContentSection.SERIES, "SERIES"))
+            addView(sectionButton(ContentSection.RADIO, "RADIO"))
             addView(navButton("BUSCAR") { showSearch() })
+            addView(navButton("MIS LISTAS") { openPlaylistSelector() })
             addView(navButton("AJUSTES") { showSettings(config) })
             addView(View(this@MainActivity), LinearLayout.LayoutParams(1, 0, 1f))
-            addView(TextView(this@MainActivity).apply {
-                val creds = RemotePrefs.loadCredentials(this@MainActivity)
-                text = if (creds != null) "DISPOSITIVO\n${creds.code}" else "TV FULL PRO"
-                textSize = 10f
-                setTextColor(MUTED)
-                gravity = Gravity.CENTER
-                maxLines = 2
-            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(50)))
             addView(navButton("SALIR") { finishAffinity() })
         }
     }
@@ -344,30 +381,11 @@ class MainActivity : AppCompatActivity() {
                 gravity = Gravity.CENTER
                 setTypeface(typeface, Typeface.BOLD)
             }
-            loadingWrap.addView(loadingText, LinearLayout.LayoutParams(dp(360), dp(46)).apply { topMargin = dp(8) })
+            loadingWrap.addView(loadingText, LinearLayout.LayoutParams(dp(420), dp(46)).apply { topMargin = dp(8) })
             videoFrame.addView(loadingWrap, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-            videoHud = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                gravity = Gravity.CENTER_VERTICAL
-                setPadding(dp(18), dp(8), dp(18), dp(8))
-                setBackgroundColor(Color.argb(205, 4, 7, 12))
-                visibility = View.GONE
-            }
-            videoTitle = TextView(this@MainActivity).apply {
-                textSize = 18f
-                setTextColor(Color.WHITE)
-                setTypeface(typeface, Typeface.BOLD)
-                maxLines = 1
-            }
-            videoMeta = TextView(this@MainActivity).apply {
-                textSize = 12f
-                setTextColor(Color.rgb(205, 213, 224))
-                maxLines = 1
-            }
-            videoHud.addView(videoTitle)
-            videoHud.addView(videoMeta)
-            videoFrame.addView(videoHud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(62), Gravity.BOTTOM))
+            videoHud = buildPlaybackHud()
+            videoFrame.addView(videoHud, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.BOTTOM))
 
             fullscreenButton = Button(this@MainActivity).apply {
                 text = "PANTALLA COMPLETA"
@@ -376,9 +394,7 @@ class MainActivity : AppCompatActivity() {
                 isFocusable = true
                 setTextColor(Color.WHITE)
                 background = roundedBg(Color.argb(225, 18, 28, 45), 9f, BORDER, 1)
-                setOnClickListener {
-                    if (lastPlayed != null) enterFullscreen()
-                }
+                setOnClickListener { if (lastPlayed != null && lastPlayed?.section != ContentSection.RADIO) enterFullscreen() }
                 setOnFocusChangeListener { v, focused ->
                     val b = v as Button
                     b.background = roundedBg(if (focused) ACCENT else Color.argb(225, 18, 28, 45), 9f, if (focused) ACCENT else BORDER, 1)
@@ -389,42 +405,8 @@ class MainActivity : AppCompatActivity() {
                 marginEnd = dp(12)
             })
 
-            fullscreenChannelPanel = LinearLayout(this@MainActivity).apply {
-                orientation = LinearLayout.VERTICAL
-                setPadding(dp(12), dp(16), dp(12), dp(12))
-                setBackgroundColor(Color.argb(242, 8, 13, 22))
-                visibility = View.GONE
-
-                fullscreenChannelTitle = TextView(this@MainActivity).apply {
-                    text = "CANALES"
-                    textSize = 18f
-                    setTextColor(Color.WHITE)
-                    setTypeface(typeface, Typeface.BOLD)
-                    maxLines = 1
-                }
-                addView(fullscreenChannelTitle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)))
-
-                addView(TextView(this@MainActivity).apply {
-                    text = "↑ ↓ navegar · OK cambiar · BACK cerrar"
-                    textSize = 11f
-                    setTextColor(MUTED)
-                    maxLines = 1
-                }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28)))
-
-                fullscreenChannelRecycler = RecyclerView(this@MainActivity).apply {
-                    setBackgroundColor(Color.TRANSPARENT)
-                    setPadding(0, dp(5), 0, 0)
-                    clipToPadding = false
-                    clipChildren = false
-                    isVerticalScrollBarEnabled = false
-                    setItemViewCacheSize(2)
-                }
-                addView(fullscreenChannelRecycler, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-            }
-            videoFrame.addView(
-                fullscreenChannelPanel,
-                FrameLayout.LayoutParams(dp(390), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START)
-            )
+            fullscreenChannelPanel = buildFullscreenChannelPanel()
+            videoFrame.addView(fullscreenChannelPanel, FrameLayout.LayoutParams(dp(390), ViewGroup.LayoutParams.MATCH_PARENT, Gravity.START))
 
             addView(videoFrame, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 0.68f))
 
@@ -453,6 +435,135 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    private fun buildPlaybackHud(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+            setBackgroundColor(Color.argb(220, 4, 7, 12))
+            visibility = View.GONE
+
+            val header = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+            }
+            hudLogo = ImageView(this@MainActivity).apply {
+                scaleType = ImageView.ScaleType.CENTER_INSIDE
+                setBackgroundColor(Color.rgb(18, 25, 37))
+            }
+            header.addView(hudLogo, LinearLayout.LayoutParams(dp(54), dp(54)).apply { marginEnd = dp(12) })
+
+            hudBadge = TextView(this@MainActivity).apply {
+                text = "LIVE"
+                textSize = 12f
+                gravity = Gravity.CENTER
+                setTextColor(Color.WHITE)
+                setTypeface(typeface, Typeface.BOLD)
+                background = roundedBg(LIVE_GREEN, 7f)
+            }
+            header.addView(hudBadge, LinearLayout.LayoutParams(dp(82), dp(32)).apply { marginEnd = dp(12) })
+
+            val titles = LinearLayout(this@MainActivity).apply { orientation = LinearLayout.VERTICAL }
+            hudTitle = TextView(this@MainActivity).apply {
+                textSize = 19f
+                setTextColor(Color.WHITE)
+                setTypeface(typeface, Typeface.BOLD)
+                maxLines = 1
+            }
+            hudSubtitle = TextView(this@MainActivity).apply {
+                textSize = 13f
+                setTextColor(Color.rgb(205, 213, 224))
+                maxLines = 1
+            }
+            titles.addView(hudTitle)
+            titles.addView(hudSubtitle)
+            header.addView(titles, LinearLayout.LayoutParams(0, dp(54), 1f))
+            addView(header, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(56)))
+
+            liveEpgRow = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                visibility = View.GONE
+            }
+            liveEpgStart = timeText()
+            liveEpgEnd = timeText()
+            liveEpgProgress = SeekBar(this@MainActivity).apply {
+                max = 1000
+                isEnabled = false
+                isFocusable = false
+            }
+            liveEpgRow.addView(liveEpgStart, LinearLayout.LayoutParams(dp(58), dp(32)))
+            liveEpgRow.addView(liveEpgProgress, LinearLayout.LayoutParams(0, dp(32), 1f))
+            liveEpgRow.addView(liveEpgEnd, LinearLayout.LayoutParams(dp(58), dp(32)))
+            addView(liveEpgRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)))
+
+            vodProgressRow = LinearLayout(this@MainActivity).apply {
+                orientation = LinearLayout.HORIZONTAL
+                gravity = Gravity.CENTER_VERTICAL
+                visibility = View.GONE
+            }
+            vodCurrent = timeText()
+            vodDuration = timeText()
+            vodProgress = SeekBar(this@MainActivity).apply {
+                max = 1000
+                isEnabled = false
+                isFocusable = false
+            }
+            vodProgressRow.addView(vodCurrent, LinearLayout.LayoutParams(dp(72), dp(38)))
+            vodProgressRow.addView(vodProgress, LinearLayout.LayoutParams(0, dp(38), 1f))
+            vodProgressRow.addView(vodDuration, LinearLayout.LayoutParams(dp(72), dp(38)))
+            addView(vodProgressRow, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(40)))
+
+            hudHint = TextView(this@MainActivity).apply {
+                textSize = 11f
+                setTextColor(MUTED)
+                gravity = Gravity.END or Gravity.CENTER_VERTICAL
+                maxLines = 1
+            }
+            addView(hudHint, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(24)))
+        }
+    }
+
+    private fun timeText(): TextView = TextView(this).apply {
+        text = "00:00"
+        textSize = 12f
+        setTextColor(Color.WHITE)
+        gravity = Gravity.CENTER
+    }
+
+    private fun buildFullscreenChannelPanel(): LinearLayout {
+        return LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(12), dp(16), dp(12), dp(12))
+            setBackgroundColor(Color.argb(242, 8, 13, 22))
+            visibility = View.GONE
+
+            fullscreenChannelTitle = TextView(this@MainActivity).apply {
+                text = "CANALES"
+                textSize = 18f
+                setTextColor(Color.WHITE)
+                setTypeface(typeface, Typeface.BOLD)
+                maxLines = 1
+            }
+            addView(fullscreenChannelTitle, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(34)))
+            addView(TextView(this@MainActivity).apply {
+                text = "↑ ↓ navegar · OK cambiar · BACK cerrar"
+                textSize = 11f
+                setTextColor(MUTED)
+                maxLines = 1
+            }, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(28)))
+
+            fullscreenChannelRecycler = RecyclerView(this@MainActivity).apply {
+                setBackgroundColor(Color.TRANSPARENT)
+                setPadding(0, dp(5), 0, 0)
+                clipToPadding = false
+                clipChildren = false
+                isVerticalScrollBarEnabled = false
+                setItemViewCacheSize(2)
+            }
+            addView(fullscreenChannelRecycler, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        }
+    }
+
     private fun sectionButton(section: ContentSection, label: String): Button {
         return navButton(label) { showCategories(section) }.also { sectionButtons[section] = it }
     }
@@ -460,7 +571,7 @@ class MainActivity : AppCompatActivity() {
     private fun navButton(label: String, action: () -> Unit): Button {
         return Button(this).apply {
             text = label
-            textSize = 13f
+            textSize = 12f
             isAllCaps = false
             isFocusable = true
             setTextColor(TEXT)
@@ -471,11 +582,12 @@ class MainActivity : AppCompatActivity() {
                 b.background = roundedBg(if (focused) ACCENT else Color.TRANSPARENT, 9f)
                 b.setTextColor(Color.WHITE)
             }
-            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(52)).apply { bottomMargin = dp(6) }
+            layoutParams = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(45)).apply { bottomMargin = dp(4) }
         }
     }
 
     private fun showCategories(section: ContentSection) {
+        if (lastPlayed != null && lastPlayed?.section != section) stopPlayback(clearItem = true)
         currentSection = section
         browseLevel = BrowseLevel.CATEGORIES
         selectedCategory = null
@@ -484,12 +596,13 @@ class MainActivity : AppCompatActivity() {
         sectionTitle.text = sectionLabel(section)
         browseTitle.text = "${sectionLabel(section)} · CATEGORÍAS"
         browseSubtitle.text = "Elegí una categoría para continuar"
-        sectionButtons.forEach { (s, b) -> b.background = roundedBg(if (s == section) Color.rgb(74, 18, 27) else Color.TRANSPARENT, 9f) }
+        sectionButtons.forEach { (s, b) ->
+            b.background = roundedBg(if (s == section) Color.rgb(74, 18, 27) else Color.TRANSPARENT, 9f)
+        }
 
         configurePanelsForCategories(section)
         browseRecycler.adapter = null
         browseRecycler.layoutManager = verticalLayoutManager()
-
         infoTitle.text = sectionLabel(section)
         infoBody.text = "Cargando categorías…"
 
@@ -500,7 +613,7 @@ class MainActivity : AppCompatActivity() {
                     categoryAdapter = CategoryAdapter(cats) { category -> showItems(category) }
                     browseRecycler.adapter = categoryAdapter
                     browseSubtitle.text = "${cats.size} categorías"
-                    infoBody.text = "Elegí una categoría. La pantalla anterior se reemplaza al entrar."
+                    infoBody.text = if (cats.size <= 1) "No hay contenido disponible en esta sección." else "Elegí una categoría para continuar."
                     focusFirst()
                 }.onFailure { showCatalogError(it.message) }
             }
@@ -514,11 +627,11 @@ class MainActivity : AppCompatActivity() {
         browseSubtitle.text = "Cargando contenido…"
         browseRecycler.adapter = null
 
-        if (currentSection == ContentSection.LIVE) {
+        if (currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO) {
             configurePanelsForLiveItems()
             browseRecycler.layoutManager = verticalLayoutManager()
             infoTitle.text = category.name
-            infoBody.text = "Cargando canales…"
+            infoBody.text = "Cargando…"
         } else {
             configurePanelsForLibraryItems()
             browseRecycler.layoutManager = gridLayoutManager(5)
@@ -530,11 +643,11 @@ class MainActivity : AppCompatActivity() {
                 result.onSuccess { list ->
                     currentItems = list
                     if (currentSection == ContentSection.SERIES) seriesItemsBeforeEpisodes = list
-                    contentAdapter = ContentAdapter(list, grid = currentSection != ContentSection.LIVE)
+                    contentAdapter = ContentAdapter(list, grid = currentSection == ContentSection.MOVIES || currentSection == ContentSection.SERIES)
                     browseRecycler.adapter = contentAdapter
-                    browseSubtitle.text = "${list.size} elementos · BACK para volver a categorías"
-                    if (currentSection == ContentSection.LIVE) {
-                        infoBody.text = if (list.isEmpty()) "No hay canales en esta categoría." else "${list.size} canales disponibles"
+                    browseSubtitle.text = "${list.size} elementos · BACK para volver"
+                    if (currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO) {
+                        infoBody.text = if (list.isEmpty()) "No hay contenido en esta categoría." else "${list.size} disponibles"
                     }
                     focusFirst()
                 }.onFailure { showCatalogError(it.message) }
@@ -568,7 +681,7 @@ class MainActivity : AppCompatActivity() {
         browseLevel = BrowseLevel.ITEMS
         currentItems = seriesItemsBeforeEpisodes
         browseTitle.text = "SERIES · ${selectedCategory?.name.orEmpty()}"
-        browseSubtitle.text = "${currentItems.size} series · BACK para volver a categorías"
+        browseSubtitle.text = "${currentItems.size} series · BACK para volver"
         configurePanelsForLibraryItems()
         browseRecycler.layoutManager = gridLayoutManager(5)
         contentAdapter = ContentAdapter(currentItems, grid = true)
@@ -583,43 +696,53 @@ class MainActivity : AppCompatActivity() {
         }
         if (item.url.isBlank()) return
 
-        if (item.section == ContentSection.LIVE) {
-            if (lastPlayed?.id == item.id && player?.isPlaying == true) enterFullscreen() else startPlayback(item, reconnect = false)
-        } else {
-            startPlayback(item, reconnect = false)
-            enterFullscreen()
+        when (item.section) {
+            ContentSection.LIVE -> {
+                if (lastPlayed?.id == item.id && player?.isPlaying == true) enterFullscreen()
+                else startPlayback(item, reconnect = false)
+            }
+            ContentSection.RADIO -> startPlayback(item, reconnect = false)
+            ContentSection.MOVIES, ContentSection.SERIES -> {
+                startPlayback(item, reconnect = false)
+                enterFullscreen()
+            }
         }
     }
 
     private fun showItemInfo(item: ContentItem) {
-        if (currentSection != ContentSection.LIVE || !::infoTitle.isInitialized) return
+        if ((currentSection != ContentSection.LIVE && currentSection != ContentSection.RADIO) || !::infoTitle.isInitialized) return
         infoTitle.text = item.name
-        infoBody.text = "Canal ${item.id}"
-        loadEpg(item)
+        infoBody.text = if (item.section == ContentSection.RADIO) "Radio en vivo" else "Canal ${item.id}"
+        if (item.section == ContentSection.LIVE) loadEpg(item)
     }
 
     private fun loadEpg(item: ContentItem) {
         io.execute {
             val epg = repository.loadShortEpg(item.id)
-            if (epg.isEmpty()) return@execute
-            val text = epg.joinToString("\n\n") { e ->
-                buildString {
-                    append(e.title.ifBlank { "Programa" })
-                    if (e.start.isNotBlank()) append("\n${e.start}  →  ${e.end}")
-                    if (e.description.isNotBlank()) append("\n${e.description}")
-                }
-            }
+            val current = epg.firstOrNull()
             runOnUiThread {
-                if (infoTitle.text.toString() == item.name) infoBody.text = text
+                if (lastPlayed?.id == item.id) {
+                    currentEpg = current
+                    if (::videoHud.isInitialized && videoHud.visibility == View.VISIBLE) showPlaybackHud()
+                }
+                if (infoTitle.text.toString() == item.name && epg.isNotEmpty()) {
+                    infoBody.text = epg.joinToString("\n\n") { e ->
+                        buildString {
+                            append(e.title.ifBlank { "Programa" })
+                            if (e.start.isNotBlank()) append("\n${e.start}  →  ${e.end}")
+                        }
+                    }
+                }
             }
         }
     }
 
     private fun configurePanelsForCategories(section: ContentSection) {
         browsePanel.visibility = View.VISIBLE
-        rightPanel.visibility = if (section == ContentSection.LIVE) View.VISIBLE else View.GONE
+        val liveLike = section == ContentSection.LIVE || section == ContentSection.RADIO
+        rightPanel.visibility = if (liveLike) View.VISIBLE else View.GONE
         val lp = browsePanel.layoutParams as LinearLayout.LayoutParams
-        if (section == ContentSection.LIVE) {
+        if (liveLike) {
             lp.width = dp(390)
             lp.weight = 0f
             lp.marginEnd = dp(10)
@@ -649,18 +772,12 @@ class MainActivity : AppCompatActivity() {
         browsePanel.layoutParams = lp
     }
 
-    private fun verticalLayoutManager(): LinearLayoutManager {
-        return LinearLayoutManager(this).apply { isItemPrefetchEnabled = false }
-    }
-
-    private fun gridLayoutManager(spanCount: Int): GridLayoutManager {
-        return GridLayoutManager(this, spanCount).apply { isItemPrefetchEnabled = false }
-    }
+    private fun verticalLayoutManager(): LinearLayoutManager = LinearLayoutManager(this).apply { isItemPrefetchEnabled = false }
+    private fun gridLayoutManager(spanCount: Int): GridLayoutManager = GridLayoutManager(this, spanCount).apply { isItemPrefetchEnabled = false }
 
     private fun focusFirst() {
         browseRecycler.post {
-            browseRecycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus()
-                ?: browseRecycler.requestFocus()
+            browseRecycler.findViewHolderForAdapterPosition(0)?.itemView?.requestFocus() ?: browseRecycler.requestFocus()
         }
     }
 
@@ -678,10 +795,10 @@ class MainActivity : AppCompatActivity() {
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
 
         val dataSource = DefaultHttpDataSource.Factory()
-            .setUserAgent("TV-FULL-PRO/1.4 AndroidTV")
+            .setUserAgent("TV-FULL-PRO/1.5 AndroidTV")
             .setAllowCrossProtocolRedirects(true)
             .setConnectTimeoutMs(8_000)
-            .setReadTimeoutMs(25_000)
+            .setReadTimeoutMs(30_000)
 
         val p = ExoPlayer.Builder(this, renderers)
             .setLoadControl(loadControl)
@@ -692,21 +809,27 @@ class MainActivity : AppCompatActivity() {
             override fun onPlaybackStateChanged(state: Int) {
                 when (state) {
                     Player.STATE_BUFFERING -> {
-                        if (waitingFirstFrame) {
+                        beginBufferingDiagnostic()
+                        if (waitingFirstFrame && !hasPlayedCurrent) {
                             showLoading("Inicializando…")
-                        } else if (isCurrentLive()) {
+                        } else if (isCurrentLiveLike()) {
                             scheduleStallRecovery()
                         } else {
                             showLoading("Cargando…")
                         }
                     }
                     Player.STATE_READY -> {
+                        endBufferingDiagnostic()
                         cancelStallRecovery()
+                        recoveryPending = false
+                        if (isCurrentRadio() && waitingFirstFrame) confirmPlaybackStarted()
                         if (!waitingFirstFrame) hideLoading()
+                        restoreLiveBadgeIfNeeded()
                     }
                     Player.STATE_ENDED -> {
+                        endBufferingDiagnostic()
                         cancelStallRecovery()
-                        if (isCurrentLive()) scheduleReconnect("Reconectando…", 350L)
+                        if (isCurrentLiveLike()) scheduleLiveRecovery("Fin inesperado del stream", hard = true)
                         else showLoading("Finalizado")
                     }
                     Player.STATE_IDLE -> Unit
@@ -714,17 +837,26 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onRenderedFirstFrame() {
-                waitingFirstFrame = false
-                reconnectAttempts = 0
-                cancelStallRecovery()
-                hideLoading()
-                showVideoHud()
+                confirmPlaybackStarted()
+            }
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) {
+                diagnostics.width = videoSize.width
+                diagnostics.height = videoSize.height
             }
 
             override fun onPlayerError(error: PlaybackException) {
+                endBufferingDiagnostic()
                 cancelStallRecovery()
-                if (isCurrentLive()) {
-                    scheduleReconnect("Reconectando…", 450L)
+                diagnostics.lastError = "${PlaybackException.getErrorCodeName(error.errorCode)} ${error.message.orEmpty()}".trim()
+                logDiagnostics("player_error")
+                if (isCurrentLiveLike()) {
+                    val status = httpStatus(error)
+                    if (status == 401 || status == 403 || status == 404 || status == 410) {
+                        markCurrentUnavailable("HTTP $status")
+                    } else {
+                        scheduleLiveRecovery("Error recuperable", hard = false)
+                    }
                 } else {
                     waitingFirstFrame = false
                     showLoading("No se pudo reproducir")
@@ -742,107 +874,205 @@ class MainActivity : AppCompatActivity() {
             player ?: return
         }
 
-        if (!reconnect) reconnectAttempts = 0
+        if (!reconnect) {
+            recoveryAttempts = 0
+            diagnostics = PlaybackDiagnostics(transport = transportOf(item.url))
+            hasPlayedCurrent = false
+        }
         lastPlayed = item
+        currentEpg = null
         waitingFirstFrame = true
+        recoveryPending = false
         startupToken++
         reconnectToken++
         cancelStallRecovery()
         val token = startupToken
 
         showLoading(if (reconnect) "Reconectando…" else "Inicializando…")
-        videoTitle.text = item.name
-        videoMeta.text = if (item.section == ContentSection.LIVE) "TV en vivo" else sectionLabel(item.section)
-
         p.stop()
         p.clearMediaItems()
         p.setMediaItem(MediaItem.fromUri(item.url))
         p.prepare()
         p.playWhenReady = true
+        if (item.section == ContentSection.LIVE) loadEpg(item)
 
-        val startupTimeout = if (reconnect) 6_000L else LIVE_STARTUP_TIMEOUT_MS
+        val timeout = if (reconnect) LIVE_RECONNECT_STARTUP_TIMEOUT_MS else LIVE_STARTUP_TIMEOUT_MS
         handler.postDelayed({
             if (token == startupToken && waitingFirstFrame && lastPlayed?.url == item.url) {
-                if (item.section == ContentSection.LIVE) scheduleReconnect("Reconectando…", 250L)
+                if (isCurrentLiveLike()) scheduleLiveRecovery("Inicio sin señal", hard = false)
                 else {
                     p.stop()
                     waitingFirstFrame = false
                     showLoading("No se pudo iniciar")
                 }
             }
-        }, startupTimeout)
+        }, timeout)
+    }
+
+    private fun confirmPlaybackStarted() {
+        waitingFirstFrame = false
+        hasPlayedCurrent = true
+        recoveryAttempts = 0
+        recoveryPending = false
+        cancelStallRecovery()
+        hideLoading()
+        showPlaybackHud()
+        logDiagnostics("playback_confirmed")
     }
 
     private fun scheduleStallRecovery() {
-        if (!isCurrentLive() || waitingFirstFrame) return
+        if (!isCurrentLiveLike() || waitingFirstFrame) return
         stallToken++
         val token = stallToken
 
         handler.postDelayed({
-            if (token == stallToken && player?.playbackState == Player.STATE_BUFFERING && isCurrentLive() && !waitingFirstFrame) {
-                showLoading("Recuperando señal…")
-                infoTitle.text = lastPlayed?.name.orEmpty()
-                infoBody.text = "Esperando datos del canal sin cerrar la conexión."
+            if (token == stallToken && player?.playbackState == Player.STATE_BUFFERING && isCurrentLiveLike() && !waitingFirstFrame) {
+                showLiveRecoveryHud()
             }
         }, LIVE_REBUFFER_NOTICE_MS)
 
+        val stallLimit = stallLimitFor(lastPlayed?.url.orEmpty())
         handler.postDelayed({
-            if (token == stallToken && player?.playbackState == Player.STATE_BUFFERING && isCurrentLive() && !waitingFirstFrame) {
-                scheduleReconnect("Reconectando…", 200L)
+            if (token == stallToken && player?.playbackState == Player.STATE_BUFFERING && isCurrentLiveLike() && !waitingFirstFrame) {
+                scheduleLiveRecovery("Buffering prolongado", hard = false)
             }
-        }, LIVE_STALL_RECONNECT_MS)
+        }, stallLimit)
     }
 
     private fun cancelStallRecovery() {
         stallToken++
     }
 
-    private fun scheduleReconnect(message: String, delayMs: Long) {
+    private fun scheduleLiveRecovery(reason: String, hard: Boolean) {
         val item = lastPlayed ?: return
-        if (item.section != ContentSection.LIVE) return
-        if (reconnectAttempts >= LIVE_MAX_RECONNECTS) {
-            waitingFirstFrame = false
-            player?.stop()
-            showLoading("Canal no disponible")
+        if (!isCurrentLiveLike() || recoveryPending) return
+        if (recoveryAttempts >= LIVE_MAX_RECOVERIES) {
+            markCurrentUnavailable("Máximo de recuperaciones")
             return
         }
 
-        reconnectAttempts++
-        waitingFirstFrame = true
+        recoveryAttempts++
+        diagnostics.recoveries++
+        recoveryPending = true
         reconnectToken++
         val token = reconnectToken
         cancelStallRecovery()
-        player?.stop()
-        showLoading(message)
+        showLiveRecoveryHud()
         infoTitle.text = item.name
-        infoBody.text = "Reconectando canal · intento $reconnectAttempts de $LIVE_MAX_RECONNECTS"
+        infoBody.text = "$reason · recuperación $recoveryAttempts de $LIVE_MAX_RECOVERIES"
 
-        val backoff = when (reconnectAttempts) {
-            1 -> 700L
-            2 -> 1_500L
-            3 -> 3_000L
-            else -> 5_000L
+        val delay = when (recoveryAttempts) {
+            1 -> 600L
+            2 -> 1_200L
+            3 -> 2_500L
+            else -> 4_000L
         }
+
         handler.postDelayed({
-            if (token == reconnectToken && lastPlayed?.url == item.url) {
+            if (token != reconnectToken || lastPlayed?.url != item.url) return@postDelayed
+            recoveryPending = false
+            if (hard || recoveryAttempts >= 3) {
                 startPlayback(item, reconnect = true)
+            } else {
+                softReprepare(item)
             }
-        }, delayMs + backoff)
+        }, delay)
+    }
+
+    private fun softReprepare(item: ContentItem) {
+        val p = player ?: return
+        waitingFirstFrame = true
+        startupToken++
+        val token = startupToken
+        p.prepare()
+        p.playWhenReady = true
+        handler.postDelayed({
+            if (token == startupToken && waitingFirstFrame && lastPlayed?.url == item.url) {
+                scheduleLiveRecovery("Reintento suave sin respuesta", hard = true)
+            }
+        }, LIVE_RECONNECT_STARTUP_TIMEOUT_MS)
+    }
+
+    private fun markCurrentUnavailable(reason: String) {
+        waitingFirstFrame = false
+        recoveryPending = false
+        cancelStallRecovery()
+        player?.stop()
+        showLoading("Canal no disponible")
+        diagnostics.lastError = reason
+        infoBody.text = reason
+        logDiagnostics("unavailable")
+    }
+
+    private fun beginBufferingDiagnostic() {
+        if (diagnostics.bufferingStartedAt == 0L) {
+            diagnostics.bufferingStartedAt = System.currentTimeMillis()
+            diagnostics.bufferingCount++
+        }
+    }
+
+    private fun endBufferingDiagnostic() {
+        if (diagnostics.bufferingStartedAt > 0L) {
+            diagnostics.bufferingTotalMs += System.currentTimeMillis() - diagnostics.bufferingStartedAt
+            diagnostics.bufferingStartedAt = 0L
+        }
+    }
+
+    private fun logDiagnostics(event: String) {
+        Log.i(
+            TAG,
+            "$event transport=${diagnostics.transport} buffers=${diagnostics.bufferingCount} bufferMs=${diagnostics.bufferingTotalMs} recoveries=${diagnostics.recoveries} video=${diagnostics.width}x${diagnostics.height} error=${diagnostics.lastError}"
+        )
+    }
+
+    private fun httpStatus(error: PlaybackException): Int? {
+        var cause: Throwable? = error
+        while (cause != null) {
+            if (cause is HttpDataSource.InvalidResponseCodeException) return cause.responseCode
+            cause = cause.cause
+        }
+        return null
+    }
+
+    private fun stallLimitFor(url: String): Long {
+        val lower = url.lowercase(Locale.ROOT)
+        return when {
+            lower.contains(".m3u8") -> 35_000L
+            lower.contains(".ts") -> 30_000L
+            else -> 30_000L
+        }
+    }
+
+    private fun transportOf(url: String): String {
+        val lower = url.lowercase(Locale.ROOT)
+        return when {
+            lower.contains(".m3u8") -> "HLS"
+            lower.contains(".ts") -> "MPEG-TS"
+            lower.contains(".mp4") -> "MP4"
+            lower.contains(".mkv") -> "MKV"
+            else -> "AUTO"
+        }
     }
 
     private fun isCurrentLive(): Boolean = lastPlayed?.section == ContentSection.LIVE
+    private fun isCurrentRadio(): Boolean = lastPlayed?.section == ContentSection.RADIO
+    private fun isCurrentLiveLike(): Boolean = isCurrentLive() || isCurrentRadio()
 
-    private fun stopNonLivePlayback() {
-        if (lastPlayed?.section == ContentSection.LIVE) return
+    private fun stopPlayback(clearItem: Boolean) {
         startupToken++
         reconnectToken++
         cancelStallRecovery()
         waitingFirstFrame = false
-        reconnectAttempts = 0
+        hasPlayedCurrent = false
+        recoveryPending = false
+        recoveryAttempts = 0
         player?.stop()
         player?.clearMediaItems()
-        lastPlayed = null
+        if (clearItem) lastPlayed = null
+        currentEpg = null
         hideLoading()
+        handler.removeCallbacks(hideHud)
+        if (::videoHud.isInitialized) videoHud.visibility = View.GONE
     }
 
     private fun releasePlayer() {
@@ -865,22 +1095,148 @@ class MainActivity : AppCompatActivity() {
         if (::loading.isInitialized) loading.visibility = View.GONE
     }
 
-    private fun showVideoHud() {
+    private fun showPlaybackHud() {
         val item = lastPlayed ?: return
         if (fullscreenChannelListVisible) return
-        videoTitle.text = item.name
-        videoMeta.text = if (item.section == ContentSection.LIVE) {
-            "↓ canales · OK pausa · BACK vuelve"
-        } else {
-            "OK pausa · BACK vuelve"
+
+        hudTitle.text = item.name
+        hudLogo.setImageDrawable(null)
+        if (item.logo.isNotBlank()) imageLoader.load(hudLogo, item.logo, dp(54), dp(54))
+
+        when (item.section) {
+            ContentSection.LIVE -> {
+                hudBadge.text = "● LIVE"
+                hudBadge.background = roundedBg(LIVE_GREEN, 7f)
+                hudSubtitle.text = currentEpg?.title?.ifBlank { "EN VIVO" } ?: "EN VIVO"
+                hudHint.text = "↓ canales · OK pausa · BACK volver"
+                vodProgressRow.visibility = View.GONE
+                updateLiveEpgProgress()
+            }
+            ContentSection.RADIO -> {
+                hudBadge.text = "● RADIO"
+                hudBadge.background = roundedBg(LIVE_GREEN, 7f)
+                hudSubtitle.text = "EN VIVO"
+                hudHint.text = "OK pausa · BACK volver"
+                liveEpgRow.visibility = View.GONE
+                vodProgressRow.visibility = View.GONE
+            }
+            ContentSection.MOVIES -> {
+                hudBadge.text = "PELÍCULA"
+                hudBadge.background = roundedBg(ACCENT, 7f)
+                hudSubtitle.text = "Reproduciendo"
+                hudHint.text = "← -10s · → +10s · OK pausa/reanuda · BACK volver"
+                liveEpgRow.visibility = View.GONE
+                vodProgressRow.visibility = View.VISIBLE
+                updateVodProgress()
+            }
+            ContentSection.SERIES -> {
+                hudBadge.text = "EPISODIO"
+                hudBadge.background = roundedBg(ACCENT, 7f)
+                hudSubtitle.text = item.extra.ifBlank { "Reproduciendo" }
+                hudHint.text = "← -10s · → +10s · OK pausa/reanuda · BACK volver"
+                liveEpgRow.visibility = View.GONE
+                vodProgressRow.visibility = View.VISIBLE
+                updateVodProgress()
+            }
         }
         videoHud.visibility = View.VISIBLE
         handler.removeCallbacks(hideHud)
-        handler.postDelayed(hideHud, 3_500)
+        if (!waitingFirstFrame) handler.postDelayed(hideHud, HUD_HIDE_MS)
+    }
+
+    private fun showLiveRecoveryHud() {
+        val item = lastPlayed ?: return
+        if (!::videoHud.isInitialized || fullscreenChannelListVisible) return
+        hudTitle.text = item.name
+        hudBadge.text = "RECUPERANDO"
+        hudBadge.background = roundedBg(WARNING, 7f)
+        hudSubtitle.text = "Esperando datos sin cerrar la conexión"
+        liveEpgRow.visibility = View.GONE
+        vodProgressRow.visibility = View.GONE
+        hudHint.text = "La reproducción continuará automáticamente"
+        videoHud.visibility = View.VISIBLE
+        handler.removeCallbacks(hideHud)
+    }
+
+    private fun restoreLiveBadgeIfNeeded() {
+        if (isCurrentLiveLike() && ::videoHud.isInitialized && videoHud.visibility == View.VISIBLE) {
+            showPlaybackHud()
+        }
+    }
+
+    private fun updateLiveEpgProgress() {
+        val epg = currentEpg
+        if (epg == null) {
+            liveEpgRow.visibility = View.GONE
+            return
+        }
+        val start = parseEpgTime(epg.start)
+        val end = parseEpgTime(epg.end)
+        if (start == null || end == null || end <= start) {
+            liveEpgRow.visibility = View.GONE
+            return
+        }
+        val now = System.currentTimeMillis()
+        val progress = (((now - start).toDouble() / (end - start).toDouble()) * 1000.0).toInt().coerceIn(0, 1000)
+        liveEpgStart.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(start))
+        liveEpgEnd.text = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date(end))
+        liveEpgProgress.progress = progress
+        liveEpgRow.visibility = View.VISIBLE
+    }
+
+    private fun parseEpgTime(value: String): Long? {
+        if (value.isBlank()) return null
+        val patterns = listOf("yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd'T'HH:mm:ss", "yyyy-MM-dd HH:mm")
+        for (pattern in patterns) {
+            val parsed = runCatching { SimpleDateFormat(pattern, Locale.getDefault()).parse(value)?.time }.getOrNull()
+            if (parsed != null) return parsed
+        }
+        return null
+    }
+
+    private fun updateVodProgress() {
+        val item = lastPlayed ?: return
+        if (item.section == ContentSection.LIVE || item.section == ContentSection.RADIO) return
+        val p = player ?: return
+        val duration = p.duration
+        val position = p.currentPosition.coerceAtLeast(0L)
+        vodCurrent.text = formatTime(position)
+        if (duration == C.TIME_UNSET || duration <= 0L) {
+            vodDuration.text = "--:--"
+            vodProgress.progress = 0
+        } else {
+            vodDuration.text = formatTime(duration)
+            vodProgress.progress = ((position.toDouble() / duration.toDouble()) * 1000.0).toInt().coerceIn(0, 1000)
+        }
+    }
+
+    private fun formatTime(ms: Long): String {
+        val total = (ms / 1000L).coerceAtLeast(0L)
+        val h = total / 3600L
+        val m = (total % 3600L) / 60L
+        val s = total % 60L
+        return if (h > 0) String.format(Locale.getDefault(), "%d:%02d:%02d", h, m, s)
+        else String.format(Locale.getDefault(), "%02d:%02d", m, s)
+    }
+
+    private fun seekVod(deltaMs: Long) {
+        val item = lastPlayed ?: return
+        if (item.section == ContentSection.LIVE || item.section == ContentSection.RADIO) return
+        val p = player ?: return
+        val duration = p.duration
+        val max = if (duration == C.TIME_UNSET || duration <= 0L) Long.MAX_VALUE else duration
+        val target = (p.currentPosition + deltaMs).coerceAtLeast(0L).coerceAtMost(max)
+        p.seekTo(target)
+        showPlaybackHud()
+    }
+
+    private fun togglePlayPause() {
+        player?.let { if (it.isPlaying) it.pause() else it.play() }
+        showPlaybackHud()
     }
 
     private fun enterFullscreen() {
-        if (isFullscreen || lastPlayed == null) return
+        if (isFullscreen || lastPlayed == null || lastPlayed?.section == ContentSection.RADIO) return
         isFullscreen = true
         hideFullscreenChannelList(showHudAfter = false)
         immersive()
@@ -905,7 +1261,7 @@ class MainActivity : AppCompatActivity() {
         }.also { videoFrame.layoutParams = it }
         videoFrame.background = null
         videoFrame.setPadding(0, 0, 0, 0)
-        showVideoHud()
+        showPlaybackHud()
     }
 
     private fun exitFullscreen() {
@@ -930,7 +1286,7 @@ class MainActivity : AppCompatActivity() {
 
         when {
             browseLevel == BrowseLevel.CATEGORIES -> configurePanelsForCategories(currentSection)
-            currentSection == ContentSection.LIVE -> configurePanelsForLiveItems()
+            currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO -> configurePanelsForLiveItems()
             else -> configurePanelsForLibraryItems()
         }
         handler.removeCallbacks(hideHud)
@@ -960,8 +1316,7 @@ class MainActivity : AppCompatActivity() {
         val index = currentItems.indexOfFirst { it.id == lastPlayed?.id }.coerceAtLeast(0)
         fullscreenChannelRecycler.scrollToPosition(index)
         fullscreenChannelRecycler.post {
-            fullscreenChannelRecycler.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus()
-                ?: fullscreenChannelRecycler.requestFocus()
+            fullscreenChannelRecycler.findViewHolderForAdapterPosition(index)?.itemView?.requestFocus() ?: fullscreenChannelRecycler.requestFocus()
         }
     }
 
@@ -971,7 +1326,7 @@ class MainActivity : AppCompatActivity() {
         fullscreenChannelPanel.visibility = View.GONE
         fullscreenChannelRecycler.adapter = null
         fullscreenChannelAdapter = null
-        if (showHudAfter && isFullscreen) showVideoHud()
+        if (showHudAfter && isFullscreen) showPlaybackHud()
     }
 
     private fun showSearch() {
@@ -991,7 +1346,10 @@ class MainActivity : AppCompatActivity() {
                     browseRecycler.adapter = CategoryAdapter(source.filter { q.isBlank() || it.name.lowercase(Locale.getDefault()).contains(q) }) { showItems(it) }
                 } else {
                     val source = currentItems
-                    contentAdapter = ContentAdapter(source.filter { q.isBlank() || it.name.lowercase(Locale.getDefault()).contains(q) }, grid = currentSection != ContentSection.LIVE && browseLevel != BrowseLevel.EPISODES)
+                    contentAdapter = ContentAdapter(
+                        source.filter { q.isBlank() || it.name.lowercase(Locale.getDefault()).contains(q) },
+                        grid = (currentSection == ContentSection.MOVIES || currentSection == ContentSection.SERIES) && browseLevel != BrowseLevel.EPISODES
+                    )
                     browseRecycler.adapter = contentAdapter
                 }
                 focusFirst()
@@ -1000,13 +1358,28 @@ class MainActivity : AppCompatActivity() {
             .show()
     }
 
+    private fun openPlaylistSelector() {
+        stopPlayback(clearItem = true)
+        if (RemotePrefs.loadServices(this).isNotEmpty()) {
+            startActivity(Intent(this, PlaylistActivity::class.java))
+            finish()
+        } else {
+            startActivity(Intent(this, ProvisioningActivity::class.java).putExtra("force_remote", true))
+            finish()
+        }
+    }
+
     private fun showSettings(config: SourceConfig) {
         val source = if (config.mode == SourceMode.M3U) "M3U" else "Xtream"
         val code = RemotePrefs.loadCredentials(this)?.code ?: "Sin código remoto"
         val service = RemotePrefs.serviceName(this).ifBlank { "Sin nombre" }
+        val diag = "Buffering: ${diagnostics.bufferingCount} · ${diagnostics.bufferingTotalMs / 1000.0}s\n" +
+            "Recuperaciones: ${diagnostics.recoveries} · Transporte: ${diagnostics.transport}\n" +
+            "Video: ${diagnostics.width}x${diagnostics.height}\n" +
+            "Último error: ${diagnostics.lastError.ifBlank { "ninguno" }}"
         AlertDialog.Builder(this)
             .setTitle("TV FULL PRO")
-            .setMessage("Fuente: $source\nServicio: $service\nDispositivo: $code\n\nReproductor: Media3 / ExoPlayer\nImágenes: carga visible + caché local")
+            .setMessage("Fuente: $source\nLista: $service\nDispositivo: $code\n\nReproductor: Media3 / ExoPlayer\n\nDiagnóstico actual\n$diag")
             .setPositiveButton("SINCRONIZAR PANEL") { _, _ ->
                 startActivity(Intent(this, ProvisioningActivity::class.java).putExtra("force_remote", true))
                 finish()
@@ -1036,6 +1409,7 @@ class MainActivity : AppCompatActivity() {
         ContentSection.LIVE -> "TV EN VIVO"
         ContentSection.MOVIES -> "PELÍCULAS"
         ContentSection.SERIES -> "SERIES"
+        ContentSection.RADIO -> "RADIO"
     }
 
     private fun goLogin() {
@@ -1057,12 +1431,29 @@ class MainActivity : AppCompatActivity() {
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
         if (event.action == KeyEvent.ACTION_DOWN) {
+            if (isFullscreen && !fullscreenChannelListVisible) {
+                when (event.keyCode) {
+                    KeyEvent.KEYCODE_DPAD_LEFT -> {
+                        if (!isCurrentLiveLike()) seekVod(-VOD_SEEK_MS) else showPlaybackHud()
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                        if (!isCurrentLiveLike()) seekVod(VOD_SEEK_MS) else showPlaybackHud()
+                        return true
+                    }
+                    KeyEvent.KEYCODE_DPAD_UP -> {
+                        showPlaybackHud()
+                        return true
+                    }
+                }
+            }
+
             when (event.keyCode) {
                 KeyEvent.KEYCODE_BACK -> {
                     when {
                         fullscreenChannelListVisible -> hideFullscreenChannelList(showHudAfter = true)
-                        isFullscreen && lastPlayed?.section != ContentSection.LIVE -> {
-                            stopNonLivePlayback()
+                        isFullscreen && !isCurrentLiveLike() -> {
+                            stopPlayback(clearItem = true)
                             exitFullscreen()
                         }
                         isFullscreen -> exitFullscreen()
@@ -1078,13 +1469,11 @@ class MainActivity : AppCompatActivity() {
                 }
                 KeyEvent.KEYCODE_DPAD_CENTER,
                 KeyEvent.KEYCODE_ENTER -> if (isFullscreen && !fullscreenChannelListVisible) {
-                    player?.let { if (it.isPlaying) it.pause() else it.play() }
-                    showVideoHud()
+                    togglePlayPause()
                     return true
                 }
                 KeyEvent.KEYCODE_MEDIA_PLAY_PAUSE -> if (isFullscreen) {
-                    player?.let { if (it.isPlaying) it.pause() else it.play() }
-                    if (!fullscreenChannelListVisible) showVideoHud()
+                    togglePlayPause()
                     return true
                 }
             }
@@ -1123,9 +1512,7 @@ class MainActivity : AppCompatActivity() {
                 isFocusable = true
                 maxLines = 1
                 background = roundedBg(CARD, 10f, BORDER, 1)
-                layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)).apply {
-                    bottomMargin = dp(7)
-                }
+                layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(58)).apply { bottomMargin = dp(7) }
             }
             return Holder(text)
         }
@@ -1163,9 +1550,7 @@ class MainActivity : AppCompatActivity() {
                 setPadding(dp(8), dp(6), dp(12), dp(6))
                 isFocusable = true
                 background = roundedBg(CARD, 10f, BORDER, 1)
-                layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(70)).apply {
-                    bottomMargin = dp(7)
-                }
+                layoutParams = RecyclerView.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(70)).apply { bottomMargin = dp(7) }
             }
             val image = ImageView(parent.context).apply {
                 scaleType = ImageView.ScaleType.CENTER_INSIDE
@@ -1217,9 +1602,7 @@ class MainActivity : AppCompatActivity() {
             holder.text.text = item.name
             holder.image.setImageDrawable(null)
             holder.image.visibility = if (!holder.grid && item.logo.isBlank() && browseLevel == BrowseLevel.EPISODES) View.GONE else View.VISIBLE
-            holder.root.setOnClickListener {
-                clickOverride?.invoke(item) ?: openItem(item)
-            }
+            holder.root.setOnClickListener { clickOverride?.invoke(item) ?: openItem(item) }
             holder.root.setOnFocusChangeListener { v, focused ->
                 v.background = roundedBg(if (focused) ACCENT else CARD, if (holder.grid) 11f else 10f, if (focused) ACCENT else BORDER, 1)
                 if (focused && showFocusInfo) showItemInfo(item)
