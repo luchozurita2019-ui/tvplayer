@@ -76,19 +76,19 @@ class LoginActivity : AppCompatActivity() {
         }
         m3u = RadioButton(this).apply {
             id = View.generateViewId()
-            text = "M3U"
+            text = "M3U / Auto"
             textSize = 18f
             setTextColor(Color.WHITE)
             isFocusable = true
         }
-        modes.addView(xtream, LinearLayout.LayoutParams(dp(160), dp(54)))
-        modes.addView(m3u, LinearLayout.LayoutParams(dp(160), dp(54)))
+        modes.addView(xtream, LinearLayout.LayoutParams(dp(180), dp(54)))
+        modes.addView(m3u, LinearLayout.LayoutParams(dp(210), dp(54)))
         root.addView(modes)
 
         server = field("Servidor · http://servidor:puerto")
         user = field("Usuario")
         pass = field("Contraseña").apply { inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD }
-        m3uUrl = field("URL de la lista M3U").apply {
+        m3uUrl = field("URL M3U o get.php de Xtream").apply {
             inputType = InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_URI
             visibility = View.GONE
         }
@@ -114,7 +114,7 @@ class LoginActivity : AppCompatActivity() {
             setTextColor(Color.rgb(185, 193, 204))
             gravity = Gravity.CENTER
         }
-        root.addView(status, LinearLayout.LayoutParams(dp(700), dp(54)))
+        root.addView(status, LinearLayout.LayoutParams(dp(760), dp(54)))
 
         modes.setOnCheckedChangeListener { _, checked ->
             val useM3u = checked == m3u.id
@@ -146,7 +146,7 @@ class LoginActivity : AppCompatActivity() {
     }
 
     private fun connect() {
-        val config = if (m3u.isChecked) {
+        val inputConfig = if (m3u.isChecked) {
             SourceConfig(SourceMode.M3U, m3uUrl = m3uUrl.text.toString().trim())
         } else {
             SourceConfig(
@@ -157,22 +157,23 @@ class LoginActivity : AppCompatActivity() {
             )
         }
 
-        if ((config.mode == SourceMode.M3U && config.m3uUrl.isBlank()) ||
-            (config.mode == SourceMode.XTREAM && (config.server.isBlank() || config.username.isBlank() || config.password.isBlank()))) {
+        if ((inputConfig.mode == SourceMode.M3U && inputConfig.m3uUrl.isBlank()) ||
+            (inputConfig.mode == SourceMode.XTREAM && (inputConfig.server.isBlank() || inputConfig.username.isBlank() || inputConfig.password.isBlank()))) {
             status.text = "Completá los datos para continuar."
             return
         }
 
         connect.isEnabled = false
-        status.text = "Comprobando acceso…"
+        status.text = "Detectando tipo de servicio y comprobando acceso…"
         io.execute {
-            val ok = runCatching { CatalogRepository(config).validate() }.getOrDefault(false)
+            val resolved = runCatching { SourceResolver.resolve(inputConfig) }.getOrElse { inputConfig }
+            val ok = runCatching { CatalogRepository(resolved).validate() }.getOrDefault(false)
             runOnUiThread {
                 connect.isEnabled = true
                 if (ok) {
                     RemotePrefs.disableRemote(this)
-                    Prefs.save(this, config)
-                    status.text = "Conectado en modo manual"
+                    Prefs.save(this, resolved)
+                    status.text = if (resolved.mode == SourceMode.XTREAM) "Conectado · Xtream detectado" else "Conectado · M3U"
                     startActivity(Intent(this, MainActivity::class.java))
                     finish()
                 } else {
