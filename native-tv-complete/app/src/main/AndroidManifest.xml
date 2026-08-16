@@ -22,6 +22,12 @@
             android:screenOrientation="landscape" />
 
         <activity
+            android:name=".PlaylistActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <activity
             android:name=".LoginActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
             android:exported="false"
