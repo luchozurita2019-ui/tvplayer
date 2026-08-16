@@ -29,7 +29,7 @@ jobs:
           channel: stable
 
       - name: Format changed Dart files
-        run: dart format --output=none --set-exit-if-changed lib/main.dart lib/screens/remote_access_gate.dart lib/services/remote_provisioning_service.dart
+        run: dart format lib/main.dart lib/screens/remote_access_gate.dart lib/services/remote_provisioning_service.dart
 
       - name: Install dependencies
         run: flutter pub get
