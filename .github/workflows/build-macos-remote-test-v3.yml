@@ -7,6 +7,7 @@ on:
     paths:
       - '.github/scripts/apply_macos_remote_reregister_v3.py'
       - '.github/workflows/build-macos-remote-test-v3.yml'
+      - 'lib/services/m3u_fetcher.dart'
   workflow_dispatch:
 
 permissions:
@@ -30,7 +31,7 @@ jobs:
           channel: stable
 
       - name: Format changed Dart files
-        run: dart format lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart
+        run: dart format lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart lib/services/m3u_fetcher.dart
 
       - name: Install dependencies
         run: flutter pub get
@@ -42,7 +43,7 @@ jobs:
         run: |
           CHANGED=$(git diff --name-only)
           echo "$CHANGED"
-          BAD=$(echo "$CHANGED" | grep -vE '^(lib/services/remote_provisioning_service\.dart|lib/providers/iptv_provider\.dart)$' || true)
+          BAD=$(echo "$CHANGED" | grep -vE '^(lib/services/remote_provisioning_service\.dart|lib/providers/iptv_provider\.dart|lib/services/m3u_fetcher\.dart)$' || true)
           if [ -n "$BAD" ]; then
             echo "Unexpected changed files:"
             echo "$BAD"
@@ -56,7 +57,7 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart
+            git add lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart lib/services/m3u_fetcher.dart
             git commit -m "Recover deleted macOS remote device registration"
             git push origin HEAD:mac-remote-provisioning-v1
           fi
