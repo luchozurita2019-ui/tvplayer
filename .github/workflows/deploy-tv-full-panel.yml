@@ -8,6 +8,7 @@ on:
       - 'panel/**'
       - '.github/scripts/apply_panel_customer_delete_v4.py'
       - '.github/scripts/apply_panel_service_validation_v5.py'
+      - '.github/scripts/apply_panel_payment_status_v6.py'
       - '.github/workflows/deploy-tv-full-panel.yml'
   workflow_dispatch:
 
@@ -36,6 +37,9 @@ jobs:
       - name: Enable service validation
         run: python3 .github/scripts/apply_panel_service_validation_v5.py
 
+      - name: Enable payment status
+        run: python3 .github/scripts/apply_panel_payment_status_v6.py
+
       - name: Validate panel JavaScript
         run: |
           python3 - <<'PY'
@@ -52,6 +56,10 @@ jobs:
           grep -q 'data-action="validate-service"' panel/index.html
           grep -q 'tvf-service-validate' panel/index.html
           grep -q 'Validar y guardar' panel/index.html
+          grep -q 'access_status' panel/index.html
+          grep -q 'access_state' panel/index.html
+          grep -q 'Falta de pago' panel/index.html
+          grep -q 'deviceStatusBadge' panel/index.html
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
