@@ -30,8 +30,7 @@ class M3uFetcher {
       name: 'browser',
       headers: <String, String>{
         'User-Agent': _browserUserAgent,
-        'Accept':
-            'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
+        'Accept': 'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
         'Connection': 'keep-alive',
       },
     ),
@@ -46,18 +45,14 @@ class M3uFetcher {
     _HttpProfile(
       name: 'android-iptv',
       headers: <String, String>{
-        'User-Agent':
-            'Dalvik/2.1.0 (Linux; U; Android 9; Android TV Build/PPR2.180905.006)',
+        'User-Agent': 'Dalvik/2.1.0 (Linux; U; Android 9; Android TV Build/PPR2.180905.006)',
         'Accept': '*/*',
         'Connection': 'close',
       },
     ),
     _HttpProfile(
       name: 'minimal',
-      headers: <String, String>{
-        'Accept': '*/*',
-        'Connection': 'close',
-      },
+      headers: <String, String>{'Accept': '*/*', 'Connection': 'close'},
     ),
   ];
 
@@ -70,7 +65,11 @@ class M3uFetcher {
     Object? lastError;
     int? lastStatus;
 
-    for (var profileIndex = 0; profileIndex < _profiles.length; profileIndex++) {
+    for (
+      var profileIndex = 0;
+      profileIndex < _profiles.length;
+      profileIndex++
+    ) {
       final profile = _profiles[profileIndex];
 
       for (var attempt = 0; attempt <= maxRetries; attempt++) {
@@ -146,7 +145,9 @@ class M3uFetcher {
             continue;
           }
         } on HttpException {
-          lastError = Exception('Error al conectar con el servidor de la lista');
+          lastError = Exception(
+            'Error al conectar con el servidor de la lista',
+          );
           if (attempt < maxRetries) {
             await _backoff(attempt);
             continue;
