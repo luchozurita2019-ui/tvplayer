@@ -127,9 +127,19 @@ class TvCatalogDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, n
         return result
     }
 
+    /** Browser rows. Series browsing intentionally returns parents only. */
     fun items(sourceId: String, section: ContentSection, categoryId: String? = null): List<CatalogItem> {
         val result = ArrayList<CatalogItem>()
-        val selection = if (categoryId.isNullOrBlank()) "source_id=? AND section=?" else "source_id=? AND section=? AND category_id=?"
+        val baseSelection = if (categoryId.isNullOrBlank()) {
+            "source_id=? AND section=?"
+        } else {
+            "source_id=? AND section=? AND category_id=?"
+        }
+        val selection = if (section == ContentSection.SERIES) {
+            "$baseSelection AND season_number IS NULL"
+        } else {
+            baseSelection
+        }
         val args = if (categoryId.isNullOrBlank()) arrayOf(sourceId, section.name) else arrayOf(sourceId, section.name, categoryId)
         readableDatabase.query(
             "items",
@@ -145,12 +155,29 @@ class TvCatalogDatabase(context: Context) : SQLiteOpenHelper(context, DB_NAME, n
         return result
     }
 
+    /** Internal sync view containing both Series parents and episode rows. */
+    fun allSeriesRows(sourceId: String): List<CatalogItem> {
+        val result = ArrayList<CatalogItem>()
+        readableDatabase.query(
+            "items",
+            ITEM_COLUMNS,
+            "source_id=? AND section=?",
+            arrayOf(sourceId, ContentSection.SERIES.name),
+            null,
+            null,
+            "sort_order ASC, name COLLATE NOCASE ASC"
+        ).use { c ->
+            while (c.moveToNext()) result += readItem(c, sourceId, ContentSection.SERIES)
+        }
+        return result
+    }
+
     fun seriesEpisodes(sourceId: String, seriesId: String): List<CatalogItem> {
         val result = ArrayList<CatalogItem>()
         readableDatabase.query(
             "items",
             ITEM_COLUMNS,
-            "source_id=? AND section=? AND series_id=?",
+            "source_id=? AND section=? AND series_id=? AND season_number IS NOT NULL",
             arrayOf(sourceId, ContentSection.SERIES.name, seriesId),
             null,
             null,
