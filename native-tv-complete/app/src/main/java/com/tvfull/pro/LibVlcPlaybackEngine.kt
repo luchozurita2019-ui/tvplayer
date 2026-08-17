@@ -10,15 +10,15 @@ import org.videolan.libvlc.MediaPlayer
 import org.videolan.libvlc.util.VLCVideoLayout
 
 /**
- * Small LibVLC wrapper used by Native TV V5.
- *
- * It is intentionally isolated from catalog/panel/UI code. The Activity decides
- * when VLC is used; this class only owns the decoder/network engine and surface.
+ * Isolated LibVLC playback engine for Native TV V5.
+ * Catalog, provisioning, payment and navigation stay outside this class.
  */
 class LibVlcPlaybackEngine(
     context: Context,
     private val listener: Listener,
 ) {
+    data class Track(val id: Int, val name: String)
+
     interface Listener {
         fun onOpening()
         fun onBuffering(percent: Float)
@@ -33,9 +33,9 @@ class LibVlcPlaybackEngine(
     private val appContext = context.applicationContext
     private val options = arrayListOf(
         "--http-reconnect",
-        "--network-caching=3500",
-        "--live-caching=3500",
-        "--file-caching=3500",
+        "--network-caching=4500",
+        "--live-caching=4500",
+        "--file-caching=8000",
         "--drop-late-frames",
         "--skip-frames",
     )
@@ -68,66 +68,56 @@ class LibVlcPlaybackEngine(
                 MediaPlayer.Event.EncounteredError -> listener.onError()
                 MediaPlayer.Event.TimeChanged -> listener.onTimeChanged(event.timeChanged)
                 MediaPlayer.Event.Vout -> {
-                    // LibVLC occasionally opens the vout before Android has laid
-                    // out the surface. Updating here is the same safeguard used by
-                    // VLC Android itself for that race.
+                    // Surface-size race workaround used by VLC Android itself.
                     videoLayout.post { runCatching { mediaPlayer.updateVideoSurfaces() } }
                 }
             }
         }
     }
 
-    fun play(url: String, resumePositionMs: Long = 0L) {
+    fun play(url: String, resumePositionMs: Long = 0L, live: Boolean = false) {
         if (released) return
         ensureViewsAttached()
         currentUrl = url
         videoLayout.visibility = View.VISIBLE
 
-        mediaPlayer.stop()
+        if (mediaPlayer.hasMedia()) runCatching { mediaPlayer.stop() }
         val media = Media(libVlc, Uri.parse(url)).apply {
             setHWDecoderEnabled(true, false)
-            addOption(":network-caching=3500")
-            addOption(":live-caching=3500")
-            addOption(":file-caching=3500")
+            addOption(if (live) ":network-caching=4500" else ":network-caching=8000")
+            addOption(if (live) ":live-caching=4500" else ":file-caching=8000")
             addOption(":http-reconnect")
         }
-        mediaPlayer.media = media
+        mediaPlayer.setMedia(media)
         media.release()
         mediaPlayer.play()
 
         if (resumePositionMs > 0L) {
-            // Seek after playback starts. Calling setTime before the input becomes
-            // seekable is ignored on some servers.
             videoLayout.postDelayed({
                 if (!released && currentUrl == url && mediaPlayer.isSeekable) {
                     mediaPlayer.time = resumePositionMs
                 }
-            }, 900L)
+            }, 1_000L)
         }
-    }
-
-    fun restartSameStream(resumePositionMs: Long = 0L) {
-        val url = currentUrl
-        if (url.isNotBlank()) play(url, resumePositionMs)
     }
 
     fun stop(hideSurface: Boolean = true) {
         if (released) return
-        runCatching { mediaPlayer.stop() }
+        if (mediaPlayer.hasMedia()) runCatching { mediaPlayer.stop() }
         currentUrl = ""
         if (hideSurface) videoLayout.visibility = View.GONE
     }
 
     fun pause() {
-        if (!released) runCatching { mediaPlayer.pause() }
+        if (!released && mediaPlayer.hasMedia()) runCatching { mediaPlayer.pause() }
     }
 
     fun resume() {
-        if (!released) runCatching { mediaPlayer.play() }
+        if (!released && mediaPlayer.hasMedia()) runCatching { mediaPlayer.play() }
     }
 
     fun togglePause() {
-        if (released) return
+        if (released || !mediaPlayer.hasMedia()) return
         if (mediaPlayer.isPlaying) pause() else resume()
     }
 
@@ -147,6 +137,25 @@ class LibVlcPlaybackEngine(
         runCatching { mediaPlayer.setVideoScale(scale) }
     }
 
+    fun audioTracks(): List<Track> = if (released) emptyList() else
+        mediaPlayer.audioTracks?.map { Track(it.id, it.name.orEmpty()) }.orEmpty()
+
+    fun subtitleTracks(): List<Track> = if (released) emptyList() else
+        mediaPlayer.spuTracks?.map { Track(it.id, it.name.orEmpty()) }.orEmpty()
+
+    fun selectedAudioTrack(): Int = if (released) -1 else mediaPlayer.audioTrack
+    fun selectedSubtitleTrack(): Int = if (released) -1 else mediaPlayer.spuTrack
+    fun selectAudioTrack(id: Int): Boolean = !released && mediaPlayer.setAudioTrack(id)
+    fun selectSubtitleTrack(id: Int): Boolean = !released && mediaPlayer.setSpuTrack(id)
+
+    fun videoResolution(): Pair<Int, Int>? {
+        if (released) return null
+        val track = runCatching { mediaPlayer.currentVideoTrack }.getOrNull() ?: return null
+        val width = track.width
+        val height = track.height
+        return if (width > 0 && height > 0) width to height else null
+    }
+
     fun currentTimeMs(): Long = if (released) 0L else mediaPlayer.time.coerceAtLeast(0L)
     fun durationMs(): Long = if (released) 0L else mediaPlayer.length.coerceAtLeast(0L)
     fun isPlaying(): Boolean = !released && mediaPlayer.isPlaying
@@ -156,7 +165,7 @@ class LibVlcPlaybackEngine(
     fun release() {
         if (released) return
         released = true
-        runCatching { mediaPlayer.stop() }
+        if (mediaPlayer.hasMedia()) runCatching { mediaPlayer.stop() }
         if (viewsAttached) runCatching { mediaPlayer.detachViews() }
         viewsAttached = false
         runCatching { mediaPlayer.release() }
@@ -165,8 +174,7 @@ class LibVlcPlaybackEngine(
 
     private fun ensureViewsAttached() {
         if (!viewsAttached) {
-            // SurfaceView mode is deliberate: it is the most stable option on
-            // old Android TV/TV Box devices and avoids TextureView races.
+            // SurfaceView mode is deliberate for Android TV / TV Box stability.
             mediaPlayer.attachViews(videoLayout, null, true, false)
             viewsAttached = true
         }
