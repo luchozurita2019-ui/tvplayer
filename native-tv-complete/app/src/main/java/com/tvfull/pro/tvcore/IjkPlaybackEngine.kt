@@ -103,7 +103,7 @@ class IjkPlaybackEngine {
             p.setDataSource(currentUrl)
             p.prepareAsync()
         } catch (e: Exception) {
-            handleError(-1, -1, e.message ?: "No se pudo abrir el stream")
+            handleError(IMediaPlayer.MEDIA_ERROR_UNKNOWN, 0, e.message ?: "No se pudo abrir el stream")
         }
     }
 
@@ -126,9 +126,9 @@ class IjkPlaybackEngine {
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", currentPolicy.frameDrop.toLong())
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 1L)
 
-        // FFmpeg HTTP reconnect options belong to the FORMAT layer. For Live/Radio,
-        // EOF is treated as a recoverable provider-side stream boundary and the
-        // same URL is reopened internally. For VOD, a real EOF must remain final.
+        // These are FFmpeg AVFormat options, not generic player timers.
+        // Live/Radio may reconnect through a provider-side EOF; VOD must keep
+        // a genuine end-of-file as the end of the movie/episode.
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect", if (reconnect) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_streamed", if (reconnect && liveLike) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_at_eof", if (reconnect && liveLike) 1L else 0L)
@@ -152,7 +152,7 @@ class IjkPlaybackEngine {
             runCatching { media.start() }
         })
 
-        p.setOnInfoListener(IMediaPlayer.OnInfoListener { _, what, extra ->
+        p.setOnInfoListener(IMediaPlayer.OnInfoListener { _, what, _ ->
             when (what) {
                 IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START,
                 IMediaPlayer.MEDIA_INFO_AUDIO_RENDERING_START -> listener?.onPlaying()
@@ -181,7 +181,25 @@ class IjkPlaybackEngine {
     }
 
     private fun handleError(code: Int, extra: Int, message: String) {
-        if (!released && requestedMode == DecoderMode.AUTO && activeMode == DecoderMode.HARDWARE && !autoSoftwareRetried) {
+        val mayBeDecoderOrFormat = when (code) {
+            IMediaPlayer.MEDIA_ERROR_UNKNOWN,
+            IMediaPlayer.MEDIA_ERROR_MALFORMED,
+            IMediaPlayer.MEDIA_ERROR_UNSUPPORTED -> true
+            // Network/storage failures are not decoder failures. In particular,
+            // switching to software decoding cannot repair HTTP I/O or timeout.
+            IMediaPlayer.MEDIA_ERROR_IO,
+            IMediaPlayer.MEDIA_ERROR_TIMED_OUT,
+            IMediaPlayer.MEDIA_ERROR_SERVER_DIED -> false
+            else -> false
+        }
+
+        if (
+            !released &&
+            mayBeDecoderOrFormat &&
+            requestedMode == DecoderMode.AUTO &&
+            activeMode == DecoderMode.HARDWARE &&
+            !autoSoftwareRetried
+        ) {
             autoSoftwareRetried = true
             resumePositionMs = if (currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO) 0L else currentPosition()
             listener?.onDecoderFallback(DecoderMode.HARDWARE, DecoderMode.SOFTWARE, message)
