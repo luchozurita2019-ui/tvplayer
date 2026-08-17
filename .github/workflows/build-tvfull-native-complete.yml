@@ -16,8 +16,9 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     steps:
-      - name: Checkout
+      - name: Checkout TV FULL
         uses: actions/checkout@v4
 
       - name: Java 17
@@ -48,7 +49,88 @@ jobs:
           grep -q 'instanceFollowRedirects = false' "$CORE/XtreamClient.kt"
           grep -q 'get_series_info' "$CORE/CatalogSyncEngine.kt"
 
-      - name: Build release APK
+      - name: Install IJK native build prerequisites
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y yasm make unzip curl
+
+          NDK_ZIP="$RUNNER_TEMP/android-ndk-r14b-linux-x86_64.zip"
+          curl --fail --location --retry 3 \
+            'https://dl.google.com/android/repository/android-ndk-r14b-linux-x86_64.zip' \
+            --output "$NDK_ZIP"
+          unzip -q "$NDK_ZIP" -d "$RUNNER_TEMP"
+          test -x "$RUNNER_TEMP/android-ndk-r14b/ndk-build"
+
+          echo "ANDROID_NDK=$RUNNER_TEMP/android-ndk-r14b" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
+
+      - name: Checkout official IJKPlayer k0.8.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          IJK_ROOT="$RUNNER_TEMP/ijkplayer-k0.8.8"
+          git clone --branch k0.8.8 --depth 1 https://github.com/bilibili/ijkplayer.git "$IJK_ROOT"
+          test "$(git -C "$IJK_ROOT" rev-parse HEAD)" = 'cced91e3ae3730f5c63f3605b00d25eafcf5b97b'
+          echo "IJK_ROOT=$IJK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Initialize official FFmpeg and IJK sources
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$IJK_ROOT"
+          ./init-android.sh
+
+          # Prefer the broad official module for IPTV compatibility instead of
+          # optimizing APK size before playback is proven on real TVs.
+          cd config
+          rm -f module.sh
+          ln -s module-default.sh module.sh
+
+      - name: Build official IJK FFmpeg ARMv7
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$IJK_ROOT/android/contrib"
+          ./compile-ffmpeg.sh armv7a
+
+      - name: Build official IJK FFmpeg ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$IJK_ROOT/android/contrib"
+          ./compile-ffmpeg.sh arm64
+
+      - name: Build official IJK native player ARMv7 and ARM64
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$IJK_ROOT/android"
+          ./compile-ijk.sh armv7a
+          ./compile-ijk.sh arm64
+
+      - name: Materialize source-built IJK into TV FULL
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP='native-tv-complete/app/src/main'
+          rm -rf "$APP/ijkplayer-java" "$APP/jniLibs"
+          mkdir -p "$APP/ijkplayer-java" "$APP/jniLibs/armeabi-v7a" "$APP/jniLibs/arm64-v8a"
+
+          cp -R "$IJK_ROOT/android/ijkplayer/ijkplayer-java/src/main/java/"* "$APP/ijkplayer-java/"
+          cp "$IJK_ROOT/android/ijkplayer/ijkplayer-armv7a/src/main/libs/armeabi-v7a/"*.so "$APP/jniLibs/armeabi-v7a/"
+          cp "$IJK_ROOT/android/ijkplayer/ijkplayer-arm64/src/main/libs/arm64-v8a/"*.so "$APP/jniLibs/arm64-v8a/"
+
+          test -f "$APP/jniLibs/armeabi-v7a/libijkffmpeg.so"
+          test -f "$APP/jniLibs/armeabi-v7a/libijksdl.so"
+          test -f "$APP/jniLibs/armeabi-v7a/libijkplayer.so"
+          test -f "$APP/jniLibs/arm64-v8a/libijkffmpeg.so"
+          test -f "$APP/jniLibs/arm64-v8a/libijksdl.so"
+          test -f "$APP/jniLibs/arm64-v8a/libijkplayer.so"
+          test -f "$APP/ijkplayer-java/tv/danmaku/ijk/media/player/IjkMediaPlayer.java"
+
+      - name: Build TV FULL release APK
         working-directory: native-tv-complete
         run: gradle --no-daemon --stacktrace :app:assembleRelease
 
@@ -62,15 +144,20 @@ jobs:
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libijkplayer.so'
           unzip -l "$APK" | grep -q 'lib/armeabi-v7a/libijkffmpeg.so'
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libijkffmpeg.so'
+          unzip -l "$APK" | grep -q 'lib/armeabi-v7a/libijksdl.so'
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libijksdl.so'
           ls -lh "$APK"
+
           TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
           "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
+
           mkdir -p artifact
           cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk
           sha256sum artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk > artifact/SHA256.txt
           stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk > artifact/SIZE_BYTES.txt
           git rev-parse HEAD > artifact/COMMIT.txt
+          printf 'IJKPlayer: bilibili/ijkplayer k0.8.8\nCommit: cced91e3ae3730f5c63f3605b00d25eafcf5b97b\nBuilt from upstream source in CI.\n' > artifact/IJK_SOURCE.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
