@@ -1,15 +1,16 @@
-name: Build TV FULL Native Stability Premium V3
+name: Build TV FULL Native Stability V4
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - tvfull-native-tv-stability-v3
+      - tvfull-native-tv-stability-v4
     paths:
       - 'native-tv-complete/**'
       - '.github/scripts/apply_native_tv_professional_v2.py'
       - '.github/scripts/apply_native_tv_stability_v3.py'
       - '.github/scripts/apply_native_tv_premium_ui_v3.py'
+      - '.github/scripts/apply_native_tv_stability_v4.py'
       - '.github/workflows/build-tvfull-native-complete.yml'
 
 permissions:
@@ -42,7 +43,10 @@ jobs:
       - name: Apply Premium V3 interface
         run: python3 .github/scripts/apply_native_tv_premium_ui_v3.py
 
-      - name: Verify payment player stability and premium markers
+      - name: Apply Stability V4 targeted fixes
+        run: python3 .github/scripts/apply_native_tv_stability_v4.py
+
+      - name: Verify V4 markers and preserved features
         shell: bash
         run: |
           set -euo pipefail
@@ -50,31 +54,34 @@ jobs:
           REMOTE='native-tv-complete/app/src/main/java/com/tvfull/pro/RemoteProvisioning.kt'
           PROV='native-tv-complete/app/src/main/java/com/tvfull/pro/ProvisioningActivity.kt'
 
-          # Existing Professional V2 features must remain.
+          # Existing features remain untouched.
           grep -q 'showPlaybackOptions' "$TV"
           grep -q 'TrackSelectionOverride' "$TV"
           grep -q 'RESIZE_MODE_ZOOM' "$TV"
           grep -q 'videoResolutionLabel' "$TV"
-          grep -q 'infoPanel.visibility = View.GONE' "$TV"
           grep -q 'PAYMENT_DUE' "$REMOTE"
           grep -q 'payment_due' "$REMOTE"
           grep -q 'SERVICIO SUSPENDIDO' "$PROV"
-
-          # Stability V3.
-          grep -q 'MAX_VOD_RECOVERIES = 4' "$TV"
-          grep -q 'DefaultLoadErrorHandlingPolicy' "$TV"
-          grep -q '20_000.*VOD reserve' "$TV"
-          grep -q 'scheduleVodRecovery' "$TV"
-          grep -q 'lastKnownPositionMs' "$TV"
-          grep -q 'maybeTryXtreamHlsFallback' "$TV"
-          grep -q 'm3u8' "$TV"
-          grep -q 'DIAGNÓSTICO DE REPRODUCCIÓN' "$TV"
-
-          # Premium UI V3.
           grep -q 'premiumSurface' "$TV"
           grep -q 'NATIVE TV' "$TV"
-          grep -q 'private fun navButton(label: String, action: () -> Unit): TextView' "$TV"
-          grep -q '3.0-native-tv-stability-premium' native-tv-complete/app/build.gradle
+
+          # V4: lazy player + VOD timeout + direct-first Live.
+          grep -q 'created lazily only after the user' "$TV"
+          grep -q 'VOD_START_TIMEOUT = 30_000L' "$TV"
+          grep -q 'HLS_LEARN_STABLE_MS = 90_000L' "$TV"
+          grep -q 'prepareOrUseHlsFallback' "$TV"
+          grep -q 'probeHlsPlaylist' "$TV"
+          grep -q 'HLS probe descartado' "$TV"
+          grep -q 'regreso inmediato a TS directo' "$TV"
+          grep -q 'setKeepContentOnPlayerReset(true)' "$TV"
+          grep -q 'DefaultBandwidthMeter' "$TV"
+          grep -q 'buffer=.*red≈' "$TV"
+
+          # V4: activation screen must adapt to the TV dimensions.
+          grep -q 'screenWidthDp' "$PROV"
+          grep -q 'screenHeightDp' "$PROV"
+          grep -q 'contentWidthDp' "$PROV"
+          grep -q "4.0-native-tv-stability" native-tv-complete/app/build.gradle
 
       - name: Build release APK
         working-directory: native-tv-complete
@@ -91,14 +98,14 @@ jobs:
           "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
           "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
           mkdir -p artifact
-          cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3.apk
-          sha256sum artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3.apk > artifact/SHA256.txt
-          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3.apk > artifact/SIZE_BYTES.txt
+          cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-V4.apk
+          sha256sum artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-V4.apk > artifact/SHA256.txt
+          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-V4.apk > artifact/SIZE_BYTES.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3
+          name: TV-FULL-PRO-NATIVE-TV-STABILITY-V4
           path: artifact/
           retention-days: 30
