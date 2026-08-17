@@ -1,24 +1,23 @@
+import 'dart:convert';
+
 import '../models/channel.dart';
 
 /// Parsea el contenido M3U y devuelve la lista de canales.
 ///
 /// Es una función TOP-LEVEL (no un método de instancia) a propósito:
 /// así se puede ejecutar con `compute()` dentro de un isolate separado.
-/// Con listas de 10.000+ canales, parsear en el hilo principal congela
-/// la UI un momento notorio (jank); en un isolate, la app sigue fluida
-/// mientras se procesa en segundo plano.
 List<Channel> parseM3uInBackground(String content) {
   return M3uParser.parse(content);
 }
 
-/// Parser de archivos M3U/M3U8 extendidos (formato #EXTM3U / #EXTINF).
+/// Parser M3U/M3U8 orientado a compatibilidad IPTV.
 ///
-/// Diseñado para listas grandes (10k+ canales, común en IPTV):
-/// - Una sola pasada por el texto (O(n)), sin regex pesadas por línea.
-/// - No crea objetos intermedios innecesarios.
-/// - Reconoce líneas #EXTVLCOPT (User-Agent / Referer por canal), que
-///   algunos proveedores incluyen porque su servidor exige headers
-///   específicos para dejar pasar la conexión.
+/// Además de #EXTINF reconoce headers frecuentes en reproductores IPTV:
+/// - #EXTVLCOPT:http-user-agent / http-referrer / http-origin / http-cookie
+/// - #EXTVLCOPT:http-authorization / http-header
+/// - #EXTHTTP:{"Header":"valor"}
+/// - #KODIPROP:inputstream.adaptive.stream_headers / manifest_headers
+/// - URL|User-Agent=...&Referer=...&Origin=...
 class M3uParser {
   static List<Channel> parse(String content) {
     final lines = content.split('\n');
@@ -30,14 +29,13 @@ class M3uParser {
     String? pendingTvgId;
     String? pendingUserAgent;
     String? pendingReferrer;
+    final pendingHeaders = <String, String>{};
 
     for (var rawLine in lines) {
       final line = rawLine.trim();
       if (line.isEmpty) continue;
 
       if (line.startsWith('#EXTINF')) {
-        // Ejemplo:
-        // #EXTINF:-1 tvg-id="cnn" tvg-logo="http://x/cnn.png" group-title="Noticias",CNN HD
         final commaIndex = line.indexOf(',');
         pendingName = commaIndex != -1
             ? line.substring(commaIndex + 1).trim()
@@ -46,34 +44,89 @@ class M3uParser {
         pendingLogo = _extractAttr(line, 'tvg-logo');
         pendingGroup = _extractAttr(line, 'group-title');
         pendingTvgId = _extractAttr(line, 'tvg-id');
-      } else if (line.startsWith('#EXTVLCOPT:http-user-agent=')) {
-        pendingUserAgent =
-            line.substring('#EXTVLCOPT:http-user-agent='.length).trim();
-      } else if (line.startsWith('#EXTVLCOPT:http-referrer=')) {
-        pendingReferrer =
-            line.substring('#EXTVLCOPT:http-referrer='.length).trim();
+      } else if (line.startsWith('#EXTVLCOPT:')) {
+        final rawOption = line.substring('#EXTVLCOPT:'.length).trim();
+        final equals = rawOption.indexOf('=');
+        if (equals > 0) {
+          final key = rawOption.substring(0, equals).trim().toLowerCase();
+          final value = rawOption.substring(equals + 1).trim();
+          if (value.isNotEmpty) {
+            switch (key) {
+              case 'http-user-agent':
+                pendingUserAgent = value;
+                pendingHeaders['User-Agent'] = value;
+                break;
+              case 'http-referrer':
+              case 'http-referer':
+                pendingReferrer = value;
+                pendingHeaders['Referer'] = value;
+                break;
+              case 'http-origin':
+                pendingHeaders['Origin'] = value;
+                break;
+              case 'http-cookie':
+                pendingHeaders['Cookie'] = value;
+                break;
+              case 'http-authorization':
+                pendingHeaders['Authorization'] = value;
+                break;
+              case 'http-header':
+                _parseHeaderLine(value, pendingHeaders);
+                break;
+            }
+          }
+        }
+      } else if (line.startsWith('#EXTHTTP:')) {
+        _parseExtHttp(line.substring('#EXTHTTP:'.length), pendingHeaders);
+      } else if (line.startsWith(
+              '#KODIPROP:inputstream.adaptive.stream_headers=') ||
+          line.startsWith(
+              '#KODIPROP:inputstream.adaptive.manifest_headers=')) {
+        final equals = line.indexOf('=');
+        if (equals != -1) {
+          _parseHeaderQuery(line.substring(equals + 1), pendingHeaders);
+        }
       } else if (!line.startsWith('#')) {
-        // Es la URL del stream, cierra la entrada pendiente.
+        final parsed = _splitUrlAndInlineHeaders(line);
+        pendingHeaders.addAll(parsed.headers);
+
+        // Sincronizamos los campos históricos para listas guardadas y código
+        // existente que todavía los consulta directamente.
+        pendingUserAgent ??= _headerValue(pendingHeaders, 'User-Agent');
+        pendingReferrer ??= _headerValue(pendingHeaders, 'Referer');
+
         if (pendingName != null) {
           channels.add(Channel(
             name: pendingName,
-            url: line,
+            url: parsed.url,
             logoUrl: pendingLogo,
             group: pendingGroup,
             tvgId: pendingTvgId,
             httpUserAgent: pendingUserAgent,
             httpReferrer: pendingReferrer,
+            httpHeaders: pendingHeaders.isEmpty
+                ? null
+                : Map<String, String>.from(pendingHeaders),
           ));
         } else {
-          // M3U simple sin #EXTINF: usamos la URL como nombre.
-          channels.add(Channel(name: line, url: line));
+          channels.add(Channel(
+            name: parsed.url,
+            url: parsed.url,
+            httpUserAgent: pendingUserAgent,
+            httpReferrer: pendingReferrer,
+            httpHeaders: pendingHeaders.isEmpty
+                ? null
+                : Map<String, String>.from(pendingHeaders),
+          ));
         }
+
         pendingName = null;
         pendingLogo = null;
         pendingGroup = null;
         pendingTvgId = null;
         pendingUserAgent = null;
         pendingReferrer = null;
+        pendingHeaders.clear();
       }
     }
 
@@ -90,4 +143,78 @@ class M3uParser {
     final value = line.substring(valueStart, end).trim();
     return value.isEmpty ? null : value;
   }
+
+  static void _parseExtHttp(String raw, Map<String, String> target) {
+    final value = raw.trim();
+    if (value.isEmpty) return;
+    try {
+      final decoded = jsonDecode(value);
+      if (decoded is Map) {
+        for (final entry in decoded.entries) {
+          final key = entry.key.toString().trim();
+          final headerValue = entry.value?.toString().trim() ?? '';
+          if (key.isNotEmpty && headerValue.isNotEmpty) {
+            target[key] = headerValue;
+          }
+        }
+      }
+    } catch (_) {
+      // Algunas listas usan EXTHTTP no JSON. No invalidamos toda la lista.
+    }
+  }
+
+  static void _parseHeaderLine(String value, Map<String, String> target) {
+    final colon = value.indexOf(':');
+    if (colon <= 0) return;
+    final key = value.substring(0, colon).trim();
+    final headerValue = value.substring(colon + 1).trim();
+    if (key.isNotEmpty && headerValue.isNotEmpty) target[key] = headerValue;
+  }
+
+  static void _parseHeaderQuery(String raw, Map<String, String> target) {
+    final value = raw.trim();
+    if (value.isEmpty) return;
+    for (final part in value.split('&')) {
+      final equals = part.indexOf('=');
+      if (equals <= 0) continue;
+      final key = _safeDecode(part.substring(0, equals)).trim();
+      final headerValue = _safeDecode(part.substring(equals + 1)).trim();
+      if (key.isNotEmpty && headerValue.isNotEmpty) target[key] = headerValue;
+    }
+  }
+
+  static _ParsedStreamUrl _splitUrlAndInlineHeaders(String line) {
+    final pipe = line.indexOf('|');
+    if (pipe <= 0 || pipe == line.length - 1) {
+      return _ParsedStreamUrl(line.trim(), const {});
+    }
+
+    final url = line.substring(0, pipe).trim();
+    final headers = <String, String>{};
+    _parseHeaderQuery(line.substring(pipe + 1), headers);
+    return _ParsedStreamUrl(url, headers);
+  }
+
+  static String _safeDecode(String value) {
+    try {
+      return Uri.decodeComponent(value.replaceAll('+', '%20'));
+    } catch (_) {
+      return value;
+    }
+  }
+
+  static String? _headerValue(Map<String, String> headers, String name) {
+    final wanted = name.toLowerCase();
+    for (final entry in headers.entries) {
+      if (entry.key.toLowerCase() == wanted) return entry.value;
+    }
+    return null;
+  }
+}
+
+class _ParsedStreamUrl {
+  final String url;
+  final Map<String, String> headers;
+
+  const _ParsedStreamUrl(this.url, this.headers);
 }
