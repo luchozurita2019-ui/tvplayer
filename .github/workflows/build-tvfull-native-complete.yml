@@ -65,9 +65,6 @@ jobs:
           NDK_ROOT="$RUNNER_TEMP/android-ndk-r14b"
           test -x "$NDK_ROOT/ndk-build"
 
-          # IJK's historical scripts inspect more than one NDK variable.
-          # Pin all of them to the same official r14b toolchain so the modern
-          # GitHub runner's preinstalled NDK cannot leak into the build.
           echo "ANDROID_NDK=$NDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$NDK_ROOT" >> "$GITHUB_ENV"
@@ -90,11 +87,15 @@ jobs:
           cd "$IJK_ROOT"
           ./init-android.sh
 
-          # Prefer the broad official module for IPTV compatibility instead of
-          # optimizing APK size before playback is proven on real TVs.
+          # Start from the broad official configuration. FFmpeg 3.4 can
+          # mistakenly enable Linux perf instrumentation when cross-building
+          # ARM on a modern Linux host; Android NDK r14b does not provide
+          # linux/perf_event.h. Disable only that optional profiler feature.
           cd config
           rm -f module.sh
-          ln -s module-default.sh module.sh
+          cp module-default.sh module.sh
+          printf '\nexport COMMON_FF_CFG_FLAGS="$COMMON_FF_CFG_FLAGS --disable-linux-perf"\n' >> module.sh
+          grep -q -- '--disable-linux-perf' module.sh
 
       - name: Build official IJK FFmpeg ARMv7
         shell: bash
