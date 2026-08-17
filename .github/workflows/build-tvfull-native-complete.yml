@@ -1,16 +1,17 @@
-name: Build TV FULL Native Stability V4.2 CLEAN
+name: Build TV FULL Native Hybrid Player V5
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - tvfull-native-tv-stability-v42-clean
+      - tvfull-native-tv-hybrid-player-v5
     paths:
       - 'native-tv-complete/**'
       - '.github/scripts/apply_native_tv_professional_v2.py'
       - '.github/scripts/apply_native_tv_stability_v3.py'
       - '.github/scripts/apply_native_tv_premium_ui_v3.py'
       - '.github/scripts/apply_native_tv_stability_v42_clean.py'
+      - '.github/scripts/apply_native_tv_hybrid_player_v5.py'
       - '.github/workflows/build-tvfull-native-complete.yml'
 
 permissions:
@@ -37,32 +38,33 @@ jobs:
       - name: Apply Professional V2 base
         run: python3 .github/scripts/apply_native_tv_professional_v2.py
 
-      - name: Apply Stability V3 proven engine
+      - name: Apply Stability V3 engine
         run: python3 .github/scripts/apply_native_tv_stability_v3.py
 
       - name: Apply Premium V3 interface
         run: python3 .github/scripts/apply_native_tv_premium_ui_v3.py
 
-      - name: Apply V4.2 clean targeted fixes
+      - name: Apply V4.2 clean safeguards
         run: python3 .github/scripts/apply_native_tv_stability_v42_clean.py
 
-      - name: Verify clean V3 lifecycle and V4.2 fixes
+      - name: Apply Hybrid Player V5
+        run: python3 .github/scripts/apply_native_tv_hybrid_player_v5.py
+
+      - name: Verify V5 hybrid architecture and preserved features
         shell: bash
         run: |
           set -euo pipefail
           TV='native-tv-complete/app/src/main/java/com/tvfull/pro/TvHomeActivity.kt'
+          VLC='native-tv-complete/app/src/main/java/com/tvfull/pro/LibVlcPlaybackEngine.kt'
           REMOTE='native-tv-complete/app/src/main/java/com/tvfull/pro/RemoteProvisioning.kt'
           PROV='native-tv-complete/app/src/main/java/com/tvfull/pro/ProvisioningActivity.kt'
+          GRADLE='native-tv-complete/app/build.gradle'
 
-          # Proven V3 / Professional features stay present.
+          # Existing TV FULL features must remain.
           grep -q 'showPlaybackOptions' "$TV"
           grep -q 'TrackSelectionOverride' "$TV"
           grep -q 'RESIZE_MODE_ZOOM' "$TV"
           grep -q 'videoResolutionLabel' "$TV"
-          grep -q 'MAX_VOD_RECOVERIES = 4' "$TV"
-          grep -q 'DefaultLoadErrorHandlingPolicy' "$TV"
-          grep -q 'scheduleVodRecovery' "$TV"
-          grep -q 'lastKnownPositionMs' "$TV"
           grep -q 'DIAGNÓSTICO DE REPRODUCCIÓN' "$TV"
           grep -q 'premiumSurface' "$TV"
           grep -q 'NATIVE TV' "$TV"
@@ -70,41 +72,62 @@ jobs:
           grep -q 'payment_due' "$REMOTE"
           grep -q 'SERVICIO SUSPENDIDO' "$PROV"
 
-          # Critical: restore the proven V3 Activity/player lifecycle.
+          # V5: actual second playback engine, not another TS/HLS timer patch.
+          grep -q "org.videolan.android:libvlc-all:3.6.0" "$GRADLE"
+          grep -q "def tvAbi = project.findProperty('tvAbi')" "$GRADLE"
+          grep -q 'class LibVlcPlaybackEngine' "$VLC"
+          grep -q -- '--http-reconnect' "$VLC"
+          grep -q -- '--network-caching=4500' "$VLC"
+          grep -q 'startVlcPlayback' "$TV"
+          grep -q 'VOD cambia Media3 -> VLC' "$TV"
+          grep -q 'playingWithVlc' "$TV"
+          grep -q 'showVlcAudioTracks' "$TV"
+          grep -q 'showVlcSubtitleTracks' "$TV"
+          grep -q 'VLC LIVE recuperación' "$TV"
+          grep -q "5.0-native-tv-hybrid-player" "$GRADLE"
+
+          # Critical regressions remain excluded.
           grep -q 'if (::playerView.isInitialized && player == null) initPlayer()' "$TV"
           ! grep -q 'created lazily only after the user' "$TV"
-          ! grep -q 'player?.release().*lastPlayed = null' "$TV"
-
-          # V4.2 CLEAN targeted changes only.
-          grep -q 'no automatic TS -> HLS switch' "$TV"
           grep -q 'return item.url' "$TV"
-          grep -q 'if (isLiveLike(item)) LIVE_START_TIMEOUT else 30_000L' "$TV"
-          grep -q 'visibility = View.GONE' "$TV"
-          grep -q "4.2-native-tv-stability-clean" native-tv-complete/app/build.gradle
 
-      - name: Build release APK
-        working-directory: native-tv-complete
-        run: gradle --no-daemon --stacktrace :app:assembleRelease
-
-      - name: Verify APK
+      - name: Build ARM64 release APK
         shell: bash
         run: |
           set -euo pipefail
-          APK='native-tv-complete/app/build/outputs/apk/release/app-release.apk'
-          test -f "$APK"
-          ls -lh "$APK"
-          TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
-          "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
           mkdir -p artifact
-          cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-V4-2-CLEAN.apk
-          sha256sum artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-V4-2-CLEAN.apk > artifact/SHA256.txt
-          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-V4-2-CLEAN.apk > artifact/SIZE_BYTES.txt
+          cd native-tv-complete
+          gradle --no-daemon --stacktrace clean :app:assembleRelease -PtvAbi=arm64-v8a
+          cp app/build/outputs/apk/release/app-release.apk ../artifact/TV-FULL-PRO-NATIVE-TV-HYBRID-V5-ARM64.apk
+
+      - name: Build ARM32 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd native-tv-complete
+          gradle --no-daemon --stacktrace clean :app:assembleRelease -PtvAbi=armeabi-v7a
+          cp app/build/outputs/apk/release/app-release.apk ../artifact/TV-FULL-PRO-NATIVE-TV-HYBRID-V5-ARM32.apk
+
+      - name: Verify APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          for APK in artifact/*.apk; do
+            test -f "$APK"
+            echo "==== $APK ===="
+            ls -lh "$APK"
+            "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
+            "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
+            sha256sum "$APK"
+          done
+          sha256sum artifact/*.apk > artifact/SHA256.txt
+          stat -c '%n %s' artifact/*.apk > artifact/SIZE_BYTES.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-NATIVE-TV-STABILITY-V4-2-CLEAN
+          name: TV-FULL-PRO-NATIVE-TV-HYBRID-V5
           path: artifact/
           retention-days: 30
