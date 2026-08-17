@@ -18,6 +18,7 @@ import androidx.recyclerview.widget.RecyclerView
 import com.tvfull.pro.tvcore.CatalogSyncEngine
 import com.tvfull.pro.tvcore.ProvisionedSource
 import com.tvfull.pro.tvcore.TvCatalogDatabase
+import com.tvfull.pro.tvcore.XtreamStrictSyncEngine
 import java.util.concurrent.Executors
 
 class PlaylistActivity : AppCompatActivity() {
@@ -139,7 +140,11 @@ class PlaylistActivity : AppCompatActivity() {
                     config = service.config,
                     expiresAt = service.expiresAt
                 )
-                CatalogSyncEngine(db).sync(source)
+                if (source.config.mode == SourceMode.XTREAM) {
+                    XtreamStrictSyncEngine(db).sync(source)
+                } else {
+                    CatalogSyncEngine(db).sync(source)
+                }
             }
             db.close()
 
