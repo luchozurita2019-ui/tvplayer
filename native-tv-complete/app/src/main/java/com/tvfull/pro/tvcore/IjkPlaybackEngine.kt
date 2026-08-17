@@ -48,6 +48,7 @@ class IjkPlaybackEngine {
         require(url.startsWith("http://", true) || url.startsWith("https://", true)) { "URL de reproducción inválida" }
         ensureLibraries()
         released = false
+        @Suppress("DEPRECATION")
         runCatching { surfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_NORMAL) }
         this.holder = surfaceHolder
         this.listener = listener
@@ -129,8 +130,9 @@ class IjkPlaybackEngine {
         val hardware = mode == DecoderMode.HARDWARE
         val liveLike = currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO
         val reconnect = currentPolicy.reconnectEnabled
-        val bufferBytes = if (liveLike) currentPolicy.liveBufferBytes else currentPolicy.vodBufferBytes
-            .coerceIn(4L * 1024L * 1024L, 128L * 1024L * 1024L)
+        val bufferBytes = (
+            if (liveLike) currentPolicy.liveBufferBytes else currentPolicy.vodBufferBytes
+        ).coerceIn(4L * 1024L * 1024L, 128L * 1024L * 1024L)
 
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", if (hardware) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-hevc", if (hardware) 1L else 0L)
@@ -175,7 +177,7 @@ class IjkPlaybackEngine {
                     videoRenderingStarted = true
                     listener?.onPlaying()
                 }
-                IMediaPlayer.MEDIA_INFO_AUDIO_RENDERING_START -> {
+                IJK_MEDIA_INFO_AUDIO_RENDERING_START -> {
                     audioRenderingStarted = true
                     listener?.onAudioStarted()
                     if (currentSection == ContentSection.RADIO) {
@@ -234,11 +236,11 @@ class IjkPlaybackEngine {
     private fun handleError(code: Int, extra: Int, message: String) {
         val mayBeDecoderOrFormat = when (code) {
             IMediaPlayer.MEDIA_ERROR_UNKNOWN,
-            IMediaPlayer.MEDIA_ERROR_MALFORMED,
-            IMediaPlayer.MEDIA_ERROR_UNSUPPORTED -> true
-            IMediaPlayer.MEDIA_ERROR_IO,
-            IMediaPlayer.MEDIA_ERROR_TIMED_OUT,
-            IMediaPlayer.MEDIA_ERROR_SERVER_DIED -> false
+            IJK_MEDIA_ERROR_MALFORMED,
+            IJK_MEDIA_ERROR_UNSUPPORTED -> true
+            IJK_MEDIA_ERROR_IO,
+            IJK_MEDIA_ERROR_TIMED_OUT,
+            IJK_MEDIA_ERROR_SERVER_DIED -> false
             else -> false
         }
 
@@ -273,6 +275,16 @@ class IjkPlaybackEngine {
     }
 
     companion object {
+        // Values copied from the official IJKPlayer k0.8.8 IMediaPlayer API.
+        // Local constants avoid Kotlin/Javac symbol-resolution differences while
+        // keeping the exact upstream native event/error values.
+        private const val IJK_MEDIA_INFO_AUDIO_RENDERING_START = 10002
+        private const val IJK_MEDIA_ERROR_SERVER_DIED = 100
+        private const val IJK_MEDIA_ERROR_IO = -1004
+        private const val IJK_MEDIA_ERROR_MALFORMED = -1007
+        private const val IJK_MEDIA_ERROR_UNSUPPORTED = -1010
+        private const val IJK_MEDIA_ERROR_TIMED_OUT = -110
+
         @Volatile private var librariesLoaded = false
 
         @Synchronized
