@@ -1,5 +1,8 @@
 package com.tvfull.pro.tvcore
 
+import android.media.AudioManager
+import android.os.Handler
+import android.os.Looper
 import android.view.SurfaceHolder
 import com.tvfull.pro.ContentSection
 import tv.danmaku.ijk.media.player.IjkMediaPlayer
@@ -9,6 +12,7 @@ class IjkPlaybackEngine {
     interface Listener {
         fun onOpening(url: String, decoderMode: DecoderMode) {}
         fun onPrepared(durationMs: Long) {}
+        fun onAudioStarted() {}
         fun onPlaying() {}
         fun onBuffering(started: Boolean, percent: Int) {}
         fun onVideoSize(width: Int, height: Int) {}
@@ -17,6 +21,7 @@ class IjkPlaybackEngine {
         fun onError(code: Int, extra: Int, message: String) {}
     }
 
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var player: IjkMediaPlayer? = null
     private var holder: SurfaceHolder? = null
     private var listener: Listener? = null
@@ -28,6 +33,9 @@ class IjkPlaybackEngine {
     private var autoSoftwareRetried = false
     private var resumePositionMs = 0L
     private var released = false
+    private var videoRenderingStarted = false
+    private var audioRenderingStarted = false
+    private var playbackGeneration = 0L
 
     fun open(
         url: String,
@@ -40,6 +48,7 @@ class IjkPlaybackEngine {
         require(url.startsWith("http://", true) || url.startsWith("https://", true)) { "URL de reproducción inválida" }
         ensureLibraries()
         released = false
+        runCatching { surfaceHolder.setType(SurfaceHolder.SURFACE_TYPE_NORMAL) }
         this.holder = surfaceHolder
         this.listener = listener
         this.currentUrl = url
@@ -74,11 +83,15 @@ class IjkPlaybackEngine {
 
     fun stop() {
         resumePositionMs = if (currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO) 0L else currentPosition()
+        playbackGeneration++
+        mainHandler.removeCallbacksAndMessages(null)
         releasePlayer()
     }
 
     fun release() {
         released = true
+        playbackGeneration++
+        mainHandler.removeCallbacksAndMessages(null)
         releasePlayer()
         holder = null
         listener = null
@@ -89,14 +102,19 @@ class IjkPlaybackEngine {
         if (released) return
         val surface = holder ?: error("SurfaceHolder no disponible")
         activeMode = mode
+        playbackGeneration++
+        val generation = playbackGeneration
+        videoRenderingStarted = false
+        audioRenderingStarted = false
         releasePlayer()
 
         val p = IjkMediaPlayer()
         player = p
         configure(p, mode)
         p.setDisplay(surface)
+        p.setAudioStreamType(AudioManager.STREAM_MUSIC)
         p.setScreenOnWhilePlaying(true)
-        installListeners(p)
+        installListeners(p, generation)
         listener?.onOpening(currentUrl, mode)
 
         try {
@@ -111,24 +129,21 @@ class IjkPlaybackEngine {
         val hardware = mode == DecoderMode.HARDWARE
         val liveLike = currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO
         val reconnect = currentPolicy.reconnectEnabled
-        val bufferBytes = if (liveLike) {
-            currentPolicy.liveBufferBytes
-        } else {
-            currentPolicy.vodBufferBytes
-        }.coerceIn(4L * 1024L * 1024L, 128L * 1024L * 1024L)
+        val bufferBytes = if (liveLike) currentPolicy.liveBufferBytes else currentPolicy.vodBufferBytes
+            .coerceIn(4L * 1024L * 1024L, 128L * 1024L * 1024L)
 
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec", if (hardware) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-hevc", if (hardware) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-auto-rotate", if (hardware) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "mediacodec-handle-resolution-change", if (hardware) 1L else 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "overlay-format", IjkMediaPlayer.SDL_FCC_RV32)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-buffer-size", bufferBytes)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", currentPolicy.frameDrop.toLong())
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 1L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_CODEC, "skip_loop_filter", 48L)
 
-        // These are FFmpeg AVFormat options, not generic player timers.
-        // Live/Radio may reconnect through a provider-side EOF; VOD must keep
-        // a genuine end-of-file as the end of the movie/episode.
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect", if (reconnect) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_streamed", if (reconnect && liveLike) 1L else 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_at_eof", if (reconnect && liveLike) 1L else 0L)
@@ -142,8 +157,9 @@ class IjkPlaybackEngine {
         }
     }
 
-    private fun installListeners(p: IjkMediaPlayer) {
+    private fun installListeners(p: IjkMediaPlayer, generation: Long) {
         p.setOnPreparedListener(IMediaPlayer.OnPreparedListener { media ->
+            if (generation != playbackGeneration) return@OnPreparedListener
             val seek = resumePositionMs
             if (seek > 0L && currentSection != ContentSection.LIVE && currentSection != ContentSection.RADIO) {
                 runCatching { media.seekTo(seek) }
@@ -153,9 +169,21 @@ class IjkPlaybackEngine {
         })
 
         p.setOnInfoListener(IMediaPlayer.OnInfoListener { _, what, _ ->
+            if (generation != playbackGeneration) return@OnInfoListener false
             when (what) {
-                IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START,
-                IMediaPlayer.MEDIA_INFO_AUDIO_RENDERING_START -> listener?.onPlaying()
+                IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START -> {
+                    videoRenderingStarted = true
+                    listener?.onPlaying()
+                }
+                IMediaPlayer.MEDIA_INFO_AUDIO_RENDERING_START -> {
+                    audioRenderingStarted = true
+                    listener?.onAudioStarted()
+                    if (currentSection == ContentSection.RADIO) {
+                        listener?.onPlaying()
+                    } else {
+                        scheduleBlackVideoWatchdog(generation)
+                    }
+                }
                 IMediaPlayer.MEDIA_INFO_BUFFERING_START -> listener?.onBuffering(true, 0)
                 IMediaPlayer.MEDIA_INFO_BUFFERING_END -> listener?.onBuffering(false, 100)
             }
@@ -163,21 +191,44 @@ class IjkPlaybackEngine {
         })
 
         p.setOnBufferingUpdateListener(IMediaPlayer.OnBufferingUpdateListener { _, percent ->
-            listener?.onBuffering(percent < 100, percent.coerceIn(0, 100))
+            if (generation == playbackGeneration) listener?.onBuffering(percent < 100, percent.coerceIn(0, 100))
         })
 
         p.setOnVideoSizeChangedListener(IMediaPlayer.OnVideoSizeChangedListener { _, width, height, _, _ ->
-            if (width > 0 && height > 0) listener?.onVideoSize(width, height)
+            if (generation != playbackGeneration) return@OnVideoSizeChangedListener
+            if (width > 0 && height > 0) {
+                runCatching { holder?.setFixedSize(width, height) }
+                listener?.onVideoSize(width, height)
+                if (audioRenderingStarted && !videoRenderingStarted) scheduleBlackVideoWatchdog(generation)
+            }
         })
 
         p.setOnCompletionListener(IMediaPlayer.OnCompletionListener {
-            listener?.onCompleted()
+            if (generation == playbackGeneration) listener?.onCompleted()
         })
 
         p.setOnErrorListener(IMediaPlayer.OnErrorListener { _, what, extra ->
-            handleError(what, extra, "IJK error $what/$extra")
+            if (generation == playbackGeneration) handleError(what, extra, "IJK error $what/$extra")
             true
         })
+    }
+
+    private fun scheduleBlackVideoWatchdog(generation: Long) {
+        if (currentSection == ContentSection.RADIO) return
+        mainHandler.postDelayed({
+            if (
+                generation == playbackGeneration &&
+                !released &&
+                audioRenderingStarted &&
+                !videoRenderingStarted
+            ) {
+                if (requestedMode == DecoderMode.AUTO && activeMode == DecoderMode.HARDWARE && !autoSoftwareRetried) {
+                    fallbackToSoftware("Audio activo pero MediaCodec no renderizó video")
+                } else {
+                    listener?.onError(IMediaPlayer.MEDIA_ERROR_UNKNOWN, 0, "Audio activo sin frames de video")
+                }
+            }
+        }, 5_000L)
     }
 
     private fun handleError(code: Int, extra: Int, message: String) {
@@ -185,8 +236,6 @@ class IjkPlaybackEngine {
             IMediaPlayer.MEDIA_ERROR_UNKNOWN,
             IMediaPlayer.MEDIA_ERROR_MALFORMED,
             IMediaPlayer.MEDIA_ERROR_UNSUPPORTED -> true
-            // Network/storage failures are not decoder failures. In particular,
-            // switching to software decoding cannot repair HTTP I/O or timeout.
             IMediaPlayer.MEDIA_ERROR_IO,
             IMediaPlayer.MEDIA_ERROR_TIMED_OUT,
             IMediaPlayer.MEDIA_ERROR_SERVER_DIED -> false
@@ -200,13 +249,18 @@ class IjkPlaybackEngine {
             activeMode == DecoderMode.HARDWARE &&
             !autoSoftwareRetried
         ) {
-            autoSoftwareRetried = true
-            resumePositionMs = if (currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO) 0L else currentPosition()
-            listener?.onDecoderFallback(DecoderMode.HARDWARE, DecoderMode.SOFTWARE, message)
-            startInternal(DecoderMode.SOFTWARE)
+            fallbackToSoftware(message)
             return
         }
         listener?.onError(code, extra, message)
+    }
+
+    private fun fallbackToSoftware(reason: String) {
+        if (released || autoSoftwareRetried) return
+        autoSoftwareRetried = true
+        resumePositionMs = if (currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO) 0L else currentPosition()
+        listener?.onDecoderFallback(DecoderMode.HARDWARE, DecoderMode.SOFTWARE, reason)
+        startInternal(DecoderMode.SOFTWARE)
     }
 
     private fun releasePlayer() {
