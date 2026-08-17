@@ -43,6 +43,7 @@ jobs:
           test -f "$CORE/CatalogSyncEngine.kt"
           test -f "$CORE/PlaybackSourceResolver.kt"
           test -f "$CORE/IjkPlaybackEngine.kt"
+          test -f "$CORE/TvCoreCoordinator.kt"
           grep -q 'IjkMediaPlayer' "$CORE/IjkPlaybackEngine.kt"
           grep -q 'max-buffer-size' "$CORE/IjkPlaybackEngine.kt"
           grep -q 'DecoderMode.AUTO' "$CORE/IjkPlaybackEngine.kt"
@@ -61,9 +62,16 @@ jobs:
             'https://dl.google.com/android/repository/android-ndk-r14b-linux-x86_64.zip' \
             --output "$NDK_ZIP"
           unzip -q "$NDK_ZIP" -d "$RUNNER_TEMP"
-          test -x "$RUNNER_TEMP/android-ndk-r14b/ndk-build"
+          NDK_ROOT="$RUNNER_TEMP/android-ndk-r14b"
+          test -x "$NDK_ROOT/ndk-build"
 
-          echo "ANDROID_NDK=$RUNNER_TEMP/android-ndk-r14b" >> "$GITHUB_ENV"
+          # IJK's historical scripts inspect more than one NDK variable.
+          # Pin all of them to the same official r14b toolchain so the modern
+          # GitHub runner's preinstalled NDK cannot leak into the build.
+          echo "ANDROID_NDK=$NDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_ROOT=$NDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_NDK_HOME=$NDK_ROOT" >> "$GITHUB_ENV"
+          echo "NDK_HOME=$NDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
 
       - name: Checkout official IJKPlayer k0.8.8
