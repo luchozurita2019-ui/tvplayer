@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
@@ -20,8 +21,9 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
+    final playlist = provider.playlistById(widget.playlist.id) ?? widget.playlist;
 
-    var channels = widget.playlist.channels;
+    var channels = playlist.channels;
     if (_selectedGroup != null) {
       channels = channels.where((c) => c.group == _selectedGroup).toList();
     }
@@ -29,14 +31,17 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
 
     return Scaffold(
       appBar: AppBar(
-        title: Text(widget.playlist.name),
+        title: Text(playlist.name),
         actions: [
-          if (widget.playlist.isRemote)
+          if (playlist.isRemote)
             IconButton(
               icon: const Icon(Icons.refresh),
               tooltip: 'Actualizar lista',
-              onPressed: () =>
-                  context.read<IptvProvider>().refreshPlaylist(widget.playlist.id),
+              onPressed: provider.loading
+                  ? null
+                  : () => context
+                      .read<IptvProvider>()
+                      .refreshPlaylist(playlist.id),
             ),
         ],
       ),
@@ -55,7 +60,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                   context.read<IptvProvider>().setSearchQuery(value),
             ),
           ),
-          if (widget.playlist.groups.isNotEmpty)
+          if (playlist.groups.isNotEmpty)
             SizedBox(
               height: 44,
               child: ListView(
@@ -67,7 +72,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                     selected: _selectedGroup == null,
                     onTap: () => setState(() => _selectedGroup = null),
                   ),
-                  ...widget.playlist.groups.map((g) => _GroupChip(
+                  ...playlist.groups.map((g) => _GroupChip(
                         label: g,
                         selected: _selectedGroup == g,
                         onTap: () => setState(() => _selectedGroup = g),
@@ -78,8 +83,6 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
           Expanded(
             child: channels.isEmpty
                 ? const Center(child: Text('No se encontraron canales'))
-                // ListView.builder: solo renderiza lo visible en pantalla,
-                // clave para que listas de miles de canales sigan fluidas.
                 : ListView.builder(
                     itemCount: channels.length,
                     itemBuilder: (context, index) {
@@ -89,7 +92,12 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
                         isFavorite: provider.isFavorite(channel),
                         onFavoriteToggle: () =>
                             context.read<IptvProvider>().toggleFavorite(channel),
-                        onTap: () => _openPlayer(context, channels, index),
+                        onTap: () => _openPlayer(
+                          context,
+                          channels,
+                          index,
+                          provider,
+                        ),
                       );
                     },
                   ),
@@ -99,12 +107,18 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     );
   }
 
-  void _openPlayer(BuildContext context, List<Channel> channels, int index) {
+  void _openPlayer(
+    BuildContext context,
+    List<Channel> channels,
+    int index,
+    IptvProvider provider,
+  ) {
     Navigator.of(context).push(MaterialPageRoute(
       builder: (_) => PlayerScreen(
         channel: channels[index],
         playlist: channels,
         initialIndex: index,
+        settings: provider.playbackSettings,
       ),
     ));
   }

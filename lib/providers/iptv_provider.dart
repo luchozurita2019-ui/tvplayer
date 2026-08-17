@@ -1,35 +1,55 @@
 import 'package:flutter/foundation.dart';
+
 import '../models/channel.dart';
+import '../models/playback_settings.dart';
 import '../models/playlist.dart';
 import '../services/m3u_fetcher.dart';
 import '../services/m3u_parser.dart';
+import '../services/playback_settings_service.dart';
 import '../services/storage_service.dart';
-
-// compute() necesita una función top-level: parseM3uInBackground,
-// expuesta en m3u_parser.dart, corre en un isolate separado.
 
 class IptvProvider extends ChangeNotifier {
   final StorageService _storage = StorageService();
+  final PlaybackSettingsService _playbackSettingsService =
+      PlaybackSettingsService();
 
   List<Playlist> _playlists = [];
   List<Channel> _favorites = [];
+  PlaybackSettings _playbackSettings = PlaybackSettings.balanced;
   String _searchQuery = '';
   bool _loading = false;
   String? _error;
 
   List<Playlist> get playlists => _playlists;
   List<Channel> get favorites => _favorites;
+  PlaybackSettings get playbackSettings => _playbackSettings;
   String get searchQuery => _searchQuery;
   bool get loading => _loading;
   String? get error => _error;
 
   Future<void> init() async {
-    _playlists = await _storage.loadPlaylists();
-    _favorites = await _storage.loadFavorites();
+    final results = await Future.wait([
+      _storage.loadPlaylists(),
+      _storage.loadFavorites(),
+      _playbackSettingsService.load(),
+    ]);
+    _playlists = results[0] as List<Playlist>;
+    _favorites = results[1] as List<Channel>;
+    _playbackSettings = results[2] as PlaybackSettings;
     notifyListeners();
   }
 
-  /// Agrega una lista desde una URL remota.
+  Playlist? playlistById(String playlistId) {
+    final index = _playlists.indexWhere((p) => p.id == playlistId);
+    return index == -1 ? null : _playlists[index];
+  }
+
+  Future<void> updatePlaybackSettings(PlaybackSettings settings) async {
+    _playbackSettings = settings;
+    await _playbackSettingsService.save(settings);
+    notifyListeners();
+  }
+
   Future<void> addPlaylistFromUrl(String name, String url) async {
     _setLoading(true);
     try {
@@ -53,7 +73,6 @@ class IptvProvider extends ChangeNotifier {
     }
   }
 
-  /// Agrega una lista a partir de contenido M3U ya leído (archivo local).
   Future<void> addPlaylistFromContent(
       String name, String path, String content) async {
     _setLoading(true);
@@ -77,7 +96,6 @@ class IptvProvider extends ChangeNotifier {
     }
   }
 
-  /// Refresca una lista remota (vuelve a descargar y parsear).
   Future<void> refreshPlaylist(String playlistId) async {
     final index = _playlists.indexWhere((p) => p.id == playlistId);
     if (index == -1) return;
@@ -88,10 +106,15 @@ class IptvProvider extends ChangeNotifier {
     try {
       final content = await M3uFetcher.fetch(playlist.source);
       final channels = await compute(parseM3uInBackground, content);
-      _playlists[index] = playlist.copyWith(
+      final updated = playlist.copyWith(
         channels: channels,
         lastUpdated: DateTime.now(),
       );
+      _playlists = [
+        ..._playlists.take(index),
+        updated,
+        ..._playlists.skip(index + 1),
+      ];
       await _storage.savePlaylists(_playlists);
       _error = null;
     } catch (e) {
@@ -125,8 +148,12 @@ class IptvProvider extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Filtra canales de una lista según la búsqueda actual.
-  /// Búsqueda case-insensitive por nombre y por grupo.
+  void clearSearchQuery() {
+    if (_searchQuery.isEmpty) return;
+    _searchQuery = '';
+    notifyListeners();
+  }
+
   List<Channel> filterChannels(List<Channel> channels) {
     if (_searchQuery.trim().isEmpty) return channels;
     final q = _searchQuery.toLowerCase();
