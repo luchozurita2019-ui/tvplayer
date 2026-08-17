@@ -2,6 +2,8 @@ package com.tvfull.pro
 
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.Typeface
+import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
@@ -13,6 +15,7 @@ import android.widget.LinearLayout
 import android.widget.TextView
 import androidx.appcompat.app.AppCompatActivity
 import java.util.concurrent.Executors
+import kotlin.math.min
 
 class ProvisioningActivity : AppCompatActivity() {
     private val io = Executors.newSingleThreadExecutor()
@@ -32,16 +35,9 @@ class ProvisioningActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         immersive()
-
-        val forceRemote = intent.getBooleanExtra("force_remote", false)
-        if (forceRemote) RemotePrefs.enableRemote(this)
-
-        if (!forceRemote && !RemotePrefs.isRemoteEnabled(this) && Prefs.load(this) != null) {
-            openMain()
-            return
-        }
-
+        RemotePrefs.enableRemote(this)
         setContentView(buildUi())
+
         val existing = RemotePrefs.loadCredentials(this)
         if (existing != null) {
             showCode(existing.code)
@@ -53,100 +49,113 @@ class ProvisioningActivity : AppCompatActivity() {
     }
 
     private fun buildUi(): View {
+        val widthDp = resources.configuration.screenWidthDp.coerceAtLeast(320)
+        val heightDp = resources.configuration.screenHeightDp.coerceAtLeast(240)
+        val horizontalPadding = (widthDp * 0.055f).toInt().coerceIn(18, 64)
+        val verticalPadding = (heightDp * 0.045f).toInt().coerceIn(12, 36)
+        val contentWidth = min((widthDp - horizontalPadding * 2).coerceAtLeast(280), 920)
+
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             gravity = Gravity.CENTER
-            setPadding(dp(70), dp(40), dp(70), dp(40))
-            setBackgroundColor(Color.rgb(12, 20, 36))
+            setPadding(dp(horizontalPadding), dp(verticalPadding), dp(horizontalPadding), dp(verticalPadding))
+            setBackgroundColor(Color.rgb(7, 11, 18))
         }
 
-        root.addView(TextView(this).apply {
+        val content = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER_HORIZONTAL
+            setPadding(dp(18), dp(12), dp(18), dp(12))
+        }
+        root.addView(content, LinearLayout.LayoutParams(dp(contentWidth), ViewGroup.LayoutParams.WRAP_CONTENT))
+
+        content.addView(TextView(this).apply {
             text = "TV FULL PRO"
-            textSize = 38f
+            textSize = if (widthDp < 700) 28f else 38f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }, LinearLayout.LayoutParams(dp(760), dp(68)))
+            setTypeface(typeface, Typeface.BOLD)
+            letterSpacing = 0.035f
+        }, fullWidthWrap())
 
-        root.addView(TextView(this).apply {
-            text = "ACTIVACIÓN REMOTA"
-            textSize = 19f
+        content.addView(TextView(this).apply {
+            text = "VINCULACIÓN CON TU SERVICIO"
+            textSize = if (widthDp < 700) 15f else 19f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(241, 214, 44))
-        }, LinearLayout.LayoutParams(dp(760), dp(46)))
+            setTextColor(Color.rgb(228, 185, 79))
+            setTypeface(typeface, Typeface.BOLD)
+            setPadding(0, dp(6), 0, dp(4))
+        }, fullWidthWrap())
 
-        root.addView(TextView(this).apply {
-            text = "Asigná este dispositivo desde el panel de TV FULL.\nLas listas y servicios se cargarán automáticamente."
-            textSize = 18f
+        content.addView(TextView(this).apply {
+            text = "Usá este código en el panel de TV FULL. No necesitás escribir ninguna URL en el televisor."
+            textSize = if (widthDp < 700) 14f else 17f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(185, 193, 204))
-        }, LinearLayout.LayoutParams(dp(820), dp(86)))
+            setTextColor(Color.rgb(185, 195, 210))
+            setPadding(dp(8), dp(4), dp(8), dp(12))
+        }, fullWidthWrap())
 
         codeText = TextView(this).apply {
             text = "GENERANDO CÓDIGO…"
-            textSize = 34f
+            textSize = if (widthDp < 700) 28f else 40f
             gravity = Gravity.CENTER
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(30, 43, 65))
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            setTypeface(typeface, Typeface.BOLD)
+            letterSpacing = 0.08f
+            setPadding(dp(18), dp(16), dp(18), dp(16))
+            background = rounded(Color.rgb(15, 25, 39), 14f, Color.rgb(35, 166, 255), 2)
         }
-        root.addView(codeText, LinearLayout.LayoutParams(dp(680), dp(90)).apply { topMargin = dp(12) })
+        content.addView(codeText, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(4)
+        })
 
         statusText = TextView(this).apply {
             text = "Registrando dispositivo…"
-            textSize = 17f
+            textSize = if (widthDp < 700) 13f else 16f
             gravity = Gravity.CENTER
-            setTextColor(Color.rgb(185, 193, 204))
+            setTextColor(Color.rgb(185, 195, 210))
+            setPadding(dp(6), dp(12), dp(6), dp(8))
         }
-        root.addView(statusText, LinearLayout.LayoutParams(dp(820), dp(70)).apply { topMargin = dp(12) })
+        content.addView(statusText, fullWidthWrap())
 
-        val actions = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER
-        }
-
-        retry = tvButton("REINTENTAR") {
-            handler.removeCallbacks(poll)
-            val credentials = RemotePrefs.loadCredentials(this)
-            if (credentials == null) registerDevice() else syncNow()
-        }
-        actions.addView(retry, LinearLayout.LayoutParams(dp(240), dp(58)).apply { marginEnd = dp(14) })
-
-        actions.addView(tvButton("CONFIGURACIÓN MANUAL") {
-            RemotePrefs.disableRemote(this)
-            startActivity(Intent(this, LoginActivity::class.java).putExtra("force_login", true))
-            finish()
-        }, LinearLayout.LayoutParams(dp(330), dp(58)))
-
-        root.addView(actions, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, dp(70)).apply { topMargin = dp(8) })
-
-        root.addView(TextView(this).apply {
-            text = "El dispositivo consulta el panel automáticamente cada pocos segundos."
+        retry = Button(this).apply {
+            text = "REINTENTAR"
             textSize = 14f
-            gravity = Gravity.CENTER
-            setTextColor(Color.rgb(130, 142, 160))
-        }, LinearLayout.LayoutParams(dp(820), dp(42)))
-
-        retry.requestFocus()
-        return root
-    }
-
-    private fun tvButton(label: String, action: () -> Unit): Button {
-        return Button(this).apply {
-            text = label
-            textSize = 15f
             isAllCaps = false
             isFocusable = true
             setTextColor(Color.WHITE)
-            setBackgroundColor(Color.rgb(38, 53, 76))
-            setOnClickListener { action() }
+            setPadding(dp(24), dp(10), dp(24), dp(10))
+            background = rounded(Color.rgb(24, 38, 57), 10f, Color.rgb(57, 78, 106), 1)
+            setOnClickListener {
+                handler.removeCallbacks(poll)
+                val credentials = RemotePrefs.loadCredentials(this@ProvisioningActivity)
+                if (credentials == null) registerDevice() else syncNow()
+            }
             setOnFocusChangeListener { v, focused ->
                 (v as Button).apply {
-                    setBackgroundColor(if (focused) Color.rgb(241, 214, 44) else Color.rgb(38, 53, 76))
+                    background = if (focused) {
+                        rounded(Color.rgb(228, 185, 79), 10f, Color.rgb(228, 185, 79), 2)
+                    } else {
+                        rounded(Color.rgb(24, 38, 57), 10f, Color.rgb(57, 78, 106), 1)
+                    }
                     setTextColor(if (focused) Color.BLACK else Color.WHITE)
                 }
             }
         }
+        content.addView(retry, LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT).apply {
+            topMargin = dp(4)
+        })
+
+        content.addView(TextView(this).apply {
+            text = "El televisor consulta el panel automáticamente. Cuando asignes una lista, se sincronizará sin ingresar datos con el control remoto."
+            textSize = if (widthDp < 700) 11f else 13f
+            gravity = Gravity.CENTER
+            setTextColor(Color.rgb(121, 137, 158))
+            setPadding(dp(8), dp(12), dp(8), 0)
+        }, fullWidthWrap())
+
+        retry.requestFocus()
+        return root
     }
 
     private fun registerDevice() {
@@ -186,23 +195,35 @@ class ProvisioningActivity : AppCompatActivity() {
                     RemoteConfigState.READY -> {
                         RemotePrefs.enableRemote(this)
                         RemotePrefs.saveServices(this, result.services)
-                        statusText.text = "${result.services.size} lista(s) recibida(s). Iniciando…"
+                        statusText.setTextColor(Color.rgb(117, 221, 154))
+                        statusText.text = "${result.services.size} lista(s) recibida(s). Preparando catálogo…"
                         openPlaylists()
                     }
                     RemoteConfigState.UNASSIGNED -> {
+                        statusText.setTextColor(Color.rgb(185, 195, 210))
                         statusText.text = "Esperando que asignes un servicio a ${credentials.code}"
                         schedulePoll(5_000)
                     }
+                    RemoteConfigState.PAYMENT_DUE -> {
+                        statusText.setTextColor(Color.rgb(242, 174, 58))
+                        statusText.text = result.message.ifBlank { "Servicio suspendido por falta de pago." }
+                        codeText.setTextColor(Color.rgb(242, 174, 58))
+                        schedulePoll(15_000)
+                    }
                     RemoteConfigState.DISABLED -> {
-                        statusText.text = "Este dispositivo está DESHABILITADO desde el panel."
+                        statusText.setTextColor(Color.rgb(242, 80, 80))
+                        statusText.text = result.message.ifBlank { "Este dispositivo está deshabilitado desde el panel." }
                         codeText.setTextColor(Color.rgb(242, 80, 80))
+                        schedulePoll(15_000)
                     }
                     RemoteConfigState.INVALID -> {
+                        statusText.setTextColor(Color.rgb(185, 195, 210))
                         statusText.text = "El registro dejó de ser válido. Generando un código nuevo…"
                         RemotePrefs.clearCredentials(this)
                         handler.postDelayed({ registerDevice() }, 1_000)
                     }
                     RemoteConfigState.ERROR -> {
+                        statusText.setTextColor(Color.rgb(185, 195, 210))
                         statusText.text = result.message.ifBlank { "Sin conexión con el panel. Reintentando…" }
                         schedulePoll(8_000)
                     }
@@ -229,14 +250,6 @@ class ProvisioningActivity : AppCompatActivity() {
         finish()
     }
 
-    private fun openMain() {
-        if (launching || stopped) return
-        launching = true
-        handler.removeCallbacksAndMessages(null)
-        startActivity(Intent(this, TvHomeActivity::class.java))
-        finish()
-    }
-
     override fun onStop() {
         super.onStop()
         stopped = true
@@ -256,6 +269,19 @@ class ProvisioningActivity : AppCompatActivity() {
         handler.removeCallbacksAndMessages(null)
         io.shutdownNow()
     }
+
+    private fun fullWidthWrap() = LinearLayout.LayoutParams(
+        ViewGroup.LayoutParams.MATCH_PARENT,
+        ViewGroup.LayoutParams.WRAP_CONTENT
+    )
+
+    private fun rounded(fill: Int, radiusDp: Float, stroke: Int, strokeWidthDp: Int): GradientDrawable =
+        GradientDrawable().apply {
+            shape = GradientDrawable.RECTANGLE
+            setColor(fill)
+            cornerRadius = dp(radiusDp.toInt()).toFloat()
+            setStroke(dp(strokeWidthDp), stroke)
+        }
 
     private fun immersive() {
         @Suppress("DEPRECATION")
