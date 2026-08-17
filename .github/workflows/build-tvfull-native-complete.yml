@@ -52,6 +52,40 @@ jobs:
           grep -q 'instanceFollowRedirects = false' "$CORE/XtreamClient.kt"
           grep -q 'get_series_info' "$CORE/CatalogSyncEngine.kt"
 
+      - name: Checkout official IJKPlayer k0.8.8
+        shell: bash
+        run: |
+          set -euo pipefail
+          IJK_ROOT="$RUNNER_TEMP/ijkplayer-k0.8.8"
+          git clone --branch k0.8.8 --depth 1 https://github.com/bilibili/ijkplayer.git "$IJK_ROOT"
+          test "$(git -C "$IJK_ROOT" rev-parse HEAD)" = 'cced91e3ae3730f5c63f3605b00d25eafcf5b97b'
+          echo "IJK_ROOT=$IJK_ROOT" >> "$GITHUB_ENV"
+
+      - name: Materialize official IJK Java API for compile check
+        shell: bash
+        run: |
+          set -euo pipefail
+          APP='native-tv-complete/app/src/main'
+          rm -rf "$APP/ijkplayer-java"
+          mkdir -p "$APP/ijkplayer-java"
+          cp -R "$IJK_ROOT/android/ijkplayer/ijkplayer-java/src/main/java/"* "$APP/ijkplayer-java/"
+          test -f "$APP/ijkplayer-java/tv/danmaku/ijk/media/player/IjkMediaPlayer.java"
+
+      - name: Compile TV FULL Kotlin before native build
+        working-directory: native-tv-complete
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:compileReleaseKotlin 2>&1 | tee kotlin-compile.log
+
+      - name: Upload Kotlin compile diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-KOTLIN-COMPILE-LOG
+          path: native-tv-complete/kotlin-compile.log
+          retention-days: 7
+
       - name: Install IJK native build prerequisites
         shell: bash
         run: |
@@ -68,15 +102,6 @@ jobs:
           echo "ANDROID_NDK_HOME=$NDK_ROOT" >> "$GITHUB_ENV"
           echo "NDK_HOME=$NDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_SDK=$ANDROID_HOME" >> "$GITHUB_ENV"
-
-      - name: Checkout official IJKPlayer k0.8.8
-        shell: bash
-        run: |
-          set -euo pipefail
-          IJK_ROOT="$RUNNER_TEMP/ijkplayer-k0.8.8"
-          git clone --branch k0.8.8 --depth 1 https://github.com/bilibili/ijkplayer.git "$IJK_ROOT"
-          test "$(git -C "$IJK_ROOT" rev-parse HEAD)" = 'cced91e3ae3730f5c63f3605b00d25eafcf5b97b'
-          echo "IJK_ROOT=$IJK_ROOT" >> "$GITHUB_ENV"
 
       - name: Initialize official FFmpeg and IJK sources
         shell: bash
@@ -132,7 +157,18 @@ jobs:
 
       - name: Build TV FULL release APK
         working-directory: native-tv-complete
-        run: gradle --no-daemon --stacktrace :app:assembleRelease
+        shell: bash
+        run: |
+          set -o pipefail
+          gradle --no-daemon --stacktrace :app:assembleRelease 2>&1 | tee release-build.log
+
+      - name: Upload release build diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-RELEASE-BUILD-LOG
+          path: native-tv-complete/release-build.log
+          retention-days: 7
 
       - name: Verify APK and IJK native libraries
         shell: bash
