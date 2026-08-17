@@ -1,12 +1,13 @@
-name: Build TV FULL Native Complete
+name: Build TV FULL Native TV IJK Architecture
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - tvfull-native-complete-v1
+      - tvfull-native-tv-ijk-architecture-v1
     paths:
       - 'native-tv-complete/**'
+      - 'docs/native_tv_ijk_architecture_v1.md'
       - '.github/workflows/build-tvfull-native-complete.yml'
 
 permissions:
@@ -30,28 +31,50 @@ jobs:
         with:
           gradle-version: '8.7'
 
+      - name: Verify architecture files
+        shell: bash
+        run: |
+          set -euo pipefail
+          CORE='native-tv-complete/app/src/main/java/com/tvfull/pro/tvcore'
+          test -f "$CORE/TvCatalogDatabase.kt"
+          test -f "$CORE/XtreamClient.kt"
+          test -f "$CORE/M3uImporter.kt"
+          test -f "$CORE/CatalogSyncEngine.kt"
+          test -f "$CORE/PlaybackSourceResolver.kt"
+          test -f "$CORE/IjkPlaybackEngine.kt"
+          grep -q 'IjkMediaPlayer' "$CORE/IjkPlaybackEngine.kt"
+          grep -q 'max-buffer-size' "$CORE/IjkPlaybackEngine.kt"
+          grep -q 'DecoderMode.AUTO' "$CORE/IjkPlaybackEngine.kt"
+          grep -q 'instanceFollowRedirects = false' "$CORE/XtreamClient.kt"
+          grep -q 'get_series_info' "$CORE/CatalogSyncEngine.kt"
+
       - name: Build release APK
         working-directory: native-tv-complete
         run: gradle --no-daemon --stacktrace :app:assembleRelease
 
-      - name: Verify APK
+      - name: Verify APK and IJK native libraries
         shell: bash
         run: |
+          set -euo pipefail
           APK='native-tv-complete/app/build/outputs/apk/release/app-release.apk'
           test -f "$APK"
+          unzip -l "$APK" | grep -q 'lib/armeabi-v7a/libijkplayer.so'
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libijkplayer.so'
+          unzip -l "$APK" | grep -q 'lib/armeabi-v7a/libijkffmpeg.so'
+          unzip -l "$APK" | grep -q 'lib/arm64-v8a/libijkffmpeg.so'
           ls -lh "$APK"
           TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
           "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
           mkdir -p artifact
-          cp "$APK" artifact/TV-FULL-PRO-NATIVE-COMPLETE.apk
-          sha256sum artifact/TV-FULL-PRO-NATIVE-COMPLETE.apk > artifact/SHA256.txt
-          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-COMPLETE.apk > artifact/SIZE_BYTES.txt
+          cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk
+          sha256sum artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk > artifact/SHA256.txt
+          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk > artifact/SIZE_BYTES.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-NATIVE-COMPLETE
+          name: TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1
           path: artifact/
           retention-days: 30
