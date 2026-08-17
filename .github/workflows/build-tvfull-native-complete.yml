@@ -11,6 +11,7 @@ on:
       - '.github/scripts/apply_native_tv_stability_v3.py'
       - '.github/scripts/apply_native_tv_premium_ui_v3.py'
       - '.github/scripts/apply_native_tv_stability_v4.py'
+      - '.github/scripts/fix_native_tv_stability_v4_strings.py'
       - '.github/workflows/build-tvfull-native-complete.yml'
 
 permissions:
@@ -45,6 +46,9 @@ jobs:
 
       - name: Apply Stability V4 targeted fixes
         run: python3 .github/scripts/apply_native_tv_stability_v4.py
+
+      - name: Fix V4 Kotlin string escaping
+        run: python3 .github/scripts/fix_native_tv_stability_v4_strings.py
 
       - name: Verify V4 markers and preserved features
         shell: bash
@@ -81,6 +85,7 @@ jobs:
           grep -q 'screenWidthDp' "$PROV"
           grep -q 'screenHeightDp' "$PROV"
           grep -q 'contentWidthDp' "$PROV"
+          grep -q 'TV FULL.\\nLas listas' "$PROV"
           grep -q "4.0-native-tv-stability" native-tv-complete/app/build.gradle
 
       - name: Build release APK
