@@ -4,17 +4,28 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
 
-    <uses-feature android:name="android.software.leanback" android:required="true" />
+    <!-- Some Android TV/TV Box firmwares can run TV apps but do not report
+         Leanback correctly. Keep TV launcher support without filtering them out. -->
+    <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
     <application
         android:allowBackup="false"
+        android:extractNativeLibs="true"
         android:hardwareAccelerated="true"
-        android:largeHeap="false"
+        android:largeHeap="true"
         android:label="TV FULL PRO"
         android:theme="@style/Theme.TVFull"
         android:usesCleartextTraffic="true">
 
+        <activity
+            android:name=".TvIptvActivity"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
+            android:exported="false"
+            android:screenOrientation="landscape" />
+
+        <!-- Kept temporarily for source compatibility while the new architecture
+             is validated. The panel-linked flow no longer routes users here. -->
         <activity
             android:name=".TvHomeActivity"
             android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenSize|smallestScreenSize|uiMode"
