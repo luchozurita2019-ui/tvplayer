@@ -11,6 +11,9 @@ dependencyResolutionManagement {
     repositories {
         google()
         mavenCentral()
+        // IJKPlayer 0.8.8 upstream artifacts were published to JCenter.
+        // Keep this repository scoped to dependency resolution; no Smarters binaries are used.
+        maven { url = uri("https://jcenter.bintray.com/") }
     }
 }
 
