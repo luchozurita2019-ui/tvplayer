@@ -134,13 +134,17 @@ class PlaylistActivity : AppCompatActivity() {
         io.execute {
             val db = TvCatalogDatabase(applicationContext)
             val result = runCatching {
+                // A service can arrive from the panel as M3U while actually being an
+                // Xtream get.php URL. Reuse the original resolver so player_api.php
+                // remains authoritative for categories/catalog structure.
+                val resolvedConfig = SourceResolver.resolve(service.config)
                 val source = ProvisionedSource(
                     serviceId = service.id,
                     serviceName = service.name,
-                    config = service.config,
+                    config = resolvedConfig,
                     expiresAt = service.expiresAt
                 )
-                if (source.config.mode == SourceMode.XTREAM) {
+                if (resolvedConfig.mode == SourceMode.XTREAM) {
                     XtreamStrictSyncEngine(db).sync(source)
                 } else {
                     CatalogSyncEngine(db).sync(source)
@@ -218,7 +222,7 @@ class PlaylistActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val service = data[position]
             holder.title.text = service.name
-            holder.type.text = if (service.config.mode == SourceMode.XTREAM) "XTREAM" else "M3U"
+            holder.type.text = if (service.config.mode == SourceMode.XTREAM || SourceResolver.looksLikeXtreamUrl(service.config.m3uUrl)) "XTREAM" else "M3U"
             holder.root.setOnClickListener { select(service) }
             holder.root.setOnFocusChangeListener { v, focused ->
                 v.background = rounded(
