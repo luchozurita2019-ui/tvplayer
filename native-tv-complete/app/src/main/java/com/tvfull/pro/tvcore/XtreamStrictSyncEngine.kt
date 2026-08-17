@@ -24,6 +24,9 @@ class XtreamStrictSyncEngine(
                 .onFailure { warnings += "M3U de compatibilidad: ${it.message ?: "error"}" }
                 .getOrNull()
         }
+        val fallbackIndex: Map<ContentSection, Map<String, CatalogItem>> = fallback?.items
+            ?.mapValues { (_, rows) -> rows.associateBy { it.itemId } }
+            .orEmpty()
 
         val liveCategories = categories(
             source.serviceId,
@@ -35,7 +38,7 @@ class XtreamStrictSyncEngine(
             ContentSection.LIVE,
             safeArray(session, "get_live_streams", warnings),
             session,
-            fallback
+            fallbackIndex[ContentSection.LIVE].orEmpty()
         )
         database.replaceSection(source.serviceId, ContentSection.LIVE, liveCategories, live)
 
@@ -49,7 +52,7 @@ class XtreamStrictSyncEngine(
             ContentSection.MOVIES,
             safeArray(session, "get_vod_streams", warnings),
             session,
-            fallback
+            fallbackIndex[ContentSection.MOVIES].orEmpty()
         )
         database.replaceSection(source.serviceId, ContentSection.MOVIES, movieCategories, movies)
 
@@ -116,7 +119,7 @@ class XtreamStrictSyncEngine(
         section: ContentSection,
         array: JSONArray,
         session: XtreamSession,
-        fallback: M3uImporter.Result?
+        fallbackById: Map<String, CatalogItem>
     ): List<CatalogItem> {
         val out = ArrayList<CatalogItem>()
         for (i in 0 until array.length()) {
@@ -129,8 +132,9 @@ class XtreamStrictSyncEngine(
                 if (section == ContentSection.LIVE) "ts" else "mp4"
             }
 
-            // M3U is URL compatibility only. Metadata/category/name always remain Xtream.
-            val exactM3uUrl = fallback?.byStreamId?.get(streamId)?.playbackUrl.orEmpty()
+            // M3U can replace only the URL of the SAME section + stream id.
+            // Xtream metadata/category/name/order remain authoritative.
+            val exactM3uUrl = fallbackById[streamId]?.playbackUrl.orEmpty()
             val playbackUrl = when {
                 direct.startsWith("http://", true) || direct.startsWith("https://", true) -> direct
                 exactM3uUrl.isNotBlank() -> exactM3uUrl
