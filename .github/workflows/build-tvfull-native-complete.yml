@@ -1,10 +1,10 @@
-name: Build TV FULL Native TV IJK Architecture
+name: Build TV FULL Native TV IJK V1.1
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - tvfull-native-tv-ijk-architecture-v1
+      - tvfull-native-tv-ijk-v1-1-video-xtream-fix
     paths:
       - 'native-tv-complete/**'
       - 'docs/native_tv_ijk_architecture_v1.md'
@@ -41,12 +41,14 @@ jobs:
           test -f "$CORE/XtreamClient.kt"
           test -f "$CORE/M3uImporter.kt"
           test -f "$CORE/CatalogSyncEngine.kt"
+          test -f "$CORE/XtreamStrictSyncEngine.kt"
           test -f "$CORE/PlaybackSourceResolver.kt"
           test -f "$CORE/IjkPlaybackEngine.kt"
           test -f "$CORE/TvCoreCoordinator.kt"
           grep -q 'IjkMediaPlayer' "$CORE/IjkPlaybackEngine.kt"
           grep -q 'max-buffer-size' "$CORE/IjkPlaybackEngine.kt"
-          grep -q 'DecoderMode.AUTO' "$CORE/IjkPlaybackEngine.kt"
+          grep -q 'Audio activo pero MediaCodec no renderizó video' "$CORE/IjkPlaybackEngine.kt"
+          grep -q 'Xtream is authoritative' "$CORE/XtreamStrictSyncEngine.kt"
           grep -q 'instanceFollowRedirects = false' "$CORE/XtreamClient.kt"
           grep -q 'get_series_info' "$CORE/CatalogSyncEngine.kt"
 
@@ -56,15 +58,11 @@ jobs:
           set -euo pipefail
           sudo apt-get update
           sudo apt-get install -y yasm make unzip curl
-
           NDK_ZIP="$RUNNER_TEMP/android-ndk-r14b-linux-x86_64.zip"
-          curl --fail --location --retry 3 \
-            'https://dl.google.com/android/repository/android-ndk-r14b-linux-x86_64.zip' \
-            --output "$NDK_ZIP"
+          curl --fail --location --retry 3 'https://dl.google.com/android/repository/android-ndk-r14b-linux-x86_64.zip' --output "$NDK_ZIP"
           unzip -q "$NDK_ZIP" -d "$RUNNER_TEMP"
           NDK_ROOT="$RUNNER_TEMP/android-ndk-r14b"
           test -x "$NDK_ROOT/ndk-build"
-
           echo "ANDROID_NDK=$NDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_ROOT=$NDK_ROOT" >> "$GITHUB_ENV"
           echo "ANDROID_NDK_HOME=$NDK_ROOT" >> "$GITHUB_ENV"
@@ -86,11 +84,6 @@ jobs:
           set -euo pipefail
           cd "$IJK_ROOT"
           ./init-android.sh
-
-          # Start from the broad official configuration. FFmpeg 3.4 can
-          # mistakenly enable Linux perf instrumentation when cross-building
-          # ARM on a modern Linux host; Android NDK r14b does not provide
-          # linux/perf_event.h. Disable only that optional profiler feature.
           cd config
           rm -f module.sh
           cp module-default.sh module.sh
@@ -126,11 +119,9 @@ jobs:
           APP='native-tv-complete/app/src/main'
           rm -rf "$APP/ijkplayer-java" "$APP/jniLibs"
           mkdir -p "$APP/ijkplayer-java" "$APP/jniLibs/armeabi-v7a" "$APP/jniLibs/arm64-v8a"
-
           cp -R "$IJK_ROOT/android/ijkplayer/ijkplayer-java/src/main/java/"* "$APP/ijkplayer-java/"
           cp "$IJK_ROOT/android/ijkplayer/ijkplayer-armv7a/src/main/libs/armeabi-v7a/"*.so "$APP/jniLibs/armeabi-v7a/"
           cp "$IJK_ROOT/android/ijkplayer/ijkplayer-arm64/src/main/libs/arm64-v8a/"*.so "$APP/jniLibs/arm64-v8a/"
-
           test -f "$APP/jniLibs/armeabi-v7a/libijkffmpeg.so"
           test -f "$APP/jniLibs/armeabi-v7a/libijksdl.so"
           test -f "$APP/jniLibs/armeabi-v7a/libijkplayer.so"
@@ -155,22 +146,19 @@ jobs:
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libijkffmpeg.so'
           unzip -l "$APK" | grep -q 'lib/armeabi-v7a/libijksdl.so'
           unzip -l "$APK" | grep -q 'lib/arm64-v8a/libijksdl.so'
-          ls -lh "$APK"
-
           TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
           "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
-
           mkdir -p artifact
-          cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk
-          sha256sum artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk > artifact/SHA256.txt
-          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1.apk > artifact/SIZE_BYTES.txt
+          cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-IJK-V1-1.apk
+          sha256sum artifact/TV-FULL-PRO-NATIVE-TV-IJK-V1-1.apk > artifact/SHA256.txt
+          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-IJK-V1-1.apk > artifact/SIZE_BYTES.txt
           git rev-parse HEAD > artifact/COMMIT.txt
           printf 'IJKPlayer: bilibili/ijkplayer k0.8.8\nCommit: cced91e3ae3730f5c63f3605b00d25eafcf5b97b\nBuilt from upstream source in CI.\n' > artifact/IJK_SOURCE.txt
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-NATIVE-TV-IJK-ARCHITECTURE-V1
+          name: TV-FULL-PRO-NATIVE-TV-IJK-V1-1
           path: artifact/
           retention-days: 30
