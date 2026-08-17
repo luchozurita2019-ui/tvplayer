@@ -10,6 +10,7 @@ on:
       - '.github/scripts/apply_native_tv_professional_v2.py'
       - '.github/scripts/apply_native_tv_stability_v3.py'
       - '.github/scripts/apply_native_tv_premium_ui_v3.py'
+      - '.github/scripts/prepare_native_tv_v6.py'
       - '.github/scripts/apply_native_tv_v6_clean_final.py'
       - '.github/workflows/build-tvfull-native-complete.yml'
 
@@ -43,6 +44,9 @@ jobs:
       - name: Apply Premium V3 interface
         run: python3 .github/scripts/apply_native_tv_premium_ui_v3.py
 
+      - name: Prepare obsolete V3 playback state
+        run: python3 .github/scripts/prepare_native_tv_v6.py
+
       - name: Apply V6 clean final
         run: python3 .github/scripts/apply_native_tv_v6_clean_final.py
 
@@ -58,7 +62,6 @@ jobs:
           REMOTE='native-tv-complete/app/src/main/java/com/tvfull/pro/RemoteProvisioning.kt'
           GRADLE='native-tv-complete/app/build.gradle'
 
-          # Existing working TV FULL features stay present.
           grep -q 'PAYMENT_DUE' "$REMOTE"
           grep -q 'payment_due' "$REMOTE"
           grep -q 'SERVICIO SUSPENDIDO' "$PROV"
@@ -68,7 +71,6 @@ jobs:
           grep -q 'videoResolutionLabel' "$TV"
           grep -q 'DIAGNÓSTICO DE REPRODUCCIÓN' "$TV"
 
-          # V6: exactly one playback engine owns every stream.
           grep -q 'class StableVlcPlayer' "$VLC"
           grep -q -- '--network-caching=8000' "$VLC"
           grep -q -- '--file-caching=15000' "$VLC"
@@ -80,18 +82,15 @@ jobs:
           ! grep -q 'VOD cambia Media3 -> VLC' "$TV"
           ! grep -q 'startVlcPlayback' "$TV"
 
-          # Fullscreen regression: LIVE must query the actual playback engine.
           grep -q 'lastPlayed?.id == item.id && isPlaybackPlaying()' "$TV"
           ! grep -q 'lastPlayed?.id == item.id && player?.isPlaying == true' "$TV"
 
-          # Provider URL / series compatibility.
           grep -q 'class FallbackPlaylistResolver' "$FALLBACK"
           grep -q 'fallbackResolver.streamUrl(ContentSection.LIVE, id)' "$CAT"
           grep -q 'fallbackResolver.streamUrl(ContentSection.MOVIES, id)' "$CAT"
           grep -q 'fallbackResolver.seriesEpisodes(series.name)' "$CAT"
           grep -q 'repository.loadSeriesEpisodes(series)' "$TV"
 
-          # Provisioning must be responsive; fixed V3 widths may not return.
           grep -q 'widthDp = (dm.widthPixels / dm.density).toInt()' "$PROV"
           ! grep -q 'LinearLayout.LayoutParams(dp(820)' "$PROV"
           ! grep -q 'LinearLayout.LayoutParams(dp(760)' "$PROV"
