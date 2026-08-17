@@ -1,15 +1,16 @@
-name: Build TV FULL Native Stability Premium V3
+name: Build TV FULL Native V6 Clean Final
 
 on:
   workflow_dispatch:
   push:
     branches:
-      - tvfull-native-tv-stability-v3
+      - tvfull-native-tv-v6-clean-final
     paths:
       - 'native-tv-complete/**'
       - '.github/scripts/apply_native_tv_professional_v2.py'
       - '.github/scripts/apply_native_tv_stability_v3.py'
       - '.github/scripts/apply_native_tv_premium_ui_v3.py'
+      - '.github/scripts/apply_native_tv_v6_clean_final.py'
       - '.github/workflows/build-tvfull-native-complete.yml'
 
 permissions:
@@ -36,69 +37,106 @@ jobs:
       - name: Apply Professional V2 base
         run: python3 .github/scripts/apply_native_tv_professional_v2.py
 
-      - name: Apply Stability V3 engine
+      - name: Apply Stability V3 base
         run: python3 .github/scripts/apply_native_tv_stability_v3.py
 
       - name: Apply Premium V3 interface
         run: python3 .github/scripts/apply_native_tv_premium_ui_v3.py
 
-      - name: Verify payment player stability and premium markers
+      - name: Apply V6 clean final
+        run: python3 .github/scripts/apply_native_tv_v6_clean_final.py
+
+      - name: Verify V6 architecture and regression guards
         shell: bash
         run: |
           set -euo pipefail
           TV='native-tv-complete/app/src/main/java/com/tvfull/pro/TvHomeActivity.kt'
-          REMOTE='native-tv-complete/app/src/main/java/com/tvfull/pro/RemoteProvisioning.kt'
+          VLC='native-tv-complete/app/src/main/java/com/tvfull/pro/StableVlcPlayer.kt'
+          FALLBACK='native-tv-complete/app/src/main/java/com/tvfull/pro/FallbackPlaylistResolver.kt'
+          CAT='native-tv-complete/app/src/main/java/com/tvfull/pro/CatalogRepository.kt'
           PROV='native-tv-complete/app/src/main/java/com/tvfull/pro/ProvisioningActivity.kt'
+          REMOTE='native-tv-complete/app/src/main/java/com/tvfull/pro/RemoteProvisioning.kt'
+          GRADLE='native-tv-complete/app/build.gradle'
 
-          # Existing Professional V2 features must remain.
-          grep -q 'showPlaybackOptions' "$TV"
-          grep -q 'TrackSelectionOverride' "$TV"
-          grep -q 'RESIZE_MODE_ZOOM' "$TV"
-          grep -q 'videoResolutionLabel' "$TV"
-          grep -q 'infoPanel.visibility = View.GONE' "$TV"
+          # Existing working TV FULL features stay present.
           grep -q 'PAYMENT_DUE' "$REMOTE"
           grep -q 'payment_due' "$REMOTE"
           grep -q 'SERVICIO SUSPENDIDO' "$PROV"
-
-          # Stability V3.
-          grep -q 'MAX_VOD_RECOVERIES = 4' "$TV"
-          grep -q 'DefaultLoadErrorHandlingPolicy' "$TV"
-          grep -q '20_000.*VOD reserve' "$TV"
-          grep -q 'scheduleVodRecovery' "$TV"
-          grep -q 'lastKnownPositionMs' "$TV"
-          grep -q 'maybeTryXtreamHlsFallback' "$TV"
-          grep -q 'm3u8' "$TV"
-          grep -q 'DIAGNÓSTICO DE REPRODUCCIÓN' "$TV"
-
-          # Premium UI V3.
           grep -q 'premiumSurface' "$TV"
           grep -q 'NATIVE TV' "$TV"
-          grep -q 'private fun navButton(label: String, action: () -> Unit): TextView' "$TV"
-          grep -q '3.0-native-tv-stability-premium' native-tv-complete/app/build.gradle
+          grep -q 'RESIZE_MODE_ZOOM' "$TV"
+          grep -q 'videoResolutionLabel' "$TV"
+          grep -q 'DIAGNÓSTICO DE REPRODUCCIÓN' "$TV"
 
-      - name: Build release APK
-        working-directory: native-tv-complete
-        run: gradle --no-daemon --stacktrace :app:assembleRelease
+          # V6: exactly one playback engine owns every stream.
+          grep -q 'class StableVlcPlayer' "$VLC"
+          grep -q -- '--network-caching=8000' "$VLC"
+          grep -q -- '--file-caching=15000' "$VLC"
+          ! grep -q -- '--drop-late-frames' "$VLC"
+          ! grep -q -- '--skip-frames' "$VLC"
+          grep -q 'VLC SINGLE OPEN' "$TV"
+          grep -q 'stablePlayer.play(item.url' "$TV"
+          grep -q 'isPlaybackPlaying()' "$TV"
+          ! grep -q 'VOD cambia Media3 -> VLC' "$TV"
+          ! grep -q 'startVlcPlayback' "$TV"
 
-      - name: Verify APK
+          # Fullscreen regression: LIVE must query the actual playback engine.
+          grep -q 'lastPlayed?.id == item.id && isPlaybackPlaying()' "$TV"
+          ! grep -q 'lastPlayed?.id == item.id && player?.isPlaying == true' "$TV"
+
+          # Provider URL / series compatibility.
+          grep -q 'class FallbackPlaylistResolver' "$FALLBACK"
+          grep -q 'fallbackResolver.streamUrl(ContentSection.LIVE, id)' "$CAT"
+          grep -q 'fallbackResolver.streamUrl(ContentSection.MOVIES, id)' "$CAT"
+          grep -q 'fallbackResolver.seriesEpisodes(series.name)' "$CAT"
+          grep -q 'repository.loadSeriesEpisodes(series)' "$TV"
+
+          # Provisioning must be responsive; fixed V3 widths may not return.
+          grep -q 'widthDp = (dm.widthPixels / dm.density).toInt()' "$PROV"
+          ! grep -q 'LinearLayout.LayoutParams(dp(820)' "$PROV"
+          ! grep -q 'LinearLayout.LayoutParams(dp(760)' "$PROV"
+          ! grep -q 'LinearLayout.LayoutParams(dp(680)' "$PROV"
+
+          grep -q "org.videolan.android:libvlc-all:3.6.0" "$GRADLE"
+          grep -q "6.0-native-tv-clean-single-engine" "$GRADLE"
+
+      - name: Build ARM64 release APK
         shell: bash
         run: |
           set -euo pipefail
-          APK='native-tv-complete/app/build/outputs/apk/release/app-release.apk'
-          test -f "$APK"
-          ls -lh "$APK"
-          TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
-          "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
           mkdir -p artifact
-          cp "$APK" artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3.apk
-          sha256sum artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3.apk > artifact/SHA256.txt
-          stat -c '%s' artifact/TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3.apk > artifact/SIZE_BYTES.txt
+          cd native-tv-complete
+          gradle --no-daemon --stacktrace clean :app:assembleRelease -PtvAbi=arm64-v8a
+          cp app/build/outputs/apk/release/app-release.apk ../artifact/TV-FULL-PRO-NATIVE-TV-V6-CLEAN-ARM64.apk
+
+      - name: Build ARM32 release APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd native-tv-complete
+          gradle --no-daemon --stacktrace clean :app:assembleRelease -PtvAbi=armeabi-v7a
+          cp app/build/outputs/apk/release/app-release.apk ../artifact/TV-FULL-PRO-NATIVE-TV-V6-CLEAN-ARM32.apk
+
+      - name: Verify APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          for APK in artifact/*.apk; do
+            test -f "$APK"
+            echo "==== $APK ===="
+            ls -lh "$APK"
+            "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
+            "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
+            sha256sum "$APK"
+          done
+          sha256sum artifact/*.apk > artifact/SHA256.txt
+          stat -c '%n %s' artifact/*.apk > artifact/SIZE_BYTES.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
-      - name: Upload APK
+      - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-NATIVE-TV-STABILITY-PREMIUM-V3
+          name: TV-FULL-PRO-NATIVE-TV-V6-CLEAN-FINAL
           path: artifact/
           retention-days: 30
