@@ -22,7 +22,7 @@ data class RemoteService(
     val expiresAt: String = ""
 )
 
-enum class RemoteConfigState { READY, UNASSIGNED, DISABLED, INVALID, ERROR }
+enum class RemoteConfigState { READY, UNASSIGNED, PAYMENT_DUE, DISABLED, INVALID, ERROR }
 
 data class RemoteConfigResult(
     val state: RemoteConfigState,
@@ -56,6 +56,9 @@ object RemotePrefs {
             .putBoolean("remote_enabled", true)
             .apply()
     }
+
+    fun selectedServiceId(context: Context): String =
+        context.getSharedPreferences(FILE, Context.MODE_PRIVATE).getString("service_id", "").orEmpty()
 
     fun saveServices(context: Context, services: List<RemoteService>) {
         val arr = JSONArray()
@@ -185,12 +188,26 @@ object RemoteProvisioningClient {
             when (status) {
                 200 -> parseConfig(text)
                 401 -> RemoteConfigResult(RemoteConfigState.INVALID, message = "Credenciales del dispositivo inválidas")
-                403 -> RemoteConfigResult(RemoteConfigState.DISABLED, message = "Dispositivo deshabilitado desde el panel")
+                403 -> parseForbidden(text)
                 else -> RemoteConfigResult(RemoteConfigState.ERROR, message = "Panel HTTP $status")
             }
         } catch (e: Exception) {
             RemoteConfigResult(RemoteConfigState.ERROR, message = e.message ?: "Error de conexión")
         }
+    }
+
+    private fun parseForbidden(text: String): RemoteConfigResult {
+        val json = runCatching { JSONObject(text) }.getOrNull()
+        if (json?.optString("error")?.equals("payment_due", ignoreCase = true) == true) {
+            val message = json.optString("message").trim().ifBlank {
+                "El servicio está suspendido por falta de pago."
+            }
+            return RemoteConfigResult(RemoteConfigState.PAYMENT_DUE, message = message)
+        }
+        val message = json?.optString("message")?.trim().orEmpty().ifBlank {
+            "Este dispositivo está deshabilitado desde el panel."
+        }
+        return RemoteConfigResult(RemoteConfigState.DISABLED, message = message)
     }
 
     private fun parseConfig(text: String): RemoteConfigResult {
@@ -207,9 +224,14 @@ object RemoteProvisioningClient {
                 val id = service.optString("id").trim()
                 val name = service.optString("name").trim().ifBlank { "Lista ${i + 1}" }
                 val expires = service.optString("expires_at")
+                val fallbackM3u = firstNonBlank(
+                    service.optString("fallback_m3u"),
+                    service.optString("fallback_m3u_url"),
+                    service.optString("m3u_url")
+                )
 
                 val config = if (type == "m3u") {
-                    val url = service.optString("url").trim()
+                    val url = firstNonBlank(service.optString("url"), service.optString("m3u_url"))
                     if (url.isBlank()) continue
                     SourceConfig(SourceMode.M3U, m3uUrl = url)
                 } else {
@@ -217,7 +239,13 @@ object RemoteProvisioningClient {
                     val username = service.optString("username").trim()
                     val password = service.optString("password")
                     if (server.isBlank() || username.isBlank() || password.isBlank()) continue
-                    SourceConfig(SourceMode.XTREAM, server = server, username = username, password = password)
+                    SourceConfig(
+                        SourceMode.XTREAM,
+                        server = server,
+                        username = username,
+                        password = password,
+                        fallbackM3uUrl = fallbackM3u
+                    )
                 }
                 add(RemoteService(id = id, name = name, config = config, expiresAt = expires))
             }
@@ -228,6 +256,9 @@ object RemoteProvisioningClient {
         }
         return RemoteConfigResult(RemoteConfigState.READY, services = parsed)
     }
+
+    private fun firstNonBlank(vararg values: String): String =
+        values.firstOrNull { it.isNotBlank() }?.trim().orEmpty()
 
     private fun readResponse(conn: HttpURLConnection): String {
         val stream = if (conn.responseCode in 200..299) conn.inputStream else conn.errorStream
