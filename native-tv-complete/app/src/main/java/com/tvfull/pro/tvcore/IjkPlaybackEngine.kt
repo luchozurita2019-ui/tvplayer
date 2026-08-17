@@ -109,7 +109,9 @@ class IjkPlaybackEngine {
 
     private fun configure(p: IjkMediaPlayer, mode: DecoderMode) {
         val hardware = mode == DecoderMode.HARDWARE
-        val bufferBytes = if (currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO) {
+        val liveLike = currentSection == ContentSection.LIVE || currentSection == ContentSection.RADIO
+        val reconnect = currentPolicy.reconnectEnabled
+        val bufferBytes = if (liveLike) {
             currentPolicy.liveBufferBytes
         } else {
             currentPolicy.vodBufferBytes
@@ -123,12 +125,19 @@ class IjkPlaybackEngine {
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-buffer-size", bufferBytes)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", currentPolicy.frameDrop.toLong())
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 1L)
-        p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "reconnect", if (currentPolicy.reconnectEnabled) 1L else 0L)
+
+        // FFmpeg HTTP reconnect options belong to the FORMAT layer. For Live/Radio,
+        // EOF is treated as a recoverable provider-side stream boundary and the
+        // same URL is reopened internally. For VOD, a real EOF must remain final.
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect", if (reconnect) 1L else 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_streamed", if (reconnect && liveLike) 1L else 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_at_eof", if (reconnect && liveLike) 1L else 0L)
+        p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect_delay_max", 5L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "http-detect-range-support", 0L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "user_agent", "TV FULL PRO")
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "timeout", 15_000_000L)
 
-        if (currentSection != ContentSection.LIVE && currentSection != ContentSection.RADIO) {
+        if (!liveLike) {
             p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "enable-accurate-seek", 1L)
         }
     }
