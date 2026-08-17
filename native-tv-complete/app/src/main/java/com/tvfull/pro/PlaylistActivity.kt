@@ -133,11 +133,13 @@ class PlaylistActivity : AppCompatActivity() {
 
         io.execute {
             val db = TvCatalogDatabase(applicationContext)
+            var resolvedForSession: RemoteService? = null
             val result = runCatching {
                 // A service can arrive from the panel as M3U while actually being an
-                // Xtream get.php URL. Reuse the original resolver so player_api.php
-                // remains authoritative for categories/catalog structure.
+                // Xtream get.php URL. Resolve it before sync so player_api.php stays
+                // authoritative for categories, names and ordering.
                 val resolvedConfig = SourceResolver.resolve(service.config)
+                resolvedForSession = service.copy(config = resolvedConfig)
                 val source = ProvisionedSource(
                     serviceId = service.id,
                     serviceName = service.name,
@@ -155,6 +157,13 @@ class PlaylistActivity : AppCompatActivity() {
             runOnUiThread {
                 recycler.isEnabled = true
                 result.onSuccess { report ->
+                    // Keep the resolved configuration locally for the Activity that is
+                    // about to open. This is essential for get_series_info on services
+                    // provisioned as an Xtream get.php URL under service_type=m3u.
+                    resolvedForSession?.let { resolved ->
+                        services = services.map { if (it.id == resolved.id) resolved else it }
+                        RemotePrefs.saveServices(this, services)
+                    }
                     RemotePrefs.saveService(this, service.id, service.name)
                     status.setTextColor(Color.rgb(117, 221, 154))
                     status.text = "${service.name} · ${report.liveCount} canales · ${report.movieCount} películas · ${report.seriesCount} series"
@@ -222,7 +231,10 @@ class PlaylistActivity : AppCompatActivity() {
         override fun onBindViewHolder(holder: Holder, position: Int) {
             val service = data[position]
             holder.title.text = service.name
-            holder.type.text = if (service.config.mode == SourceMode.XTREAM || SourceResolver.looksLikeXtreamUrl(service.config.m3uUrl)) "XTREAM" else "M3U"
+            holder.type.text = if (
+                service.config.mode == SourceMode.XTREAM ||
+                SourceResolver.looksLikeXtreamUrl(service.config.m3uUrl)
+            ) "XTREAM" else "M3U"
             holder.root.setOnClickListener { select(service) }
             holder.root.setOnFocusChangeListener { v, focused ->
                 v.background = rounded(
