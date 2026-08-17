@@ -24,28 +24,51 @@ class CatalogSyncEngine(
     }
 
     fun syncSeriesEpisodes(source: ProvisionedSource, series: CatalogItem): List<CatalogItem> {
-        if (source.config.mode != SourceMode.XTREAM || series.seriesId.isBlank()) {
-            return database.seriesEpisodes(source.serviceId, series.seriesId)
+        val cached = database.seriesEpisodes(source.serviceId, series.seriesId)
+        if (cached.isNotEmpty()) return cached
+
+        if (
+            source.config.mode != SourceMode.XTREAM ||
+            series.seriesId.isBlank() ||
+            series.itemId.startsWith("m3u-series:")
+        ) {
+            return emptyList()
         }
 
         val session = xtream.authenticate(source.config)
         val info = xtream.objectResponse(session, "get_series_info", mapOf("series_id" to series.seriesId))
         val episodes = parseSeriesEpisodes(source, session, series, info)
         if (episodes.isNotEmpty()) {
-            val current = database.items(source.serviceId, ContentSection.SERIES)
+            val current = database.allSeriesRows(source.serviceId)
                 .filterNot { it.seriesId == series.seriesId && it.seasonNumber != null }
-            database.replaceSection(source.serviceId, ContentSection.SERIES, database.categories(source.serviceId, ContentSection.SERIES), current + episodes)
+            database.replaceSection(
+                source.serviceId,
+                ContentSection.SERIES,
+                database.categories(source.serviceId, ContentSection.SERIES),
+                current + episodes
+            )
             return episodes
         }
 
         val fallbackUrl = source.config.fallbackM3uUrl
         if (fallbackUrl.isNotBlank()) {
             val fallback = m3u.downloadAndParse(source.serviceId, fallbackUrl)
-            val key = series.name.lowercase().replace(Regex("[^a-z0-9áéíóúñ]+"), "-").trim('-')
+            val normalizedName = normalizeSeriesKey(series.name)
             val fallbackEpisodes = fallback.items[ContentSection.SERIES].orEmpty().filter {
-                it.seriesId == key || it.name.contains(series.name, ignoreCase = true)
+                it.seriesId == normalizedName || seriesParentName(it.name).equals(series.name, ignoreCase = true)
             }
-            if (fallbackEpisodes.isNotEmpty()) return fallbackEpisodes
+            if (fallbackEpisodes.isNotEmpty()) {
+                val current = database.allSeriesRows(source.serviceId)
+                    .filterNot { it.seriesId == series.seriesId && it.seasonNumber != null }
+                val remapped = fallbackEpisodes.map { it.copy(seriesId = series.seriesId, categoryId = series.categoryId) }
+                database.replaceSection(
+                    source.serviceId,
+                    ContentSection.SERIES,
+                    database.categories(source.serviceId, ContentSection.SERIES),
+                    current + remapped
+                )
+                return remapped
+            }
         }
         return emptyList()
     }
@@ -54,7 +77,8 @@ class CatalogSyncEngine(
         val url = source.config.m3uUrl.ifBlank { source.config.fallbackM3uUrl }
         val parsed = m3u.downloadAndParse(source.serviceId, url)
         database.upsertSource(source)
-        ContentSection.entries.forEach { section ->
+
+        listOf(ContentSection.LIVE, ContentSection.MOVIES, ContentSection.RADIO).forEach { section ->
             database.replaceSection(
                 source.serviceId,
                 section,
@@ -62,12 +86,22 @@ class CatalogSyncEngine(
                 parsed.items[section].orEmpty()
             )
         }
+
+        val seriesEpisodes = parsed.items[ContentSection.SERIES].orEmpty()
+        val seriesParents = m3uSeriesParents(source.serviceId, seriesEpisodes)
+        database.replaceSection(
+            source.serviceId,
+            ContentSection.SERIES,
+            parsed.categories[ContentSection.SERIES].orEmpty(),
+            seriesParents + seriesEpisodes
+        )
+
         val report = SyncReport(
             sourceId = source.serviceId,
             liveCount = parsed.items[ContentSection.LIVE].orEmpty().size,
             movieCount = parsed.items[ContentSection.MOVIES].orEmpty().size,
-            seriesCount = parsed.items[ContentSection.SERIES].orEmpty().map { it.seriesId.ifBlank { it.categoryId } }.distinct().size,
-            episodeCount = parsed.items[ContentSection.SERIES].orEmpty().size
+            seriesCount = seriesParents.size,
+            episodeCount = seriesEpisodes.size
         )
         database.saveSyncReport(report)
         return report
@@ -91,7 +125,12 @@ class CatalogSyncEngine(
             fallback,
             session
         )
-        database.replaceSection(source.serviceId, ContentSection.LIVE, mergeCategories(liveCategories, fallback?.categories?.get(ContentSection.LIVE).orEmpty()), live)
+        database.replaceSection(
+            source.serviceId,
+            ContentSection.LIVE,
+            mergeCategories(liveCategories, fallback?.categories?.get(ContentSection.LIVE).orEmpty()),
+            live
+        )
 
         val movieCategories = categories(source.serviceId, ContentSection.MOVIES, safeArray(session, "get_vod_categories", warnings))
         val movies = streamItems(
@@ -101,33 +140,49 @@ class CatalogSyncEngine(
             fallback,
             session
         )
-        database.replaceSection(source.serviceId, ContentSection.MOVIES, mergeCategories(movieCategories, fallback?.categories?.get(ContentSection.MOVIES).orEmpty()), movies)
+        database.replaceSection(
+            source.serviceId,
+            ContentSection.MOVIES,
+            mergeCategories(movieCategories, fallback?.categories?.get(ContentSection.MOVIES).orEmpty()),
+            movies
+        )
 
         val seriesCategories = categories(source.serviceId, ContentSection.SERIES, safeArray(session, "get_series_categories", warnings))
-        val series = seriesItems(source.serviceId, safeArray(session, "get_series", warnings))
-        val fallbackSeries = fallback?.items?.get(ContentSection.SERIES).orEmpty()
-        val mergedSeries = if (series.isNotEmpty()) series + fallbackSeries.filter { fallbackItem ->
-            series.none { native -> native.name.equals(fallbackItem.name, ignoreCase = true) }
-        } else fallbackSeries
+        val nativeSeries = seriesItems(source.serviceId, safeArray(session, "get_series", warnings))
+        val fallbackEpisodes = fallback?.items?.get(ContentSection.SERIES).orEmpty()
+        val fallbackParents = m3uSeriesParents(source.serviceId, fallbackEpisodes)
+        val mergedParents = ArrayList<CatalogItem>().apply {
+            addAll(nativeSeries)
+            fallbackParents.forEach { fallbackParent ->
+                if (none { native -> native.name.equals(fallbackParent.name, ignoreCase = true) }) {
+                    add(fallbackParent.copy(sortOrder = size))
+                }
+            }
+        }
         database.replaceSection(
             source.serviceId,
             ContentSection.SERIES,
             mergeCategories(seriesCategories, fallback?.categories?.get(ContentSection.SERIES).orEmpty()),
-            mergedSeries
+            mergedParents + fallbackEpisodes
         )
 
         val radioCategories = categories(source.serviceId, ContentSection.RADIO, safeArray(session, "get_live_categories", warnings))
         val radioFallback = fallback?.items?.get(ContentSection.RADIO).orEmpty()
         if (radioFallback.isNotEmpty()) {
-            database.replaceSection(source.serviceId, ContentSection.RADIO, mergeCategories(radioCategories, fallback?.categories?.get(ContentSection.RADIO).orEmpty()), radioFallback)
+            database.replaceSection(
+                source.serviceId,
+                ContentSection.RADIO,
+                mergeCategories(radioCategories, fallback?.categories?.get(ContentSection.RADIO).orEmpty()),
+                radioFallback
+            )
         }
 
         val report = SyncReport(
             sourceId = source.serviceId,
             liveCount = live.size,
             movieCount = movies.size,
-            seriesCount = mergedSeries.count { it.seasonNumber == null },
-            episodeCount = mergedSeries.count { it.seasonNumber != null },
+            seriesCount = mergedParents.size,
+            episodeCount = fallbackEpisodes.size,
             warnings = warnings,
             finalServer = session.server
         )
@@ -157,7 +212,11 @@ class CatalogSyncEngine(
         if (fallback.isEmpty()) return primary
         val out = ArrayList<CatalogCategory>()
         out += primary
-        fallback.forEach { f -> if (out.none { it.categoryId == f.categoryId || it.name.equals(f.name, true) }) out += f.copy(sortOrder = out.size) }
+        fallback.forEach { f ->
+            if (out.none { it.categoryId == f.categoryId || it.name.equals(f.name, true) }) {
+                out += f.copy(sortOrder = out.size)
+            }
+        }
         return out
     }
 
@@ -221,6 +280,30 @@ class CatalogSyncEngine(
         return out
     }
 
+    private fun m3uSeriesParents(sourceId: String, episodes: List<CatalogItem>): List<CatalogItem> {
+        if (episodes.isEmpty()) return emptyList()
+        val groups = LinkedHashMap<String, MutableList<CatalogItem>>()
+        episodes.forEach { episode ->
+            val key = episode.seriesId.ifBlank { normalizeSeriesKey(seriesParentName(episode.name)) }
+            groups.getOrPut(key) { ArrayList() }.add(episode)
+        }
+
+        return groups.entries.mapIndexed { index, (seriesId, rows) ->
+            val first = rows.minByOrNull { it.sortOrder } ?: rows.first()
+            CatalogItem(
+                sourceId = sourceId,
+                section = ContentSection.SERIES,
+                itemId = "m3u-series:$seriesId",
+                categoryId = first.categoryId,
+                name = seriesParentName(first.name),
+                logo = first.logo,
+                seriesId = seriesId,
+                metadataJson = "{\"origin\":\"m3u\",\"episodes\":${rows.size}}",
+                sortOrder = index
+            )
+        }
+    }
+
     private fun parseSeriesEpisodes(source: ProvisionedSource, session: XtreamSession, series: CatalogItem, info: JSONObject): List<CatalogItem> {
         val raw = info.opt("episodes")
         val out = ArrayList<CatalogItem>()
@@ -265,8 +348,28 @@ class CatalogSyncEngine(
         return out
     }
 
+    private fun seriesParentName(name: String): String {
+        val withoutSeasonEpisode = name
+            .replace(SERIES_MARKER, " ")
+            .replace(X_MARKER, " ")
+            .replace(Regex("\\s{2,}"), " ")
+            .trim(' ', '-', '.', ':', '_')
+        return withoutSeasonEpisode.ifBlank { name }
+    }
+
+    private fun normalizeSeriesKey(value: String): String = value
+        .trim()
+        .lowercase()
+        .replace(Regex("[^a-z0-9áéíóúñ]+"), "-")
+        .trim('-')
+
     private fun clean(value: Any?): String? {
         if (value == null || value === JSONObject.NULL) return null
         return value.toString().trim().takeIf { it.isNotBlank() && !it.equals("null", true) }
+    }
+
+    companion object {
+        private val SERIES_MARKER = Regex("(?i)(?:S|T)\\d{1,2}\\s*[ ._-]?(?:E|x)\\d{1,3}")
+        private val X_MARKER = Regex("(?i)\\b\\d{1,2}x\\d{1,3}\\b")
     }
 }
