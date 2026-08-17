@@ -32,6 +32,15 @@ android {
         }
     }
 
+    sourceSets {
+        main {
+            // GitHub Actions materializes the official Bilibili k0.8.8 Java API
+            // and source-built native libraries under these standard folders.
+            java.srcDirs += ['src/main/ijkplayer-java']
+            jniLibs.srcDirs += ['src/main/jniLibs']
+        }
+    }
+
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
@@ -48,14 +57,9 @@ dependencies {
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
 
     // Existing Media3 stays only while the legacy TV UI is being migrated.
-    // The new tvcore playback path uses IJK/FFmpeg exclusively.
+    // The new tvcore playback path uses source-built IJK/FFmpeg exclusively.
     implementation 'androidx.media3:media3-exoplayer:1.8.0'
     implementation 'androidx.media3:media3-exoplayer-hls:1.8.0'
     implementation 'androidx.media3:media3-exoplayer-dash:1.8.0'
     implementation 'androidx.media3:media3-ui:1.8.0'
-
-    // Official Bilibili IJKPlayer k0.8.8 artifacts.
-    implementation 'tv.danmaku.ijk.media:ijkplayer-java:0.8.8'
-    implementation 'tv.danmaku.ijk.media:ijkplayer-armv7a:0.8.8'
-    implementation 'tv.danmaku.ijk.media:ijkplayer-arm64:0.8.8'
 }
