@@ -3,6 +3,8 @@ package com.tvfull.pro.tvcore
 import android.content.Context
 import com.tvfull.pro.RemoteConfigResult
 import com.tvfull.pro.RemoteConfigState
+import com.tvfull.pro.SourceMode
+import com.tvfull.pro.SourceResolver
 
 class TvCoreCoordinator(context: Context) {
     private val appContext = context.applicationContext
@@ -10,7 +12,8 @@ class TvCoreCoordinator(context: Context) {
     val database = TvCatalogDatabase(appContext)
     val playbackResolver = PlaybackSourceResolver()
     val playbackEngine = IjkPlaybackEngine()
-    private val syncEngine = CatalogSyncEngine(database)
+    private val m3uSyncEngine = CatalogSyncEngine(database)
+    private val xtreamSyncEngine = XtreamStrictSyncEngine(database)
 
     data class RefreshResult(
         val remote: RemoteConfigResult,
@@ -19,21 +22,33 @@ class TvCoreCoordinator(context: Context) {
     )
 
     fun refreshFromPanel(): RefreshResult {
-        val (remote, sources) = provisioning.fetch()
+        val (remote, provisioned) = provisioning.fetch()
         if (remote.state != RemoteConfigState.READY) {
-            return RefreshResult(remote, sources, emptyList())
+            return RefreshResult(remote, provisioned, emptyList())
         }
 
-        val reports = sources.mapNotNull { source ->
-            runCatching { syncEngine.sync(source) }.getOrNull()
+        val resolvedSources = provisioned.map { source ->
+            val resolved = SourceResolver.resolve(source.config)
+            source.copy(config = resolved)
         }
-        return RefreshResult(remote, sources, reports)
+
+        val reports = resolvedSources.mapNotNull { source ->
+            runCatching {
+                if (source.config.mode == SourceMode.XTREAM) {
+                    xtreamSyncEngine.sync(source)
+                } else {
+                    m3uSyncEngine.sync(source)
+                }
+            }.getOrNull()
+        }
+        return RefreshResult(remote, resolvedSources, reports)
     }
 
     fun loadSeriesEpisodes(source: ProvisionedSource, series: CatalogItem): List<CatalogItem> {
         val cached = database.seriesEpisodes(source.serviceId, series.seriesId)
         if (cached.isNotEmpty()) return cached
-        return syncEngine.syncSeriesEpisodes(source, series)
+        val resolved = source.copy(config = SourceResolver.resolve(source.config))
+        return m3uSyncEngine.syncSeriesEpisodes(resolved, series)
     }
 
     fun close() {
