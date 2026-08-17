@@ -15,8 +15,8 @@ android {
         applicationId 'com.tvfull.pro'
         minSdk 21
         targetSdk 34
-        versionCode 20
-        versionName '7.0-native-tv-ijk-architecture'
+        versionCode 21
+        versionName '7.1-native-tv-ijk-video-xtream-fix'
     }
 
     signingConfigs {
