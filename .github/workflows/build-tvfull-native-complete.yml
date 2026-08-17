@@ -1,4 +1,4 @@
-name: Build TV FULL Native V6 Clean Final
+name: Build TV FULL Native V6 ARM Universal
 
 on:
   workflow_dispatch:
@@ -45,6 +45,21 @@ jobs:
         run: python3 .github/scripts/apply_native_tv_v6_clean_final.py
       - name: Fix V6 Kotlin compatibility
         run: python3 .github/scripts/fix_native_tv_v6_compile.py
+
+      - name: Prepare universal ARM packaging
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('native-tv-complete/app/build.gradle')
+          s = p.read_text(encoding='utf-8')
+          old = "        if (tvAbi) {\n            ndk { abiFilters tvAbi }\n        }\n"
+          new = "        ndk { abiFilters 'armeabi-v7a', 'arm64-v8a' }\n"
+          if old not in s:
+              raise SystemExit('ABI filter block not found')
+          p.write_text(s.replace(old, new, 1), encoding='utf-8')
+          print('Universal ARM ABI filters enabled: armeabi-v7a + arm64-v8a')
+          PY
 
       - name: Verify V6 architecture and regression guards
         shell: bash
@@ -95,45 +110,35 @@ jobs:
           ! grep -q 'LinearLayout.LayoutParams(dp(680)' "$PROV"
 
           grep -q "org.videolan.android:libvlc-all:3.6.0" "$GRADLE"
+          grep -q "abiFilters 'armeabi-v7a', 'arm64-v8a'" "$GRADLE"
           grep -q "6.0-native-tv-clean-single-engine" "$GRADLE"
 
-      - name: Build ARM64 release APK
+      - name: Build universal ARM release APK
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifact
           cd native-tv-complete
-          gradle --no-daemon --stacktrace clean :app:assembleRelease -PtvAbi=arm64-v8a
-          cp app/build/outputs/apk/release/app-release.apk ../artifact/TV-FULL-PRO-NATIVE-TV-V6-CLEAN-ARM64.apk
+          gradle --no-daemon --stacktrace clean :app:assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk ../artifact/TV-FULL-PRO-NATIVE-TV-V6-ARM-UNIVERSAL.apk
 
-      - name: Build ARM32 release APK
+      - name: Verify install package
         shell: bash
         run: |
           set -euo pipefail
-          cd native-tv-complete
-          gradle --no-daemon --stacktrace clean :app:assembleRelease -PtvAbi=armeabi-v7a
-          cp app/build/outputs/apk/release/app-release.apk ../artifact/TV-FULL-PRO-NATIVE-TV-V6-CLEAN-ARM32.apk
-
-      - name: Verify APKs
-        shell: bash
-        run: |
-          set -euo pipefail
+          APK='artifact/TV-FULL-PRO-NATIVE-TV-V6-ARM-UNIVERSAL.apk'
           TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
-          for APK in artifact/*.apk; do
-            test -f "$APK"
-            echo "==== $APK ===="
-            ls -lh "$APK"
-            "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | head -25
-            "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
-            sha256sum "$APK"
-          done
-          sha256sum artifact/*.apk > artifact/SHA256.txt
-          stat -c '%n %s' artifact/*.apk > artifact/SIZE_BYTES.txt
+          test -f "$APK"
+          "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | grep -E "^(package:|sdkVersion:|targetSdkVersion:|native-code:)"
+          "$ANDROID_HOME/build-tools/$TOOLS/aapt" dump badging "$APK" | grep -q "native-code:.*'armeabi-v7a'.*'arm64-v8a'\|native-code:.*'arm64-v8a'.*'armeabi-v7a'"
+          "$ANDROID_HOME/build-tools/$TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          sha256sum "$APK" > artifact/SHA256.txt
+          stat -c '%n %s' "$APK" > artifact/SIZE_BYTES.txt
           git rev-parse HEAD > artifact/COMMIT.txt
 
-      - name: Upload APKs
+      - name: Upload universal ARM APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-NATIVE-TV-V6-CLEAN-FINAL
+          name: TV-FULL-PRO-NATIVE-TV-V6-ARM-UNIVERSAL
           path: artifact/
           retention-days: 30
