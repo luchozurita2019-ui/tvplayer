@@ -12,15 +12,10 @@ import tv.danmaku.ijk.media.player.ISurfaceTextureHolder
 /**
  * IJK/FFmpeg playback core for Android TV.
  *
- * The Surface lifecycle intentionally follows the upstream IJK VideoView model:
- * - bind the player to an existing Surface before prepare;
- * - apply the decoded video size to SurfaceHolder.setFixedSize();
- * - for SurfaceView, wait for surfaceChanged() to confirm the fixed buffer size
- *   before starting playback;
- * - detach the display on surface destruction without destroying the player.
- *
- * This avoids the classic IJK symptom where audio starts while the video sink is
- * not ready and the TV remains black.
+ * Surface handling follows the proven IJK VideoView/Smarters pattern:
+ * bind before prepare, set the native Surface buffer to the decoded video size,
+ * wait for surfaceChanged() to confirm that size, and detach (not destroy) the
+ * media player when the Surface temporarily disappears.
  */
 class IjkPlaybackEngine {
     interface Listener {
@@ -29,7 +24,7 @@ class IjkPlaybackEngine {
         fun onAudioStarted() {}
         fun onPlaying() {}
         fun onBuffering(started: Boolean, percent: Int) {}
-        fun onVideoSize(width: Int, height: Int, sarNum: Int, sarDen: Int) {}
+        fun onVideoSize(width: Int, height: Int) {}
         fun onDecoderFallback(from: DecoderMode, to: DecoderMode, reason: String) {}
         fun onCompleted() {}
         fun onError(code: Int, extra: Int, message: String) {}
@@ -38,6 +33,7 @@ class IjkPlaybackEngine {
     private val mainHandler = Handler(Looper.getMainLooper())
     private var player: IjkMediaPlayer? = null
     private var holder: SurfaceHolder? = null
+    private var registeredHolder: SurfaceHolder? = null
     private var listener: Listener? = null
 
     private var currentUrl = ""
@@ -63,6 +59,34 @@ class IjkPlaybackEngine {
     private var fixedHeight = 0
     private var playbackGeneration = 0L
     private var blackVideoWatchdog: Runnable? = null
+
+    private val internalSurfaceCallback = object : SurfaceHolder.Callback {
+        override fun surfaceCreated(surfaceHolder: SurfaceHolder) {
+            holder = surfaceHolder
+            val frame = surfaceHolder.surfaceFrame
+            surfaceWidth = frame.width().coerceAtLeast(0)
+            surfaceHeight = frame.height().coerceAtLeast(0)
+            player?.let { bindDisplay(it, surfaceHolder) }
+            maybeStart()
+        }
+
+        override fun surfaceChanged(surfaceHolder: SurfaceHolder, format: Int, width: Int, height: Int) {
+            holder = surfaceHolder
+            surfaceWidth = width.coerceAtLeast(0)
+            surfaceHeight = height.coerceAtLeast(0)
+            player?.let { bindDisplay(it, surfaceHolder) }
+            maybeStart()
+        }
+
+        override fun surfaceDestroyed(surfaceHolder: SurfaceHolder) {
+            if (holder === surfaceHolder) {
+                player?.let { bindDisplay(it, null) }
+                holder = null
+                surfaceWidth = 0
+                surfaceHeight = 0
+            }
+        }
+    }
 
     fun open(
         url: String,
@@ -95,8 +119,8 @@ class IjkPlaybackEngine {
         startInternal(firstMode)
     }
 
-    /** Rebind an existing player after a SurfaceView recreation. */
     fun attachSurface(surfaceHolder: SurfaceHolder) {
+        registerSurfaceCallback(surfaceHolder)
         holder = surfaceHolder
         val frame = surfaceHolder.surfaceFrame
         surfaceWidth = frame.width().coerceAtLeast(0)
@@ -105,7 +129,7 @@ class IjkPlaybackEngine {
         maybeStart()
     }
 
-    /** Called from SurfaceHolder.Callback.surfaceChanged(). */
+    /** Optional explicit bridge for a host that forwards Surface callbacks. */
     fun surfaceChanged(surfaceHolder: SurfaceHolder, width: Int, height: Int) {
         holder = surfaceHolder
         surfaceWidth = width.coerceAtLeast(0)
@@ -114,10 +138,6 @@ class IjkPlaybackEngine {
         maybeStart()
     }
 
-    /**
-     * A destroyed Surface is not a media error. Detach only the video sink so a
-     * transient resize/fullscreen/lifecycle change cannot kill a healthy stream.
-     */
     fun detachSurface(surfaceHolder: SurfaceHolder? = null) {
         if (surfaceHolder != null && holder != null && surfaceHolder !== holder) return
         player?.let { bindDisplay(it, null) }
@@ -151,6 +171,15 @@ class IjkPlaybackEngine {
     }
 
     fun stop() {
+        // The host Activity also receives Surface callbacks. If it calls stop()
+        // while Android is tearing down only the Surface, preserve the media player
+        // just like IJK's reference VideoView does and wait for surfaceCreated().
+        val currentHolder = holder
+        if (currentHolder != null && !currentHolder.surface.isValid) {
+            detachSurface(currentHolder)
+            return
+        }
+
         resumePositionMs = if (isLiveLike()) 0L else currentPosition()
         targetPlaying = false
         playbackGeneration++
@@ -164,9 +193,18 @@ class IjkPlaybackEngine {
         playbackGeneration++
         cancelBlackVideoWatchdog()
         releasePlayer()
+        registeredHolder?.removeCallback(internalSurfaceCallback)
+        registeredHolder = null
         holder = null
         listener = null
         currentUrl = ""
+    }
+
+    private fun registerSurfaceCallback(surfaceHolder: SurfaceHolder) {
+        if (registeredHolder === surfaceHolder) return
+        registeredHolder?.removeCallback(internalSurfaceCallback)
+        registeredHolder = surfaceHolder
+        surfaceHolder.addCallback(internalSurfaceCallback)
     }
 
     private fun startInternal(mode: DecoderMode) {
@@ -220,15 +258,13 @@ class IjkPlaybackEngine {
         )
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "opensles", 0L)
 
-        // Keep IJK's pixel-format selection on Auto. Forcing RGB32 globally is
-        // unnecessary for MediaCodec and makes software decoding more expensive.
+        // Match IJK's default "Auto Select" pixel output instead of globally
+        // forcing RGB32. This is safer for MediaCodec and cheaper for FFmpeg.
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "packet-buffering", 1L)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "max-buffer-size", bufferBytes)
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "framedrop", currentPolicy.frameDrop.toLong())
 
-        // Playback start is controlled by the Surface lifecycle below. This is
-        // intentionally disabled to avoid starting audio before the Surface buffer
-        // has been resized for the decoded video.
+        // start() is deliberately controlled by Surface readiness below.
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_PLAYER, "start-on-prepared", 0L)
 
         p.setOption(IjkMediaPlayer.OPT_CATEGORY_FORMAT, "reconnect", if (reconnect) 1L else 0L)
@@ -273,7 +309,7 @@ class IjkPlaybackEngine {
             maybeStart()
         })
 
-        p.setOnInfoListener(IMediaPlayer.OnInfoListener { _, what, extra ->
+        p.setOnInfoListener(IMediaPlayer.OnInfoListener { _, what, _ ->
             if (generation != playbackGeneration) return@OnInfoListener false
             when (what) {
                 IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START -> {
@@ -293,19 +329,22 @@ class IjkPlaybackEngine {
                 }
 
                 IMediaPlayer.MEDIA_INFO_BUFFERING_START -> listener?.onBuffering(true, 0)
-                IMediaPlayer.MEDIA_INFO_BUFFERING_END -> listener?.onBuffering(false, 100)
-                IMediaPlayer.MEDIA_INFO_VIDEO_ROTATION_CHANGED -> {
-                    // SurfaceView itself cannot rotate. MediaCodec auto-rotate is
-                    // enabled above, matching the reference player's hardware path.
-                    @Suppress("UNUSED_VARIABLE") val rotation = extra
+                IMediaPlayer.MEDIA_INFO_BUFFERING_END -> {
+                    if (currentSection == ContentSection.RADIO || videoRenderingStarted) {
+                        listener?.onBuffering(false, 100)
+                    }
                 }
             }
             false
         })
 
         p.setOnBufferingUpdateListener(IMediaPlayer.OnBufferingUpdateListener { _, percent ->
-            if (generation == playbackGeneration) {
-                listener?.onBuffering(percent < 100, percent.coerceIn(0, 100))
+            if (generation != playbackGeneration) return@OnBufferingUpdateListener
+            val safePercent = percent.coerceIn(0, 100)
+            if (safePercent < 100) {
+                listener?.onBuffering(true, safePercent)
+            } else if (currentSection == ContentSection.RADIO || videoRenderingStarted) {
+                listener?.onBuffering(false, 100)
             }
         })
 
@@ -349,13 +388,9 @@ class IjkPlaybackEngine {
             fixedHeight = height
             runCatching { currentHolder.setFixedSize(width, height) }
         }
-        listener?.onVideoSize(width, height, videoSarNum, videoSarDen)
+        listener?.onVideoSize(width, height)
     }
 
-    /**
-     * SurfaceView uses a dedicated buffer size. IJK's reference VideoView waits
-     * for surfaceChanged() to confirm that buffer size before start().
-     */
     private fun maybeStart() {
         if (released || !prepared || !targetPlaying) return
         val p = player ?: return
@@ -409,9 +444,9 @@ class IjkPlaybackEngine {
     private fun handleError(code: Int, extra: Int, message: String) {
         cancelBlackVideoWatchdog()
 
-        // IJK commonly reports MEDIA_ERROR_UNKNOWN (1) in `what` and the useful
-        // network/format reason in `extra`. Classify the effective error instead of
-        // treating every what=1 as a decoder failure.
+        // In IJK, what can be MEDIA_ERROR_UNKNOWN while extra carries the useful
+        // IO/timeout/format reason. Never turn a network failure into a decoder
+        // switch just because what == 1.
         val effective = when (extra) {
             IMediaPlayer.MEDIA_ERROR_IO,
             IMediaPlayer.MEDIA_ERROR_MALFORMED,
