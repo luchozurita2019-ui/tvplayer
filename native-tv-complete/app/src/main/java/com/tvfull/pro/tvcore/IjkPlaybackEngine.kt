@@ -160,17 +160,19 @@ class IjkPlaybackEngine {
     }
 
     private fun installListeners(p: IjkMediaPlayer, generation: Long) {
-        p.setOnPreparedListener(IMediaPlayer.OnPreparedListener { media ->
+        val media: IMediaPlayer = p
+
+        media.setOnPreparedListener(IMediaPlayer.OnPreparedListener { prepared ->
             if (generation != playbackGeneration) return@OnPreparedListener
             val seek = resumePositionMs
             if (seek > 0L && currentSection != ContentSection.LIVE && currentSection != ContentSection.RADIO) {
-                runCatching { media.seekTo(seek) }
+                runCatching { prepared.seekTo(seek) }
             }
-            listener?.onPrepared(media.duration.coerceAtLeast(0L))
-            runCatching { media.start() }
+            listener?.onPrepared(prepared.duration.coerceAtLeast(0L))
+            runCatching { prepared.start() }
         })
 
-        p.setOnInfoListener(IMediaPlayer.OnInfoListener { _, what, _ ->
+        media.setOnInfoListener(IMediaPlayer.OnInfoListener { _, what, _ ->
             if (generation != playbackGeneration) return@OnInfoListener false
             when (what) {
                 IMediaPlayer.MEDIA_INFO_VIDEO_RENDERING_START -> {
@@ -192,11 +194,11 @@ class IjkPlaybackEngine {
             false
         })
 
-        p.setOnBufferingUpdateListener(IMediaPlayer.OnBufferingUpdateListener { _, percent ->
+        media.setOnBufferingUpdateListener(IMediaPlayer.OnBufferingUpdateListener { _, percent ->
             if (generation == playbackGeneration) listener?.onBuffering(percent < 100, percent.coerceIn(0, 100))
         })
 
-        p.setOnVideoSizeChangedListener(IMediaPlayer.OnVideoSizeChangedListener { _, width, height, _, _ ->
+        media.setOnVideoSizeChangedListener(IMediaPlayer.OnVideoSizeChangedListener { _, width, height, _, _ ->
             if (generation != playbackGeneration) return@OnVideoSizeChangedListener
             if (width > 0 && height > 0) {
                 runCatching { holder?.setFixedSize(width, height) }
@@ -205,11 +207,11 @@ class IjkPlaybackEngine {
             }
         })
 
-        p.setOnCompletionListener(IMediaPlayer.OnCompletionListener {
+        media.setOnCompletionListener(IMediaPlayer.OnCompletionListener {
             if (generation == playbackGeneration) listener?.onCompleted()
         })
 
-        p.setOnErrorListener(IMediaPlayer.OnErrorListener { _, what, extra ->
+        media.setOnErrorListener(IMediaPlayer.OnErrorListener { _, what, extra ->
             if (generation == playbackGeneration) handleError(what, extra, "IJK error $what/$extra")
             true
         })
@@ -275,9 +277,6 @@ class IjkPlaybackEngine {
     }
 
     companion object {
-        // Values copied from the official IJKPlayer k0.8.8 IMediaPlayer API.
-        // Local constants avoid Kotlin/Javac symbol-resolution differences while
-        // keeping the exact upstream native event/error values.
         private const val IJK_MEDIA_INFO_AUDIO_RENDERING_START = 10002
         private const val IJK_MEDIA_ERROR_SERVER_DIED = 100
         private const val IJK_MEDIA_ERROR_IO = -1004
