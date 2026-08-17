@@ -13,6 +13,7 @@ on:
       - '.github/scripts/apply_native_tv_stability_v4.py'
       - '.github/scripts/fix_native_tv_stability_v4_strings.py'
       - '.github/scripts/apply_native_tv_provisioning_safe_v41.py'
+      - '.github/scripts/fix_native_tv_provisioning_v41_strings.py'
       - '.github/workflows/build-tvfull-native-complete.yml'
 
 permissions:
@@ -54,6 +55,9 @@ jobs:
       - name: Apply V4.1 safe provisioning screen
         run: python3 .github/scripts/apply_native_tv_provisioning_safe_v41.py
 
+      - name: Fix V4.1 provisioning string escaping
+        run: python3 .github/scripts/fix_native_tv_provisioning_v41_strings.py
+
       - name: Verify V4.1 markers and preserved features
         shell: bash
         run: |
@@ -85,11 +89,12 @@ jobs:
           grep -q 'DefaultBandwidthMeter' "$TV"
           grep -q 'buffer=.*red≈' "$TV"
 
-          # V4.1: safe activation screen. No dynamic ScrollView/screen-width layout.
+          # V4.1 safe activation screen.
           grep -q 'setPadding(dp(36), dp(18), dp(36), dp(18))' "$PROV"
           grep -q 'TV FULL PRO' "$PROV"
           grep -q 'GENERANDO CÓDIGO' "$PROV"
           grep -q 'ViewGroup.LayoutParams.MATCH_PARENT' "$PROV"
+          grep -Fq 'TV FULL.\nLas listas' "$PROV"
           ! grep -q 'screenWidthDp' "$PROV"
           ! grep -q 'isFillViewport' "$PROV"
           grep -q "4.1-native-tv-stability-safe-provisioning" native-tv-complete/app/build.gradle
