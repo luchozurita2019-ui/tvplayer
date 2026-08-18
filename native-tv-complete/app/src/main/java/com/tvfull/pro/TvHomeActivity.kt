@@ -50,12 +50,14 @@ import java.util.concurrent.Executors
 @UnstableApi
 class TvHomeActivity : AppCompatActivity() {
     companion object {
-        private const val LIVE_START_TIMEOUT = 12_000L
+        // A dead live stream must fail quickly instead of entering the old 30-40s
+        // compatibility/reconnect loop. Established channels still get recovery.
+        private const val LIVE_START_TIMEOUT = 6_000L
         private const val LIVE_STALL_NOTICE = 1_500L
-        private const val LIVE_STALL_REOPEN = 45_000L
+        private const val LIVE_STALL_REOPEN = 15_000L
         private const val HUD_HIDE = 4_000L
         private const val SEEK_STEP = 10_000L
-        private const val MAX_RECONNECTS = 4
+        private const val MAX_RECONNECTS = 2
 
         private val BG = Color.rgb(6, 10, 18)
         private val TOP = Color.rgb(10, 16, 27)
@@ -813,10 +815,9 @@ class TvHomeActivity : AppCompatActivity() {
     }
 
     private fun initPlayer() {
-        // Importante v1.6: no fijamos 16/28 MB. Media3 calcula el target de
-        // memoria según las pistas, igual que corresponde para video pesado.
+        // Faster startup without sacrificing the larger steady-state buffer.
         val loadControl = DefaultLoadControl.Builder()
-            .setBufferDurationsMs(5_000, 15_000, 2_500, 1_000)
+            .setBufferDurationsMs(3_000, 15_000, 1_200, 1_800)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
 
@@ -827,8 +828,8 @@ class TvHomeActivity : AppCompatActivity() {
         val dataSource = DefaultHttpDataSource.Factory()
             .setUserAgent("Mozilla/5.0 (Linux; Android TV) AppleWebKit/537.36 Chrome/120 Safari/537.36")
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(8_000)
-            .setReadTimeoutMs(30_000)
+            .setConnectTimeoutMs(5_000)
+            .setReadTimeoutMs(15_000)
 
         val p = ExoPlayer.Builder(this, renderers)
             .setLoadControl(loadControl)
@@ -875,8 +876,15 @@ class TvHomeActivity : AppCompatActivity() {
                 diagnostics.error = "${PlaybackException.getErrorCodeName(error.errorCode)} ${error.message.orEmpty()}".trim()
                 if (isLiveLike()) {
                     val status = httpStatus(error)
-                    if (status == 401 || status == 403 || status == 404 || status == 410) markUnavailable("HTTP $status")
-                    else scheduleReconnect("Error de señal")
+                    // Initial failures are definitive. Do not run the compatibility
+                    // reconnect loop that previously made a dead channel take 30-40s.
+                    if (waitingFirstFrame) {
+                        markUnavailable(status?.let { "HTTP $it" } ?: "Canal sin señal")
+                    } else if (status == 401 || status == 403 || status == 404 || status == 410) {
+                        markUnavailable("HTTP $status")
+                    } else {
+                        scheduleReconnect("Error de señal")
+                    }
                 } else {
                     waitingFirstFrame = false
                     showLoading("No se pudo reproducir")
@@ -911,8 +919,11 @@ class TvHomeActivity : AppCompatActivity() {
 
         handler.postDelayed({
             if (token == startupToken && waitingFirstFrame && lastPlayed?.url == item.url) {
-                if (isLiveLike()) scheduleReconnect("Inicio sin señal")
-                else {
+                if (isLiveLike()) {
+                    // Fail once and immediately. Reconnects are reserved for a stream
+                    // that was already playing and later stalled.
+                    markUnavailable("Inicio sin señal")
+                } else {
                     p.stop()
                     waitingFirstFrame = false
                     showLoading("No se pudo iniciar")
@@ -963,9 +974,7 @@ class TvHomeActivity : AppCompatActivity() {
         val token = reconnectToken
         val delay = when (reconnectAttempts) {
             1 -> 700L
-            2 -> 1_500L
-            3 -> 3_000L
-            else -> 5_000L
+            else -> 1_500L
         }
         showLoading("Reconectando…")
         infoTitle.text = item.name
@@ -976,6 +985,8 @@ class TvHomeActivity : AppCompatActivity() {
     }
 
     private fun markUnavailable(reason: String) {
+        startupToken++
+        reconnectToken++
         waitingFirstFrame = false
         cancelStallWatch()
         player?.stop()
