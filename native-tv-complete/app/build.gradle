@@ -15,8 +15,8 @@ android {
         applicationId 'com.tvfull.pro'
         minSdk 21
         targetSdk 34
-        versionCode 23
-        versionName '7.2-stable-ui-fast-fail'
+        versionCode 24
+        versionName '7.2.1-stable-ui-compact-hud'
     }
 
     signingConfigs {
