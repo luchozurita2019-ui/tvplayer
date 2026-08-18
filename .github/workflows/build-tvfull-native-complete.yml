@@ -47,7 +47,7 @@ jobs:
           test -f "$CORE/TvCoreCoordinator.kt"
           grep -q 'IjkMediaPlayer' "$CORE/IjkPlaybackEngine.kt"
           grep -q 'max-buffer-size' "$CORE/IjkPlaybackEngine.kt"
-          grep -q 'Audio activo pero MediaCodec no renderizó video' "$CORE/IjkPlaybackEngine.kt"
+          grep -q 'fallbackToSoftware' "$CORE/IjkPlaybackEngine.kt"
           grep -q 'Xtream is authoritative' "$CORE/XtreamStrictSyncEngine.kt"
           grep -q 'instanceFollowRedirects = false' "$CORE/XtreamClient.kt"
           grep -q 'get_series_info' "$CORE/CatalogSyncEngine.kt"
