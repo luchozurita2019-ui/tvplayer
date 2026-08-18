@@ -15,8 +15,8 @@ android {
         applicationId 'com.tvfull.pro'
         minSdk 21
         targetSdk 34
-        versionCode 22
-        versionName '7.1.1-native-tv-ijk-video-xtream-fix'
+        versionCode 23
+        versionName '7.2-stable-ui-fast-fail'
     }
 
     signingConfigs {
@@ -34,8 +34,8 @@ android {
 
     sourceSets {
         main {
-            // GitHub Actions materializes the official Bilibili k0.8.8 Java API
-            // and source-built native libraries under these standard folders.
+            // Keep the source-built IJK/FFmpeg stack in the APK while it remains
+            // isolated from the production route for controlled device testing.
             java.srcDirs += ['src/main/ijkplayer-java']
             jniLibs.srcDirs += ['src/main/jniLibs']
         }
@@ -56,8 +56,9 @@ dependencies {
     implementation 'androidx.appcompat:appcompat:1.7.0'
     implementation 'androidx.recyclerview:recyclerview:1.3.2'
 
-    // Existing Media3 stays only while the legacy TV UI is being migrated.
-    // The new tvcore playback path uses source-built IJK/FFmpeg exclusively.
+    // Media3 is the production playback path again because it preserves the
+    // mature TV UI and the working video renderer. IJK remains available only
+    // as an isolated test path until its Surface behavior is validated on TVs.
     implementation 'androidx.media3:media3-exoplayer:1.8.0'
     implementation 'androidx.media3:media3-exoplayer-hls:1.8.0'
     implementation 'androidx.media3:media3-exoplayer-dash:1.8.0'
