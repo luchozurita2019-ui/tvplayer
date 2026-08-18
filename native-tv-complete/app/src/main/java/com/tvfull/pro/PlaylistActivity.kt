@@ -154,24 +154,14 @@ class PlaylistActivity : AppCompatActivity() {
             runOnUiThread {
                 recycler.isEnabled = true
                 result.onSuccess { report ->
-                    val resolved = resolvedForSession ?: service
-                    services = services.map { if (it.id == resolved.id) resolved else it }
-                    RemotePrefs.saveServices(this, services)
+                    resolvedForSession?.let { resolved ->
+                        services = services.map { if (it.id == resolved.id) resolved else it }
+                        RemotePrefs.saveServices(this, services)
+                    }
                     RemotePrefs.saveService(this, service.id, service.name)
-
-                    // The complete TV UI reads its active source through Prefs.
-                    // Persist the already-resolved panel source so it never needs a
-                    // second manual login and keeps the API host/media host fixes.
-                    Prefs.save(this, resolved.config)
-
                     status.setTextColor(Color.rgb(117, 221, 154))
                     status.text = "${service.name} · ${report.liveCount} canales · ${report.movieCount} películas · ${report.seriesCount} series"
-
-                    // Use the mature UI again: logos, movie/series artwork, VOD
-                    // details, EPG, search, fullscreen controls and Media3 playback.
-                    // TvIptvActivity remains in the source tree only as an isolated
-                    // IJK test bed; it is no longer the production route.
-                    startActivity(Intent(this, TvHomeActivity::class.java))
+                    startActivity(Intent(this, TvIptvActivity::class.java))
                     finish()
                 }.onFailure { error ->
                     opening = false
