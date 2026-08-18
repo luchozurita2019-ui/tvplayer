@@ -135,9 +135,6 @@ class PlaylistActivity : AppCompatActivity() {
             val db = TvCatalogDatabase(applicationContext)
             var resolvedForSession: RemoteService? = null
             val result = runCatching {
-                // A service can arrive from the panel as M3U while actually being an
-                // Xtream get.php URL. Resolve it before sync so player_api.php stays
-                // authoritative for categories, names and ordering.
                 val resolvedConfig = SourceResolver.resolve(service.config)
                 resolvedForSession = service.copy(config = resolvedConfig)
                 val source = ProvisionedSource(
@@ -157,17 +154,24 @@ class PlaylistActivity : AppCompatActivity() {
             runOnUiThread {
                 recycler.isEnabled = true
                 result.onSuccess { report ->
-                    // Keep the resolved configuration locally for the Activity that is
-                    // about to open. This is essential for get_series_info on services
-                    // provisioned as an Xtream get.php URL under service_type=m3u.
-                    resolvedForSession?.let { resolved ->
-                        services = services.map { if (it.id == resolved.id) resolved else it }
-                        RemotePrefs.saveServices(this, services)
-                    }
+                    val resolved = resolvedForSession ?: service
+                    services = services.map { if (it.id == resolved.id) resolved else it }
+                    RemotePrefs.saveServices(this, services)
                     RemotePrefs.saveService(this, service.id, service.name)
+
+                    // The complete TV UI reads its active source through Prefs.
+                    // Persist the already-resolved panel source so it never needs a
+                    // second manual login and keeps the API host/media host fixes.
+                    Prefs.save(this, resolved.config)
+
                     status.setTextColor(Color.rgb(117, 221, 154))
                     status.text = "${service.name} · ${report.liveCount} canales · ${report.movieCount} películas · ${report.seriesCount} series"
-                    startActivity(Intent(this, TvIptvActivity::class.java))
+
+                    // Use the mature UI again: logos, movie/series artwork, VOD
+                    // details, EPG, search, fullscreen controls and Media3 playback.
+                    // TvIptvActivity remains in the source tree only as an isolated
+                    // IJK test bed; it is no longer the production route.
+                    startActivity(Intent(this, TvHomeActivity::class.java))
                     finish()
                 }.onFailure { error ->
                     opening = false
