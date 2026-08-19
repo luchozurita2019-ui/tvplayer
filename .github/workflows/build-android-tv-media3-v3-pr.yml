@@ -1,0 +1,149 @@
+name: Validate Android TV Media3 V3
+
+on:
+  pull_request:
+    branches:
+      - android-tv-media3-v3-test
+
+permissions:
+  contents: read
+
+jobs:
+  validate-android-tv-v3:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout controlled V3 source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-media3-v3-test
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get pinned dependencies
+        run: flutter pub get
+
+      - name: Preserve TV FULL panel sync
+        run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
+
+      - name: Apply Android TV V1 runtime baseline
+        run: python3 .github/scripts/apply_android_tv_runtime_v1.py
+
+      - name: Apply Android TV V2 pairing and focus baseline
+        run: python3 .github/scripts/apply_android_tv_v2_test.py
+
+      - name: Apply Android TV V3 Media3 LIVE patch
+        run: python3 .github/scripts/apply_android_tv_media3_v3.py
+
+      - name: Format V3 source
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/screens/remote_access_gate.dart \
+            lib/screens/tv_home_screen.dart \
+            lib/screens/player_screen.dart \
+            lib/widgets/live_video_view.dart \
+            lib/widgets/native_live_player_view.dart \
+            lib/services/tv_ui_settings_service.dart \
+            lib/widgets/tv_remote_scope.dart \
+            lib/services/remote_provisioning_service.dart \
+            lib/providers/iptv_provider.dart
+
+      - name: Analyze V3 source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify controlled player split
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'bool get _useMedia3Live => widget.isLiveContent' lib/screens/player_screen.dart
+          grep -q "viewType: 'tvfull/media3_live_surface'" lib/widgets/native_live_player_view.dart
+          grep -q 'nativeLiveSurface: widget.isLiveContent' lib/screens/player_screen.dart
+          grep -q 'widget.nativeLiveSurface!' lib/widgets/live_video_view.dart
+          grep -q 'media_kit: 1.2.6' pubspec.yaml
+          grep -q 'media_kit_video: 1.3.1' pubspec.yaml
+          grep -q 'Vinculá este televisor' lib/services/remote_provisioning_service.dart
+          grep -q '_playPauseFocusNode' lib/widgets/live_video_view.dart
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+
+      - name: Configure V3 native Media3 SurfaceView shell
+        run: python3 .github/scripts/configure_android_tv_media3_v3_native.py
+
+      - name: Verify generated Android V3 shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'applicationId = "com.tvfull.pro.tvv3test"' android/app/build.gradle.kts
+          grep -q 'androidx.media3:media3-exoplayer:1.8.0' android/app/build.gradle.kts
+          grep -q 'android:label="TV FULL V3 TEST"' android/app/src/main/AndroidManifest.xml
+          grep -q 'io.flutter.embedding.android.EnableImpeller' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:value="false"' android/app/src/main/AndroidManifest.xml
+          grep -q 'registerViewFactory' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'PlayerView(context)' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
+          grep -q 'surface is SurfaceView' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
+          grep -q 'DefaultMediaSourceFactory' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
+
+      - name: Build TV V3 release APK ARM32 + ARM64
+        run: flutter build apk --release --target-platform android-arm,android-arm64
+
+      - name: Verify final V3 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK")"
+          echo "$BADGING" | head -16
+          echo "$BADGING" | grep -q "package: name='com.tvfull.pro.tvv3test'"
+          echo "$BADGING" | grep -q "application-label:'TV FULL V3 TEST'"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+
+          APK_LIST="$(unzip -l "$APK")"
+          for REQUIRED in \
+            'lib/arm64-v8a/libapp.so' \
+            'lib/arm64-v8a/libflutter.so' \
+            'lib/armeabi-v7a/libapp.so' \
+            'lib/armeabi-v7a/libflutter.so'; do
+            echo "$APK_LIST" | grep -Fq "$REQUIRED" || {
+              echo "ERROR: missing required TV binary: $REQUIRED"
+              exit 1
+            }
+          done
+
+      - name: Prepare V3 test artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-V3-TEST-Media3-SurfaceView.apk
+          sha256sum dist/TV-FULL-V3-TEST-Media3-SurfaceView.apk > dist/SHA256.txt
+          git rev-parse HEAD > dist/COMMIT.txt
+          printf '%s\n' \
+            'TV FULL Android TV V3 controlled A/B test' \
+            'Package: com.tvfull.pro.tvv3test' \
+            'Impeller: OFF, unchanged from V2' \
+            'LIVE: Media3 1.8.0 + native PlayerView SurfaceView' \
+            'VOD: media_kit/libmpv unchanged' \
+            'Panel, pairing, M3U/Xtream and TV FULL UI preserved' > dist/TEST-NOTES.txt
+
+      - name: Upload V3 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-V3-TEST-Media3-SurfaceView
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
