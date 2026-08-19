@@ -97,6 +97,27 @@ jobs:
       - name: Remove generated template test
         run: rm -f test/widget_test.dart
 
+      - name: Set isolated V2 test application ID
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          gradle = Path('android/app/build.gradle.kts')
+          text = gradle.read_text()
+          old = 'applicationId = "com.example.iptv_player"'
+          new = 'applicationId = "com.tvfull.pro.tvv2test"'
+          if old not in text:
+              raise SystemExit('Generated applicationId marker not found')
+          gradle.write_text(text.replace(old, new, 1))
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          m = manifest.read_text()
+          m = m.replace('android:label="iptv_player"', 'android:label="TV FULL V2 TEST"', 1)
+          manifest.write_text(m)
+          PY
+          grep -q 'applicationId = "com.tvfull.pro.tvv2test"' android/app/build.gradle.kts
+          grep -q 'android:label="TV FULL V2 TEST"' android/app/src/main/AndroidManifest.xml
+
       - name: Configure Android TV and disable Impeller for A-B test
         shell: bash
         run: |
@@ -165,7 +186,10 @@ jobs:
           APK="build/app/outputs/flutter-apk/app-release.apk"
           BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
 
-          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -16
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK")"
+          echo "$BADGING" | head -16
+          echo "$BADGING" | grep -q "package: name='com.tvfull.pro.tvv2test'"
+          echo "$BADGING" | grep -q "application-label:'TV FULL V2 TEST'"
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump xmltree "$APK" AndroidManifest.xml | grep -A3 -B2 'EnableImpeller'
 
@@ -181,18 +205,20 @@ jobs:
             }
           done
 
-          echo 'ARM32 + ARM64 Flutter binaries verified.'
+          echo 'Isolated package + ARM32 + ARM64 verified.'
           echo 'V2 test: Impeller disabled; media_kit/libmpv unchanged.'
 
       - name: Prepare TV V2 APK artifact
         shell: bash
         run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-PRO-Android-TV-Performance-V2-Impeller-OFF.apk
-          sha256sum dist/TV-FULL-PRO-Android-TV-Performance-V2-Impeller-OFF.apk > dist/SHA256.txt
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-V2-TEST-Installable-Impeller-OFF.apk
+          sha256sum dist/TV-FULL-V2-TEST-Installable-Impeller-OFF.apk > dist/SHA256.txt
           git rev-parse HEAD > dist/COMMIT.txt
           printf '%s\n' \
-            'TV FULL Android TV Performance V2' \
+            'TV FULL Android TV Performance V2 - isolated install test' \
+            'Package: com.tvfull.pro.tvv2test' \
+            'Label: TV FULL V2 TEST' \
             'Impeller: OFF' \
             'Player engine: media_kit/libmpv unchanged' \
             'Pairing gate: requires assigned M3U/Xtream' \
@@ -201,7 +227,7 @@ jobs:
       - name: Upload Android TV V2 APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-Android-TV-Performance-V2-Impeller-OFF
+          name: TV-FULL-V2-TEST-Installable-Impeller-OFF
           path: dist/
           if-no-files-found: error
           retention-days: 30
