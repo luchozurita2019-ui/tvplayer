@@ -9,6 +9,7 @@ on:
       - '.github/scripts/apply_panel_customer_delete_v4.py'
       - '.github/scripts/apply_panel_service_validation_v5.py'
       - '.github/scripts/apply_panel_payment_status_v6.py'
+      - '.github/scripts/apply_panel_tivimate_v7.py'
       - '.github/workflows/deploy-tv-full-panel.yml'
   workflow_dispatch:
 
@@ -40,6 +41,9 @@ jobs:
       - name: Enable payment status
         run: python3 .github/scripts/apply_panel_payment_status_v6.py
 
+      - name: Add isolated TiviMate option
+        run: python3 .github/scripts/apply_panel_tivimate_v7.py
+
       - name: Validate panel JavaScript
         run: |
           python3 - <<'PY'
@@ -60,6 +64,9 @@ jobs:
           grep -q 'access_state' panel/index.html
           grep -q 'Falta de pago' panel/index.html
           grep -q 'deviceStatusBadge' panel/index.html
+          grep -q 'data-route="tivimate"' panel/index.html
+          grep -q 'function renderTivimate' panel/index.html
+          grep -q 'tvf-tivimate-admin' panel/index.html
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
