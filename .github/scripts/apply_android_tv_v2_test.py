@@ -1,28 +1,33 @@
 from pathlib import Path
 
+REMOTE = Path('lib/services/remote_provisioning_service.dart')
 GATE = Path('lib/screens/remote_access_gate.dart')
 HOME = Path('lib/screens/tv_home_screen.dart')
 LIVE = Path('lib/widgets/live_video_view.dart')
 
+remote = REMOTE.read_text()
 gate = GATE.read_text()
 home = HOME.read_text()
 live = LIVE.read_text()
 
-# ---------------------------------------------------------------------------
-# 1) Vinculación TV: no entrar al HOME hasta que el panel tenga al menos un
-#    servicio M3U/Xtream asignado y la sincronización local haya producido una
-#    lista reproducible. Mientras espera, muestra el código y consulta cada 6 s.
-# ---------------------------------------------------------------------------
-if "import 'dart:async';" not in gate:
-    gate = "import 'dart:async';\n\n" + gate
+# 1) Vinculación: un dispositivo registrado pero sin M3U/Xtream asignada no
+# entra al HOME. Reutilizamos la pantalla de bloqueo existente para mostrar el
+# código; no se cambia el protocolo ni los endpoints del panel.
+old_verify = """  Future<void> verifyAccess(RemoteDeviceCredentials credentials) async {\n    await fetchConfiguration(credentials);\n  }\n"""
+new_verify = """  Future<void> verifyAccess(RemoteDeviceCredentials credentials) async {\n    final configuration = await fetchConfiguration(credentials);\n    if (configuration.services.isEmpty) {\n      throw const RemoteDeviceAccessBlockedException(\n        reason: 'awaiting_service',\n        title: 'Vinculá este televisor',\n        message:\n            'Ingresá el código del dispositivo en el panel TV FULL y asigná una lista M3U o Xtream. Después elegí Reintentar.',\n      );\n    }\n  }\n"""
+if old_verify in remote:
+    remote = remote.replace(old_verify, new_verify, 1)
+elif "reason: 'awaiting_service'" not in remote:
+    raise SystemExit('remote verifyAccess marker not found')
 
+# 2) La sincronización pesada termina ANTES de habilitar el HOME. Así no empieza
+# a descargar/parsear catálogos mientras el usuario ya está reproduciendo.
 if "package:provider/provider.dart" not in gate:
     gate = gate.replace(
         "import 'package:flutter/material.dart';",
         "import 'package:flutter/material.dart';\nimport 'package:provider/provider.dart';",
         1,
     )
-
 if "../providers/iptv_provider.dart" not in gate:
     gate = gate.replace(
         "import '../services/remote_provisioning_service.dart';",
@@ -30,179 +35,22 @@ if "../providers/iptv_provider.dart" not in gate:
         1,
     )
 
-if "bool _waitingForService = false;" not in gate:
-    gate = gate.replace(
-        "  RemoteDeviceAccessBlockedException? _blocked;",
-        "  RemoteDeviceAccessBlockedException? _blocked;\n"
-        "  bool _waitingForService = false;\n"
-        "  String? _waitingMessage;\n"
-        "  Timer? _linkPollTimer;",
-        1,
-    )
+success_marker = """        await _remote.verifyAccess(credentials);\n      }\n\n      if (!mounted) return;\n      setState(() {\n"""
+success_v2 = """        await _remote.verifyAccess(credentials);\n      }\n\n      final provider = context.read<IptvProvider>();\n      await provider.init();\n      if (!mounted) return;\n      if (provider.playlists.isEmpty) {\n        setState(() {\n          _checking = false;\n          _allowed = false;\n          _blocked = RemoteDeviceAccessBlockedException(\n            reason: 'awaiting_service',\n            title: 'Vinculación pendiente',\n            message: provider.remoteSyncError ??\n                'La lista está asignada, pero todavía no pudo sincronizarse. Elegí Reintentar.',\n          );\n        });\n        return;\n      }\n\n      setState(() {\n"""
+if success_marker in gate:
+    gate = gate.replace(success_marker, success_v2, 1)
+elif "final provider = context.read<IptvProvider>();" not in gate:
+    raise SystemExit('RemoteAccessGate success marker not found')
 
-start = gate.find("  Future<void> _checkAccess() async {")
-end = gate.find("\n  @override\n  Widget build(BuildContext context)", start)
-if start == -1 or end == -1:
-    raise SystemExit('RemoteAccessGate _checkAccess block not found')
-
-replacement = r'''  void _scheduleLinkPoll() {
-    _linkPollTimer?.cancel();
-    if (!_waitingForService || _checking || !mounted) return;
-    _linkPollTimer = Timer(const Duration(seconds: 6), _checkAccess);
-  }
-
-  void _setWaitingForService(String message) {
-    if (!mounted) return;
-    setState(() {
-      _checking = false;
-      _allowed = false;
-      _blocked = null;
-      _waitingForService = true;
-      _waitingMessage = message;
-    });
-    _scheduleLinkPoll();
-  }
-
-  Future<void> _checkAccess() async {
-    _linkPollTimer?.cancel();
-
-    if (!_remote.isSupported) {
-      if (!mounted) return;
-      await context.read<IptvProvider>().init();
-      if (!mounted) return;
-      setState(() {
-        _checking = false;
-        _allowed = true;
-        _blocked = null;
-        _waitingForService = false;
-        _waitingMessage = null;
-      });
-      return;
-    }
-
-    if (mounted) {
-      setState(() {
-        _checking = true;
-        _blocked = null;
-        _waitingMessage = null;
-      });
-    }
-
-    try {
-      var credentials = await _remote.ensureRegistered();
-      _deviceCode = credentials.code;
-
-      RemoteProvisioningConfiguration configuration;
-      try {
-        configuration = await _remote.fetchConfiguration(credentials);
-      } on RemoteDeviceCredentialsInvalidException {
-        await _remote.clearCredentials();
-        credentials = await _remote.ensureRegistered();
-        _deviceCode = credentials.code;
-        configuration = await _remote.fetchConfiguration(credentials);
-      }
-
-      if (!mounted) return;
-
-      // El dispositivo puede estar registrado correctamente pero todavía no
-      // tener una lista asignada. En TV no entramos al HOME en ese estado.
-      if (configuration.services.isEmpty) {
-        _setWaitingForService(
-          'Ingresá este código en el panel TV FULL y asigná una lista M3U o Xtream. '
-          'La aplicación entrará automáticamente cuando el servicio esté listo.',
-        );
-        return;
-      }
-
-      // La sincronización pesada ocurre ANTES de habilitar el HOME. De esta
-      // manera no puede empezar a descargar/parsear catálogos mientras ya se
-      // está reproduciendo un canal en una TV con pocos recursos.
-      final provider = context.read<IptvProvider>();
-      await provider.init();
-      if (!mounted) return;
-
-      if (provider.playlists.isEmpty) {
-        _setWaitingForService(
-          provider.remoteSyncError ??
-              'El servicio está asignado, pero todavía no llegó una lista reproducible. '
-                  'TV FULL volverá a comprobarlo automáticamente.',
-        );
-        return;
-      }
-
-      setState(() {
-        _checking = false;
-        _allowed = true;
-        _blocked = null;
-        _waitingForService = false;
-        _waitingMessage = null;
-      });
-    } on RemoteDeviceAccessBlockedException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _checking = false;
-        _allowed = false;
-        _blocked = error;
-        _waitingForService = false;
-        _waitingMessage = null;
-      });
-    } catch (error) {
-      // Si el servidor está temporalmente fuera de línea, sólo permitimos
-      // entrar cuando ya existe una lista local válida de una vinculación
-      // anterior. Una instalación nueva sin lista permanece en la pantalla de
-      // vinculación en vez de entrar vacía al HOME.
-      final provider = context.read<IptvProvider>();
-      try {
-        await provider.init();
-      } catch (_) {}
-      if (!mounted) return;
-
-      if (provider.playlists.isNotEmpty) {
-        setState(() {
-          _checking = false;
-          _allowed = true;
-          _blocked = null;
-          _waitingForService = false;
-          _waitingMessage = null;
-        });
-      } else {
-        _setWaitingForService(
-          'No se pudo verificar el panel en este momento. El código del dispositivo '
-          'se conserva y TV FULL volverá a intentarlo automáticamente.',
-        );
-      }
-    }
-  }
-
-  @override
-  void dispose() {
-    _linkPollTimer?.cancel();
-    super.dispose();
-  }
-'''
-
-gate = gate[:start] + replacement + gate[end:]
-
-old_fallback = """    final blocked = _blocked;\n    final paymentDue = blocked?.isPaymentDue ?? false;\n    final title = blocked?.title ?? 'Acceso suspendido';\n    final message = blocked?.message ??\n        'Este dispositivo se encuentra temporalmente desactivado.';\n"""
-new_fallback = """    final blocked = _blocked;\n    final paymentDue = blocked?.isPaymentDue ?? false;\n    final title = blocked?.title ??\n        (_waitingForService ? 'Vinculá este televisor' : 'Acceso suspendido');\n    final message = blocked?.message ??\n        _waitingMessage ??\n        'Este dispositivo se encuentra temporalmente desactivado.';\n"""
-if old_fallback not in gate:
-    raise SystemExit('RemoteAccessGate fallback text marker not found')
-gate = gate.replace(old_fallback, new_fallback, 1)
-
-# HOME: el provider ya llega inicializado/sincronizado desde el gate. Evitamos
-# una segunda sincronización en segundo plano al entrar al HOME.
 home_init = """    WidgetsBinding.instance.addPostFrameCallback((_) {\n      unawaited(ParentalControlService.instance.init());\n      context.read<IptvProvider>().init();\n    });\n"""
-home_init_v2 = """    WidgetsBinding.instance.addPostFrameCallback((_) {\n      unawaited(ParentalControlService.instance.init());\n      // IptvProvider ya fue inicializado por RemoteAccessGate antes de entrar.\n      // No repetimos sincronización mientras el usuario navega o reproduce.\n    });\n"""
+home_v2 = """    WidgetsBinding.instance.addPostFrameCallback((_) {\n      unawaited(ParentalControlService.instance.init());\n      // El provider ya llega sincronizado desde RemoteAccessGate.\n    });\n"""
 if home_init in home:
-    home = home.replace(home_init, home_init_v2, 1)
-elif "IptvProvider ya fue inicializado por RemoteAccessGate" not in home:
+    home = home.replace(home_init, home_v2, 1)
+elif "provider ya llega sincronizado desde RemoteAccessGate" not in home:
     raise SystemExit('TvHomeScreen init marker not found')
 
-# ---------------------------------------------------------------------------
-# 2) Reproductor TV: eliminar el RepaintBoundary experimental de V1 y hacer que
-#    al mostrar controles el foco pase realmente a Play/Pause. Los InkWell del
-#    reproductor reciben un focusColor azul fuerte para que DPAD sea visible.
-# ---------------------------------------------------------------------------
+# 3) Reproductor: DPAD con foco real. V1 capturaba la primera flecha en un
+# Focus padre pero no entregaba un foco inicial a los controles visuales.
 if "final FocusNode _playPauseFocusNode" not in live:
     marker = "  final FocusNode _remoteFocusNode = FocusNode(debugLabel: 'tv-live-remote');\n"
     if marker not in live:
@@ -213,57 +61,34 @@ if "final FocusNode _playPauseFocusNode" not in live:
         1,
     )
 
-old_show = """  void _showOverlay({bool scheduleHide = true}) {\n    _overlayTimer?.cancel();\n    if (mounted && !_overlayVisible) {\n      setState(() => _overlayVisible = true);\n    }\n    if (scheduleHide) _scheduleOverlayHide();\n  }\n"""
-new_show = """  void _showOverlay({bool scheduleHide = true}) {\n    _overlayTimer?.cancel();\n    final wasHidden = !_overlayVisible;\n    if (mounted && wasHidden) {\n      setState(() => _overlayVisible = true);\n      WidgetsBinding.instance.addPostFrameCallback((_) {\n        if (mounted && _overlayVisible) _playPauseFocusNode.requestFocus();\n      });\n    }\n    if (scheduleHide) _scheduleOverlayHide();\n  }\n"""
-if old_show in live:
-    live = live.replace(old_show, new_show, 1)
-elif "_playPauseFocusNode.requestFocus()" not in live:
-    raise SystemExit('overlay focus marker not found')
+show_start = live.find("  void _showOverlay({bool scheduleHide = true}) {")
+show_end = live.find("\n  void _scheduleOverlayHide()", show_start)
+if show_start == -1 or show_end == -1:
+    raise SystemExit('showOverlay method not found')
+live = live[:show_start] + """  void _showOverlay({bool scheduleHide = true}) {\n    _overlayTimer?.cancel();\n    final wasHidden = !_overlayVisible;\n    if (mounted && wasHidden) {\n      setState(() => _overlayVisible = true);\n      WidgetsBinding.instance.addPostFrameCallback((_) {\n        if (mounted && _overlayVisible) _playPauseFocusNode.requestFocus();\n      });\n    }\n    if (scheduleHide) _scheduleOverlayHide();\n  }\n""" + live[show_end:]
 
-old_post_frame = """    WidgetsBinding.instance.addPostFrameCallback((_) {\n      if (mounted) _scheduleOverlayHide();\n    });\n"""
-new_post_frame = """    WidgetsBinding.instance.addPostFrameCallback((_) {\n      if (!mounted) return;\n      _playPauseFocusNode.requestFocus();\n      _scheduleOverlayHide();\n    });\n"""
-if old_post_frame in live:
-    live = live.replace(old_post_frame, new_post_frame, 1)
+init_focus_old = """    WidgetsBinding.instance.addPostFrameCallback((_) {\n      if (mounted) _scheduleOverlayHide();\n    });\n"""
+init_focus_new = """    WidgetsBinding.instance.addPostFrameCallback((_) {\n      if (!mounted) return;\n      _playPauseFocusNode.requestFocus();\n      _scheduleOverlayHide();\n    });\n"""
+if init_focus_old in live:
+    live = live.replace(init_focus_old, init_focus_new, 1)
 
-old_nav = """    if (navigationKey && !_overlayVisible) {\n      _showOverlay(scheduleHide: false);\n      return KeyEventResult.handled;\n    }\n"""
-new_nav = """    if (navigationKey && !_overlayVisible) {\n      _showOverlay(scheduleHide: false);\n      WidgetsBinding.instance.addPostFrameCallback((_) {\n        if (mounted) _playPauseFocusNode.requestFocus();\n      });\n      return KeyEventResult.handled;\n    }\n"""
-if old_nav in live:
-    live = live.replace(old_nav, new_nav, 1)
-
-old_play_call = """        _iconPill(\n          icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,\n          tooltip: _playing ? 'Pausar' : 'Reproducir',\n          onTap: _togglePlayPause,\n        ),\n"""
-new_play_call = """        _iconPill(\n          icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,\n          tooltip: _playing ? 'Pausar' : 'Reproducir',\n          focusNode: _playPauseFocusNode,\n          onTap: _togglePlayPause,\n        ),\n"""
-if old_play_call not in live:
+play_old = """        _iconPill(\n          icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,\n          tooltip: _playing ? 'Pausar' : 'Reproducir',\n          onTap: _togglePlayPause,\n        ),\n"""
+play_new = """        _iconPill(\n          icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,\n          tooltip: _playing ? 'Pausar' : 'Reproducir',\n          focusNode: _playPauseFocusNode,\n          onTap: _togglePlayPause,\n        ),\n"""
+if play_old not in live:
     raise SystemExit('play button marker not found')
-live = live.replace(old_play_call, new_play_call, 1)
+live = live.replace(play_old, play_new, 1)
 
-old_icon_sig = """  Widget _iconPill({\n    required IconData icon,\n    required String tooltip,\n    bool enabled = true,\n    required VoidCallback onTap,\n  }) {\n"""
-new_icon_sig = """  Widget _iconPill({\n    required IconData icon,\n    required String tooltip,\n    bool enabled = true,\n    FocusNode? focusNode,\n    required VoidCallback onTap,\n  }) {\n"""
-if old_icon_sig not in live:
+sig_old = """  Widget _iconPill({\n    required IconData icon,\n    required String tooltip,\n    bool enabled = true,\n    required VoidCallback onTap,\n  }) {\n"""
+sig_new = """  Widget _iconPill({\n    required IconData icon,\n    required String tooltip,\n    bool enabled = true,\n    FocusNode? focusNode,\n    required VoidCallback onTap,\n  }) {\n"""
+if sig_old not in live:
     raise SystemExit('icon pill signature marker not found')
-live = live.replace(old_icon_sig, new_icon_sig, 1)
+live = live.replace(sig_old, sig_new, 1)
 
-old_icon_ink = """        child: InkWell(\n          borderRadius: BorderRadius.circular(22),\n          onTap: enabled\n"""
-new_icon_ink = """        child: InkWell(\n          focusNode: focusNode,\n          canRequestFocus: enabled,\n          focusColor: const Color(0xFF1677FF),\n          borderRadius: BorderRadius.circular(22),\n          onTap: enabled\n"""
-if old_icon_ink not in live:
+ink_old = """        child: InkWell(\n          borderRadius: BorderRadius.circular(22),\n          onTap: enabled\n"""
+ink_new = """        child: InkWell(\n          focusNode: focusNode,\n          canRequestFocus: enabled,\n          focusColor: const Color(0xFF1677FF),\n          borderRadius: BorderRadius.circular(22),\n          onTap: enabled\n"""
+if ink_old not in live:
     raise SystemExit('icon pill InkWell marker not found')
-live = live.replace(old_icon_ink, new_icon_ink, 1)
-
-for old, new in [
-    (
-        "child: InkWell(\n            customBorder: const CircleBorder(),\n            onTap:",
-        "child: InkWell(\n            focusColor: const Color(0xFF1677FF),\n            customBorder: const CircleBorder(),\n            onTap:",
-    ),
-    (
-        "child: InkWell(\n        borderRadius: BorderRadius.circular(20),\n        onTap:",
-        "child: InkWell(\n        focusColor: const Color(0xFF1677FF),\n        borderRadius: BorderRadius.circular(20),\n        onTap:",
-    ),
-    (
-        "child: InkWell(\n        borderRadius: BorderRadius.circular(22),\n        onTap: () {",
-        "child: InkWell(\n        focusColor: const Color(0xFF1677FF),\n        borderRadius: BorderRadius.circular(22),\n        onTap: () {",
-    ),
-]:
-    if old in live:
-        live = live.replace(old, new)
+live = live.replace(ink_old, ink_new, 1)
 
 if "_playPauseFocusNode.dispose();" not in live:
     live = live.replace(
@@ -272,13 +97,16 @@ if "_playPauseFocusNode.dispose();" not in live:
         1,
     )
 
-old_build = """  @override\n  Widget build(BuildContext context) {\n    return Focus(\n      focusNode: _remoteFocusNode,\n      autofocus: true,\n      onKeyEvent: _handleTvRemoteKey,\n      child: RepaintBoundary(\n        child: MouseRegion(\n          onHover: (_) => _showOverlay(),\n          child: Listener(\n            behavior: HitTestBehavior.translucent,\n            onPointerDown: (_) => _showOverlay(),\n            child: Video(\n              controller: widget.controller,\n              fit: _videoFit,\n              controls: (videoState) => _buildControls(videoState),\n            ),\n          ),\n        ),\n      ),\n    );\n  }\n"""
-new_build = """  @override\n  Widget build(BuildContext context) {\n    return FocusTraversalGroup(\n      policy: ReadingOrderTraversalPolicy(),\n      child: Focus(\n        focusNode: _remoteFocusNode,\n        autofocus: true,\n        onKeyEvent: _handleTvRemoteKey,\n        child: MouseRegion(\n          onHover: (_) => _showOverlay(),\n          child: Listener(\n            behavior: HitTestBehavior.translucent,\n            onPointerDown: (_) => _showOverlay(),\n            child: Video(\n              controller: widget.controller,\n              fit: _videoFit,\n              controls: (videoState) => _buildControls(videoState),\n            ),\n          ),\n        ),\n      ),\n    );\n  }\n"""
-if old_build not in live:
-    raise SystemExit('V1 RepaintBoundary build marker not found')
-live = live.replace(old_build, new_build, 1)
+# V1 había añadido RepaintBoundary alrededor de Video como experimento. Para la
+# prueba Impeller OFF lo retiramos y dejamos el árbol de video lo más directo.
+build_start = live.find("  @override\n  Widget build(BuildContext context) {", live.find("KeyEventResult _handleTvRemoteKey"))
+build_end = live.find("\n  Widget _buildControls(VideoState videoState)", build_start)
+if build_start == -1 or build_end == -1:
+    raise SystemExit('LiveVideoView build block not found')
+live = live[:build_start] + """  @override\n  Widget build(BuildContext context) {\n    return FocusTraversalGroup(\n      policy: ReadingOrderTraversalPolicy(),\n      child: Focus(\n        focusNode: _remoteFocusNode,\n        autofocus: true,\n        onKeyEvent: _handleTvRemoteKey,\n        child: MouseRegion(\n          onHover: (_) => _showOverlay(),\n          child: Listener(\n            behavior: HitTestBehavior.translucent,\n            onPointerDown: (_) => _showOverlay(),\n            child: Video(\n              controller: widget.controller,\n              fit: _videoFit,\n              controls: (videoState) => _buildControls(videoState),\n            ),\n          ),\n        ),\n      ),\n    );\n  }\n""" + live[build_end:]
 
+REMOTE.write_text(remote)
 GATE.write_text(gate)
 HOME.write_text(home)
 LIVE.write_text(live)
-print('Android TV V2 pairing, focus and low-overhead playback patch applied')
+print('Android TV V2 pairing, pre-home sync and player focus patch applied')
