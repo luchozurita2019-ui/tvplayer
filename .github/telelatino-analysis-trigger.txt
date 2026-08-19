@@ -1,1 +1,1 @@
-Trigger isolated CI analysis for the current Telelatino APK player fingerprint.
+Trigger isolated CI analysis for the current Telelatino APK DEX player fingerprint.
