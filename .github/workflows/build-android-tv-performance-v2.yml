@@ -12,6 +12,9 @@ on:
       - '.github/workflows/build-android-tv-performance-v2.yml'
       - 'lib/**'
       - 'pubspec.yaml'
+  pull_request:
+    branches:
+      - android-tv-performance-v2-test
 
 permissions:
   contents: read
