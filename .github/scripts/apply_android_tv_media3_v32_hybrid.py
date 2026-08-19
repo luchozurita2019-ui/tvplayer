@@ -8,7 +8,8 @@ if "package:flutter/foundation.dart" not in text:
         "import 'package:flutter/material.dart';\n",
         "import 'package:flutter/foundation.dart';\n"
         "import 'package:flutter/gestures.dart';\n"
-        "import 'package:flutter/material.dart';\n",
+        "import 'package:flutter/material.dart';\n"
+        "import 'package:flutter/rendering.dart';\n",
         1,
     )
 
