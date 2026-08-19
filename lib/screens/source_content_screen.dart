@@ -9,6 +9,15 @@ import 'xtream_live_screen.dart';
 import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
 
+const _tvBlue = Color(0xFF1677FF);
+const _tvBlueBright = Color(0xFF2D92FF);
+const _tvBackground = Color(0xFF060B12);
+const _tvPanel = Color(0xFF0C1725);
+const _tvPanelFocus = Color(0xFF10243B);
+const _tvBorder = Color(0xFF203149);
+const _tvText = Color(0xFFF5F8FC);
+const _tvMuted = Color(0xFF8D9CAF);
+
 class SourceContentScreen extends StatefulWidget {
   final Playlist playlist;
 
@@ -42,131 +51,157 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   Widget build(BuildContext context) {
     final nativeXtream = playlist.sourceType == PlaylistSourceType.xtream;
 
+    final entries = <_ContentEntry>[
+      _ContentEntry(
+        icon: Icons.live_tv_rounded,
+        title: 'TV en vivo',
+        count: _buckets.count(IptvContentKind.live),
+        subtitle: nativeXtream ? 'TV Xtream nativa' : null,
+        enabledOverride: nativeXtream ? true : null,
+        kind: IptvContentKind.live,
+      ),
+      _ContentEntry(
+        icon: Icons.movie_creation_rounded,
+        title: 'Películas',
+        count: _buckets.count(IptvContentKind.movies),
+        subtitle: nativeXtream ? 'Catálogo Xtream' : null,
+        enabledOverride: nativeXtream ? true : null,
+        kind: IptvContentKind.movies,
+      ),
+      _ContentEntry(
+        icon: Icons.video_library_rounded,
+        title: 'Series',
+        count: _buckets.count(IptvContentKind.series),
+        subtitle: nativeXtream ? 'Catálogo Xtream' : null,
+        enabledOverride: nativeXtream ? true : null,
+        kind: IptvContentKind.series,
+      ),
+      _ContentEntry(
+        icon: Icons.radio_rounded,
+        title: 'Radios',
+        count: _buckets.count(IptvContentKind.radios),
+        kind: IptvContentKind.radios,
+      ),
+    ];
+
     return Scaffold(
+      backgroundColor: _tvBackground,
       appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
+        toolbarHeight: 70,
+        backgroundColor: const Color(0xFF08111D),
+        foregroundColor: _tvText,
+        surfaceTintColor: Colors.transparent,
+        titleSpacing: 8,
+        title: Row(
           children: [
-            const Text(
-              'TV FULL',
-              style: TextStyle(fontWeight: FontWeight.w900),
+            Container(
+              width: 42,
+              height: 33,
+              decoration: BoxDecoration(
+                color: _tvBlue,
+                borderRadius: BorderRadius.circular(9),
+              ),
+              child: const Icon(
+                Icons.play_arrow_rounded,
+                color: Colors.white,
+                size: 25,
+              ),
             ),
-            Text(
-              playlist.name,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.bodySmall,
+            const SizedBox(width: 11),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'TV FULL PRO',
+                    style: TextStyle(
+                      color: _tvText,
+                      fontSize: 17,
+                      fontWeight: FontWeight.w900,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    playlist.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: _tvMuted,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
       ),
-      body: LayoutBuilder(
-        builder: (context, constraints) {
-          final wide = constraints.maxWidth >= 900;
-          final columns = constraints.maxWidth >= 1250
-              ? 4
-              : constraints.maxWidth >= 760
-              ? 2
-              : 1;
+      body: SafeArea(
+        top: false,
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final fourColumns = constraints.maxWidth >= 1000;
+            final columns = fourColumns ? 4 : 2;
+            final horizontal = constraints.maxWidth >= 1400 ? 48.0 : 28.0;
+            final vertical = constraints.maxHeight >= 700 ? 34.0 : 22.0;
 
-          return ListView(
-            padding: EdgeInsets.symmetric(
-              horizontal: wide ? 48 : 18,
-              vertical: wide ? 34 : 20,
-            ),
-            children: [
-              Text(
-                '¿Qué querés ver?',
-                style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'Contenido organizado automáticamente por TV FULL.',
-                style: Theme.of(
-                  context,
-                ).textTheme.bodyLarge?.copyWith(color: Colors.white70),
-              ),
-              const SizedBox(height: 28),
-              GridView.count(
-                crossAxisCount: columns,
-                shrinkWrap: true,
-                physics: const NeverScrollableScrollPhysics(),
-                crossAxisSpacing: 18,
-                mainAxisSpacing: 18,
-                childAspectRatio: columns == 1 ? 3.3 : 1.35,
+            return Padding(
+              padding: EdgeInsets.fromLTRB(horizontal, vertical, horizontal, 24),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  _ContentCard(
-                    icon: Icons.live_tv_rounded,
-                    title: 'TV en vivo',
-                    count: _buckets.count(IptvContentKind.live),
-                    subtitleOverride: nativeXtream
-                        ? 'TV Xtream nativa rápida'
-                        : null,
-                    enabledOverride: nativeXtream ? true : null,
-                    accent: const Color(0xFF1677FF),
-                    onTap: () => _openKind(context, IptvContentKind.live),
+                  const Text(
+                    'Elegí qué querés ver',
+                    style: TextStyle(
+                      color: _tvText,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                    ),
                   ),
-                  _ContentCard(
-                    icon: Icons.movie_creation_rounded,
-                    title: 'Películas',
-                    count: _buckets.count(IptvContentKind.movies),
-                    subtitleOverride: nativeXtream
-                        ? 'Catálogo Xtream con fichas'
-                        : null,
-                    enabledOverride: nativeXtream ? true : null,
-                    accent: const Color(0xFF4C9DFF),
-                    onTap: () => _openKind(context, IptvContentKind.movies),
+                  const SizedBox(height: 5),
+                  const Text(
+                    'Contenido organizado para navegar rápido con el control remoto.',
+                    style: TextStyle(color: _tvMuted, fontSize: 11),
                   ),
-                  _ContentCard(
-                    icon: Icons.video_library_rounded,
-                    title: 'Series',
-                    count: _buckets.count(IptvContentKind.series),
-                    subtitleOverride: nativeXtream
-                        ? 'Catálogo Xtream nativo'
-                        : null,
-                    enabledOverride: nativeXtream ? true : null,
-                    accent: const Color(0xFF2D6DFF),
-                    onTap: () => _openKind(context, IptvContentKind.series),
-                  ),
-                  _ContentCard(
-                    icon: Icons.radio_rounded,
-                    title: 'Radios',
-                    count: _buckets.count(IptvContentKind.radios),
-                    accent: const Color(0xFF5DB7FF),
-                    onTap: () => _openKind(context, IptvContentKind.radios),
+                  const SizedBox(height: 24),
+                  Expanded(
+                    child: GridView.builder(
+                      padding: EdgeInsets.zero,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: columns,
+                        crossAxisSpacing: 14,
+                        mainAxisSpacing: 14,
+                        childAspectRatio: fourColumns ? 1.25 : 2.15,
+                      ),
+                      itemCount: entries.length,
+                      itemBuilder: (context, index) {
+                        final entry = entries[index];
+                        return _ContentCard(
+                          icon: entry.icon,
+                          title: entry.title,
+                          count: entry.count,
+                          subtitleOverride: entry.subtitle,
+                          enabledOverride: entry.enabledOverride,
+                          autofocus: index == 0,
+                          onTap: () => _openKind(context, entry.kind),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
-              const SizedBox(height: 24),
-              Card(
-                child: Padding(
-                  padding: const EdgeInsets.all(18),
-                  child: Row(
-                    children: [
-                      const Icon(Icons.info_outline),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Text(
-                          nativeXtream
-                              ? 'En fuentes Xtream, TV en vivo usa get_live_categories/get_live_streams con carga nativa rápida. Películas usa get_vod_streams/get_vod_info para fichas y reproducción. Series usa get_series/get_series_info y organiza temporadas y episodios.'
-                              : 'TV FULL mantiene en TV en vivo los canales lineales aunque su categoría se llame Películas, Cine o Series. Sólo separa VOD/Series cuando la estructura del stream lo identifica como tal.',
-                          style: Theme.of(context).textTheme.bodyMedium,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ],
-          );
-        },
+            );
+          },
+        ),
       ),
     );
   }
 
   void _openKind(BuildContext context, IptvContentKind kind) {
+    // Mantener exactamente la lógica estable: sólo limpiamos artwork temporal
+    // antes de entrar a una nueva sección.
     ArtworkCacheService.instance.clearBrowsingSession();
     if (playlist.sourceType == PlaylistSourceType.xtream) {
       if (kind == IptvContentKind.live) {
@@ -221,73 +256,119 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   }
 }
 
-class _ContentCard extends StatelessWidget {
+class _ContentEntry {
+  final IconData icon;
+  final String title;
+  final int count;
+  final String? subtitle;
+  final bool? enabledOverride;
+  final IptvContentKind kind;
+
+  const _ContentEntry({
+    required this.icon,
+    required this.title,
+    required this.count,
+    required this.kind,
+    this.subtitle,
+    this.enabledOverride,
+  });
+}
+
+class _ContentCard extends StatefulWidget {
   final IconData icon;
   final String title;
   final int count;
   final String? subtitleOverride;
   final bool? enabledOverride;
-  final Color accent;
   final VoidCallback onTap;
+  final bool autofocus;
 
   const _ContentCard({
     required this.icon,
     required this.title,
     required this.count,
+    required this.onTap,
     this.subtitleOverride,
     this.enabledOverride,
-    required this.accent,
-    required this.onTap,
+    this.autofocus = false,
   });
 
   @override
-  Widget build(BuildContext context) {
-    final enabled = enabledOverride ?? count > 0;
-    final subtitle =
-        subtitleOverride ?? (count == 1 ? '1 elemento' : '$count elementos');
+  State<_ContentCard> createState() => _ContentCardState();
+}
 
-    return Card(
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: enabled ? onTap : null,
-        child: Container(
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
-              colors: [
-                accent.withValues(alpha: enabled ? 0.24 : 0.08),
-                Theme.of(context).colorScheme.surfaceContainerHigh,
+class _ContentCardState extends State<_ContentCard> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final enabled = widget.enabledOverride ?? widget.count > 0;
+    final subtitle = widget.subtitleOverride ??
+        (widget.count == 1 ? '1 elemento' : '${widget.count} elementos');
+
+    return RepaintBoundary(
+      child: Material(
+        color: _focused && enabled ? _tvPanelFocus : _tvPanel,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          autofocus: widget.autofocus,
+          canRequestFocus: enabled,
+          onFocusChange: (value) => setState(() => _focused = value),
+          onTap: enabled ? widget.onTap : null,
+          borderRadius: BorderRadius.circular(16),
+          child: Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(
+                color: _focused && enabled ? _tvBlueBright : _tvBorder,
+                width: _focused ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Container(
+                  width: 66,
+                  height: 54,
+                  decoration: BoxDecoration(
+                    color: enabled
+                        ? _tvBlue.withValues(alpha: 0.14)
+                        : Colors.white.withValues(alpha: 0.03),
+                    borderRadius: BorderRadius.circular(13),
+                  ),
+                  child: Icon(
+                    widget.icon,
+                    size: 31,
+                    color: enabled ? _tvBlueBright : Colors.white24,
+                  ),
+                ),
+                const SizedBox(height: 15),
+                Text(
+                  widget.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: enabled ? _tvText : Colors.white30,
+                    fontSize: 17,
+                    fontWeight: FontWeight.w900,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  subtitle,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    color: enabled ? _tvMuted : Colors.white24,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
               ],
             ),
-          ),
-          padding: const EdgeInsets.all(24),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              Icon(
-                icon,
-                size: 58,
-                color: enabled ? Colors.white : Colors.white30,
-              ),
-              const SizedBox(height: 16),
-              Text(
-                title,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  color: enabled ? Colors.white : Colors.white38,
-                  fontWeight: FontWeight.w900,
-                ),
-              ),
-              const SizedBox(height: 8),
-              Text(
-                subtitle,
-                textAlign: TextAlign.center,
-                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                  color: enabled ? Colors.white70 : Colors.white30,
-                ),
-              ),
-            ],
           ),
         ),
       ),
