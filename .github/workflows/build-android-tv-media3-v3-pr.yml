@@ -84,13 +84,48 @@ jobs:
       - name: Configure V3 native Media3 SurfaceView shell
         run: python3 .github/scripts/configure_android_tv_media3_v3_native.py
 
-      - name: Verify generated Android V3 shell
+      - name: Enable IPTV HTTP and isolate V3.1 package
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'applicationId = "com.tvfull.pro.tvv3test"' android/app/build.gradle.kts
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gradle = Path('android/app/build.gradle.kts')
+          text = gradle.read_text()
+          old = 'applicationId = "com.tvfull.pro.tvv3test"'
+          new = 'applicationId = "com.tvfull.pro.tvv31test"'
+          if old not in text:
+              raise SystemExit('V3 applicationId marker not found')
+          gradle.write_text(text.replace(old, new, 1))
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          text = text.replace(
+              'android:label="TV FULL V3 TEST"',
+              'android:label="TV FULL V3.1 TEST"',
+              1,
+          )
+          if 'android:usesCleartextTraffic="true"' not in text:
+              marker = '<application\n'
+              if marker not in text:
+                  raise SystemExit('Android application marker not found')
+              text = text.replace(
+                  marker,
+                  '<application\n        android:usesCleartextTraffic="true"\n',
+                  1,
+              )
+          manifest.write_text(text)
+          PY
+
+      - name: Verify generated Android V3.1 shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'applicationId = "com.tvfull.pro.tvv31test"' android/app/build.gradle.kts
           grep -q 'androidx.media3:media3-exoplayer:1.8.0' android/app/build.gradle.kts
-          grep -q 'android:label="TV FULL V3 TEST"' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:label="TV FULL V3.1 TEST"' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
           grep -q 'io.flutter.embedding.android.EnableImpeller' android/app/src/main/AndroidManifest.xml
           grep -q 'android:value="false"' android/app/src/main/AndroidManifest.xml
           grep -q 'registerViewFactory' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
@@ -98,10 +133,10 @@ jobs:
           grep -q 'surface is SurfaceView' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
           grep -q 'DefaultMediaSourceFactory' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
 
-      - name: Build TV V3 release APK ARM32 + ARM64
+      - name: Build TV V3.1 release APK ARM32 + ARM64
         run: flutter build apk --release --target-platform android-arm,android-arm64
 
-      - name: Verify final V3 APK
+      - name: Verify final V3.1 APK
         shell: bash
         run: |
           set -euo pipefail
@@ -109,8 +144,8 @@ jobs:
           BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK")"
           echo "$BADGING" | head -16
-          echo "$BADGING" | grep -q "package: name='com.tvfull.pro.tvv3test'"
-          echo "$BADGING" | grep -q "application-label:'TV FULL V3 TEST'"
+          echo "$BADGING" | grep -q "package: name='com.tvfull.pro.tvv31test'"
+          echo "$BADGING" | grep -q "application-label:'TV FULL V3.1 TEST'"
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
 
           APK_LIST="$(unzip -l "$APK")"
@@ -125,25 +160,26 @@ jobs:
             }
           done
 
-      - name: Prepare V3 test artifact
+      - name: Prepare V3.1 test artifact
         shell: bash
         run: |
           mkdir -p dist
-          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-V3-TEST-Media3-SurfaceView.apk
-          sha256sum dist/TV-FULL-V3-TEST-Media3-SurfaceView.apk > dist/SHA256.txt
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-V3.1-TEST-Media3-SurfaceView-HTTP.apk
+          sha256sum dist/TV-FULL-V3.1-TEST-Media3-SurfaceView-HTTP.apk > dist/SHA256.txt
           git rev-parse HEAD > dist/COMMIT.txt
           printf '%s\n' \
-            'TV FULL Android TV V3 controlled A/B test' \
-            'Package: com.tvfull.pro.tvv3test' \
-            'Impeller: OFF, unchanged from V2' \
+            'TV FULL Android TV V3.1 controlled Media3 test' \
+            'Package: com.tvfull.pro.tvv31test' \
+            'Impeller: OFF, unchanged from V2/V3' \
             'LIVE: Media3 1.8.0 + native PlayerView SurfaceView' \
+            'HTTP IPTV: android:usesCleartextTraffic=true' \
             'VOD: media_kit/libmpv unchanged' \
             'Panel, pairing, M3U/Xtream and TV FULL UI preserved' > dist/TEST-NOTES.txt
 
-      - name: Upload V3 APK
+      - name: Upload V3.1 APK
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-V3-TEST-Media3-SurfaceView
+          name: TV-FULL-V3.1-TEST-Media3-SurfaceView-HTTP
           path: dist/
           if-no-files-found: error
           retention-days: 30
