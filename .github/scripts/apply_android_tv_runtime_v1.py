@@ -45,25 +45,68 @@ elif "Duration(milliseconds: 1500)" not in text:
 
 if "KeyEventResult _handleTvRemoteKey" not in text:
     marker = "  @override\n  void dispose() {\n"
-    handler = r'''  KeyEventResult _handleTvRemoteKey(FocusNode node, KeyEvent event) {
+    handler = r'''  void _seekTvRelative(int seconds) {
+    if (widget.isLiveContent || _duration <= Duration.zero) return;
+    final maxMs = _duration.inMilliseconds;
+    final targetMs = (_position.inMilliseconds + (seconds * 1000))
+        .clamp(0, maxMs)
+        .toInt();
+    _showOverlay();
+    unawaited(widget.player.seek(Duration(milliseconds: targetMs)));
+  }
+
+  KeyEventResult _handleTvRemoteKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
 
     final key = event.logicalKey;
-    if (key == LogicalKeyboardKey.mediaPlayPause) {
+
+    // Teclas multimedia físicas del control remoto.
+    if (key == LogicalKeyboardKey.mediaPlayPause ||
+        key == LogicalKeyboardKey.mediaPlay ||
+        key == LogicalKeyboardKey.mediaPause) {
       _togglePlayPause();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.mediaTrackNext) {
+    if (key == LogicalKeyboardKey.mediaTrackNext ||
+        key == LogicalKeyboardKey.channelUp) {
       if (widget.canNext) widget.onNext();
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.mediaTrackPrevious) {
+    if (key == LogicalKeyboardKey.mediaTrackPrevious ||
+        key == LogicalKeyboardKey.channelDown) {
       if (widget.canPrevious) widget.onPrevious();
       return KeyEventResult.handled;
     }
+    if (key == LogicalKeyboardKey.mediaFastForward) {
+      _seekTvRelative(10);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.mediaRewind) {
+      _seekTvRelative(-10);
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.info) {
+      widget.onShowStreamInfo();
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.guide) {
+      _showOverlay(scheduleHide: false);
+      widget.onShowChannelList();
+      return KeyEventResult.handled;
+    }
+    if (!widget.isLiveContent && key == LogicalKeyboardKey.mediaAudioTrack) {
+      unawaited(_showAudioTrackPicker());
+      return KeyEventResult.handled;
+    }
+    if (!widget.isLiveContent && key == LogicalKeyboardKey.subtitle) {
+      unawaited(_showSubtitleTrackPicker());
+      return KeyEventResult.handled;
+    }
 
+    // Si los controles están ocultos, el primer toque del DPAD/OK sólo los
+    // despierta. El segundo toque ya navega/activa el botón focalizado.
     final navigationKey = key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.arrowDown ||
         key == LogicalKeyboardKey.arrowLeft ||
