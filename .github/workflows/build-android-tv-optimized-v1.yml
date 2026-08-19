@@ -11,6 +11,15 @@ on:
       - '.github/workflows/build-android-tv-optimized-v1.yml'
       - 'lib/**'
       - 'pubspec.yaml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/scripts/apply_android_mobile_remote_sync_v2.py'
+      - '.github/scripts/apply_android_tv_runtime_v1.py'
+      - '.github/workflows/build-android-tv-optimized-v1.yml'
+      - 'lib/**'
+      - 'pubspec.yaml'
 
 permissions:
   contents: read
@@ -40,8 +49,6 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      # CRITICAL: this is the exact panel/device synchronization layer used by
-      # the stable mobile V3. TV optimization must not replace or bypass it.
       - name: Preserve TV FULL panel sync
         run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
 
