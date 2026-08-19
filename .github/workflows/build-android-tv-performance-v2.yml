@@ -1,0 +1,202 @@
+name: Build Android TV Performance V2
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-performance-v2-test
+    paths:
+      - '.github/scripts/apply_android_mobile_remote_sync_v2.py'
+      - '.github/scripts/apply_android_tv_runtime_v1.py'
+      - '.github/scripts/apply_android_tv_v2_test.py'
+      - '.github/workflows/build-android-tv-performance-v2.yml'
+      - 'lib/**'
+      - 'pubspec.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-tv-v2:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout TV V2 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-performance-v2-test
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get pinned dependencies
+        run: |
+          flutter pub get
+          flutter pub deps --style=compact | grep -E 'media_kit |media_kit_video |media_kit_libs_video ' || true
+
+      - name: Preserve TV FULL panel sync
+        run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
+
+      - name: Apply TV V1 runtime baseline
+        run: python3 .github/scripts/apply_android_tv_runtime_v1.py
+
+      - name: Apply TV V2 pairing focus and playback test
+        run: python3 .github/scripts/apply_android_tv_v2_test.py
+
+      - name: Format TV V2 files
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/screens/remote_access_gate.dart \
+            lib/screens/tv_home_screen.dart \
+            lib/screens/player_screen.dart \
+            lib/services/tv_ui_settings_service.dart \
+            lib/widgets/tv_remote_scope.dart \
+            lib/widgets/live_video_view.dart \
+            lib/services/remote_provisioning_service.dart \
+            lib/providers/iptv_provider.dart
+
+      - name: Analyze TV V2 app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify V2 invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'RemoteProvisioningConfiguration' lib/services/remote_provisioning_service.dart
+          grep -q 'configuration.services.isEmpty' lib/screens/remote_access_gate.dart
+          grep -q 'Vinculá este televisor' lib/screens/remote_access_gate.dart
+          grep -q 'Timer(const Duration(seconds: 6)' lib/screens/remote_access_gate.dart
+          grep -q 'IptvProvider ya fue inicializado por RemoteAccessGate' lib/screens/tv_home_screen.dart
+          grep -q '_playPauseFocusNode' lib/widgets/live_video_view.dart
+          grep -q 'focusColor: const Color(0xFF1677FF)' lib/widgets/live_video_view.dart
+          grep -q 'FocusTraversalGroup' lib/widgets/live_video_view.dart
+          ! grep -q 'child: RepaintBoundary' lib/widgets/live_video_view.dart
+          grep -q 'Duration(milliseconds: 1500)' lib/widgets/live_video_view.dart
+          grep -q 'En LIVE no reconstruimos el árbol del Video' lib/widgets/live_video_view.dart
+          grep -q 'pauseForPlayback' lib/screens/player_screen.dart
+          grep -q "reason == 'payment_due'" lib/services/remote_provisioning_service.dart
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+
+      - name: Configure Android TV and disable Impeller for A-B test
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          text = p.read_text()
+
+          if 'android.permission.INTERNET' not in text:
+              text = text.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                  '    <uses-permission android:name="android.permission.INTERNET" />',
+                  1,
+              )
+
+          features = (
+              '    <uses-feature android:name="android.software.leanback" android:required="false" />\n'
+              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+          )
+          if 'android.software.leanback' not in text:
+              text = text.replace('<application', features + '    <application', 1)
+
+          if 'android:screenOrientation="landscape"' not in text:
+              text = text.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity"\n'
+                  '            android:screenOrientation="landscape"\n'
+                  '            android:resizeableActivity="false"',
+                  1,
+              )
+
+          leanback = '<category android:name="android.intent.category.LEANBACK_LAUNCHER"/>'
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in text:
+              text = text.replace(
+                  '<category android:name="android.intent.category.LAUNCHER"/>',
+                  '<category android:name="android.intent.category.LAUNCHER"/>\n'
+                  f'                {leanback}',
+                  1,
+              )
+
+          impeller = (
+              '        <meta-data\n'
+              '            android:name="io.flutter.embedding.android.EnableImpeller"\n'
+              '            android:value="false" />\n'
+          )
+          if 'io.flutter.embedding.android.EnableImpeller' not in text:
+              marker = '        <activity\n'
+              if marker not in text:
+                  raise SystemExit('Android activity marker not found')
+              text = text.replace(marker, impeller + marker, 1)
+
+          p.write_text(text)
+          PY
+          cat android/app/src/main/AndroidManifest.xml
+          grep -q 'io.flutter.embedding.android.EnableImpeller' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:value="false"' android/app/src/main/AndroidManifest.xml
+
+      - name: Build TV V2 release APK ARM32 + ARM64
+        run: flutter build apk --release --target-platform android-arm,android-arm64
+
+      - name: Verify APK signature package TV ABIs and Impeller flag
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -16
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump xmltree "$APK" AndroidManifest.xml | grep -A3 -B2 'EnableImpeller'
+
+          APK_LIST="$(unzip -l "$APK")"
+          for REQUIRED in \
+            'lib/arm64-v8a/libapp.so' \
+            'lib/arm64-v8a/libflutter.so' \
+            'lib/armeabi-v7a/libapp.so' \
+            'lib/armeabi-v7a/libflutter.so'; do
+            echo "$APK_LIST" | grep -Fq "$REQUIRED" || {
+              echo "ERROR: missing required TV binary: $REQUIRED"
+              exit 1
+            }
+          done
+
+          echo 'ARM32 + ARM64 Flutter binaries verified.'
+          echo 'V2 test: Impeller disabled; media_kit/libmpv unchanged.'
+
+      - name: Prepare TV V2 APK artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-PRO-Android-TV-Performance-V2-Impeller-OFF.apk
+          sha256sum dist/TV-FULL-PRO-Android-TV-Performance-V2-Impeller-OFF.apk > dist/SHA256.txt
+          git rev-parse HEAD > dist/COMMIT.txt
+          printf '%s\n' \
+            'TV FULL Android TV Performance V2' \
+            'Impeller: OFF' \
+            'Player engine: media_kit/libmpv unchanged' \
+            'Pairing gate: requires assigned M3U/Xtream' \
+            'Remote: player focus starts on Play/Pause' > dist/TEST-NOTES.txt
+
+      - name: Upload Android TV V2 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-Android-TV-Performance-V2-Impeller-OFF
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
