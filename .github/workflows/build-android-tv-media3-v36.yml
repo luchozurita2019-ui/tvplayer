@@ -1,0 +1,219 @@
+name: Validate Android TV Media3 V3.6 Xtream and Compact UI
+
+on:
+  pull_request:
+    branches:
+      - android-tv-media3-v3.6-test
+
+permissions:
+  contents: read
+
+jobs:
+  validate-android-tv-v36:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout controlled V3.6 source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-media3-v3.6-test
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get pinned dependencies
+        run: flutter pub get
+
+      - name: Preserve TV FULL panel sync
+        run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
+
+      - name: Apply Android TV V1 runtime baseline
+        run: python3 .github/scripts/apply_android_tv_runtime_v1.py
+
+      - name: Apply Android TV V2 pairing and focus baseline
+        run: python3 .github/scripts/apply_android_tv_v2_test.py
+
+      - name: Apply Android TV V3 Media3 LIVE patch
+        run: python3 .github/scripts/apply_android_tv_media3_v3.py
+
+      - name: Force Hybrid Composition for SurfaceView
+        run: python3 .github/scripts/apply_android_tv_media3_v32_hybrid.py
+
+      - name: Debounce native LIVE recovery UI
+        run: python3 .github/scripts/apply_android_tv_media3_v33_recovery_ui.py
+
+      - name: Apply V3.4 favorites DPAD and native LIVE UI cleanup
+        run: python3 .github/scripts/apply_android_tv_media3_v34_ui.py
+
+      - name: Apply V3.5 pause and recovery semantics
+        run: python3 .github/scripts/apply_android_tv_media3_v35_stability_ui.py
+
+      - name: Apply V3.6 compact controls and remove all favorites UI
+        run: python3 .github/scripts/apply_android_tv_media3_v36_ui.py
+
+      - name: Format V3.6 source
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/screens/remote_access_gate.dart \
+            lib/screens/tv_home_screen.dart \
+            lib/screens/player_screen.dart \
+            lib/screens/channel_list_screen.dart \
+            lib/widgets/live_video_view.dart \
+            lib/widgets/native_live_player_view.dart \
+            lib/widgets/channel_tile.dart \
+            lib/services/tv_ui_settings_service.dart \
+            lib/widgets/tv_remote_scope.dart \
+            lib/services/remote_provisioning_service.dart \
+            lib/providers/iptv_provider.dart
+
+      - name: Analyze V3.6 source
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify V3.6 Flutter UI
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'bool get _useMedia3Live => widget.isLiveContent' lib/screens/player_screen.dart
+          grep -q 'PlatformViewsService.initExpensiveAndroidView' lib/widgets/native_live_player_view.dart
+          grep -q 'AndroidViewSurface' lib/widgets/native_live_player_view.dart
+          grep -q '_nativeLiveUserPaused' lib/screens/player_screen.dart
+          grep -q '_topListFocusNode' lib/widgets/live_video_view.dart
+          grep -q 'Duration(seconds: 3)' lib/widgets/live_video_view.dart
+          grep -q 'scale: _usesNativeLive ? 0.82 : 1.0' lib/widgets/live_video_view.dart
+          grep -q 'maxWidth: 1120' lib/widgets/live_video_view.dart
+          ! grep -q 'Icons.favorite' lib/screens/channel_list_screen.dart
+          ! grep -q 'Icons.favorite_border' lib/screens/channel_list_screen.dart
+          ! grep -q 'Icons.favorite' lib/widgets/channel_tile.dart
+          grep -q 'media_kit: 1.2.6' pubspec.yaml
+          grep -q 'media_kit_video: 1.3.1' pubspec.yaml
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+
+      - name: Configure native Media3 SurfaceView shell
+        run: python3 .github/scripts/configure_android_tv_media3_v3_native.py
+
+      - name: Apply V3.4 decoder diagnostics and native EOS recovery
+        run: python3 .github/scripts/apply_android_tv_media3_v34_native.py
+
+      - name: Apply V3.5 Media3 stability tuning
+        run: python3 .github/scripts/apply_android_tv_media3_v35_native.py
+
+      - name: Apply V3.6 Xtream LIVE compatibility
+        run: python3 .github/scripts/apply_android_tv_media3_v36_xtream.py
+
+      - name: Enable IPTV HTTP and isolate V3.6 package
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gradle = Path('android/app/build.gradle.kts')
+          text = gradle.read_text()
+          text = text.replace(
+              'applicationId = "com.tvfull.pro.tvv3test"',
+              'applicationId = "com.tvfull.pro.tvv36test"',
+              1,
+          )
+          gradle.write_text(text)
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          text = text.replace(
+              'android:label="TV FULL V3 TEST"',
+              'android:label="TV FULL V3.6 TEST"',
+              1,
+          )
+          if 'android:usesCleartextTraffic=' not in text:
+              text = text.replace(
+                  '<application',
+                  '<application android:usesCleartextTraffic="true"',
+                  1,
+              )
+          manifest.write_text(text)
+          PY
+
+      - name: Verify generated Android V3.6 shell
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'applicationId = "com.tvfull.pro.tvv36test"' android/app/build.gradle.kts
+          grep -q 'androidx.media3:media3-exoplayer:1.8.0' android/app/build.gradle.kts
+          grep -q 'android:label="TV FULL V3.6 TEST"' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:usesCleartextTraffic="true"' android/app/src/main/AndroidManifest.xml
+          KOTLIN=android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
+          grep -q 'PlayerView(context)' "$KOTLIN"
+          grep -q 'surface is SurfaceView' "$KOTLIN"
+          grep -q 'setEnableDecoderFallback(true)' "$KOTLIN"
+          ! grep -q 'forceEnableMediaCodecAsynchronousQueueing' "$KOTLIN"
+          grep -q 'setBufferDurationsMs(' "$KOTLIN"
+          grep -q 'buildCompatibilityCandidates' "$KOTLIN"
+          grep -q 'mimeTypeForLiveUrl' "$KOTLIN"
+          grep -q 'video/mp2t' "$KOTLIN"
+          grep -q 'application/x-mpegURL' "$KOTLIN"
+          grep -q 'nativeCompatibility' "$KOTLIN"
+          grep -q 'onPlayWhenReadyChanged' "$KOTLIN"
+          grep -q 'onVideoInputFormatChanged' "$KOTLIN"
+          grep -q 'nativeRecovery' "$KOTLIN"
+
+      - name: Build TV V3.6 release APK ARM32 + ARM64
+        run: flutter build apk --release --target-platform android-arm,android-arm64
+
+      - name: Verify final V3.6 APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK")"
+          echo "$BADGING" | head -16
+          echo "$BADGING" | grep -q "package: name='com.tvfull.pro.tvv36test'"
+          echo "$BADGING" | grep -q "application-label:'TV FULL V3.6 TEST'"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          APK_LIST="$(unzip -l "$APK")"
+          for REQUIRED in \
+            'lib/arm64-v8a/libapp.so' \
+            'lib/arm64-v8a/libflutter.so' \
+            'lib/armeabi-v7a/libapp.so' \
+            'lib/armeabi-v7a/libflutter.so'; do
+            echo "$APK_LIST" | grep -Fq "$REQUIRED" || exit 1
+          done
+
+      - name: Prepare V3.6 test artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-V3.6-TEST-Xtream-Compact-UI.apk
+          sha256sum dist/TV-FULL-V3.6-TEST-Xtream-Compact-UI.apk > dist/SHA256.txt
+          git rev-parse HEAD > dist/COMMIT.txt
+          printf '%s\n' \
+            'TV FULL Android TV V3.6 controlled compatibility/UI test' \
+            'Package: com.tvfull.pro.tvv36test' \
+            'LIVE: Media3 1.8.0 + PlayerView SurfaceView + Hybrid Composition' \
+            'V3.5 sync MediaCodec/buffer tuning preserved' \
+            'Xtream /live/: explicit TS/HLS MIME and id.ts/id/id.m3u8 fallback before terminal error' \
+            'Favorite hearts: removed from channel rows and main catalog cards' \
+            'LIVE controls: scaled to 82%, max width 1120' \
+            'Auto-hide: 3 seconds with no remote input, including transient Media3 recovery' \
+            'VOD: media_kit/libmpv unchanged' > dist/TEST-NOTES.txt
+
+      - name: Upload V3.6 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-V3.6-TEST-Xtream-Compact-UI
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
