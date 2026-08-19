@@ -33,11 +33,12 @@ if 'import androidx.media3.exoplayer.DecoderReuseEvaluation' not in text:
         1,
     )
 
-# The Media3 defaults are designed for general playback and can target very
-# large streaming buffers. This TV has limited RAM. Use a bounded LIVE buffer:
-# enough cushion for IPTV jitter, but fast restart after a real rebuffer.
+# Media3 1.8.0 exposes the generic setBufferDurationsMs /
+# setPrioritizeTimeOverSizeThresholds APIs. The newer streaming-specific
+# variants are not available in the pinned 1.8.0 artifact. Since this player is
+# LIVE-only, applying the generic values is equivalent for this controlled test.
 old_player = '    private val player = ExoPlayer.Builder(context, renderersFactory).build()\n'
-new_player = '''    private val liveLoadControl = DefaultLoadControl.Builder()\n        .setBufferDurationsMsForStreaming(\n            8_000,  // min buffer\n            20_000, // max buffer\n            750,    // initial playback\n            1_000,  // resume after rebuffer\n        )\n        .setTargetBufferBytes(32 * 1024 * 1024)\n        .setPrioritizeTimeOverSizeThresholdsForStreaming(true)\n        .build()\n    private val player = ExoPlayer.Builder(context, renderersFactory)\n        .setLoadControl(liveLoadControl)\n        .build()\n'''
+new_player = '''    private val liveLoadControl = DefaultLoadControl.Builder()\n        .setBufferDurationsMs(\n            8_000,  // min buffer\n            20_000, // max buffer\n            750,    // initial playback\n            1_000,  // resume after rebuffer\n        )\n        .setTargetBufferBytes(32 * 1024 * 1024)\n        .setPrioritizeTimeOverSizeThresholds(true)\n        .build()\n    private val player = ExoPlayer.Builder(context, renderersFactory)\n        .setLoadControl(liveLoadControl)\n        .build()\n'''
 text = rep(text, old_player, new_player, 'v35 bounded LIVE load control')
 
 # Report actual play intent. isPlaying becomes false during BUFFERING, which is
