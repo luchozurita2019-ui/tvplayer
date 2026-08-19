@@ -152,8 +152,9 @@ jobs:
           grep -q 'setEnableDecoderFallback(true)' "$KOTLIN"
           ! grep -q 'forceEnableMediaCodecAsynchronousQueueing' "$KOTLIN"
           grep -q 'DefaultLoadControl.Builder()' "$KOTLIN"
-          grep -q 'setBufferDurationsMsForStreaming' "$KOTLIN"
+          grep -q 'setBufferDurationsMs(' "$KOTLIN"
           grep -q 'setTargetBufferBytes(32 \* 1024 \* 1024)' "$KOTLIN"
+          grep -q 'setPrioritizeTimeOverSizeThresholds(true)' "$KOTLIN"
           grep -q 'onPlayWhenReadyChanged' "$KOTLIN"
           grep -q 'onVideoInputFormatChanged' "$KOTLIN"
           grep -q 'onDroppedVideoFrames' "$KOTLIN"
@@ -196,7 +197,7 @@ jobs:
             'MediaCodec async queueing: NOT forced (device default restored)' \
             'Decoder fallback: enabled' \
             'LIVE buffer: 8s min / 20s max / 0.75s start / 1s rebuffer' \
-            'Target buffer: 32 MiB, time priority for streaming' \
+            'Target buffer: 32 MiB, time priority' \
             'PAUSA: only explicit user pause via playWhenReady' \
             'Transient buffering: RECUPERANDO only after debounce' \
             'Decoder/format/dropped frame diagnostics: enabled' \
