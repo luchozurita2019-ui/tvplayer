@@ -1,7 +1,9 @@
 from pathlib import Path
 
 LIVE = Path('lib/widgets/live_video_view.dart')
+PLAYER = Path('lib/screens/player_screen.dart')
 text = LIVE.read_text()
+player = PLAYER.read_text()
 
 # TV remote keys are handled only in the visual layer. Playback/network logic is
 # intentionally untouched.
@@ -62,7 +64,6 @@ if "KeyEventResult _handleTvRemoteKey" not in text:
 
     final key = event.logicalKey;
 
-    // Teclas multimedia físicas del control remoto.
     if (key == LogicalKeyboardKey.mediaPlayPause ||
         key == LogicalKeyboardKey.mediaPlay ||
         key == LogicalKeyboardKey.mediaPause) {
@@ -105,8 +106,6 @@ if "KeyEventResult _handleTvRemoteKey" not in text:
       return KeyEventResult.handled;
     }
 
-    // Si los controles están ocultos, el primer toque del DPAD/OK sólo los
-    // despierta. El segundo toque ya navega/activa el botón focalizado.
     final navigationKey = key == LogicalKeyboardKey.arrowUp ||
         key == LogicalKeyboardKey.arrowDown ||
         key == LogicalKeyboardKey.arrowLeft ||
@@ -143,5 +142,23 @@ if old_build in text:
 elif "onKeyEvent: _handleTvRemoteKey" not in text:
     raise SystemExit('build marker not found')
 
+# While the channel drawer is closed, do not build/filter its channel catalog at
+# all. On low-RAM TVs this keeps the video surface from competing with an
+# invisible ListView and its widgets.
+old_filter = """    final query = _channelListQuery.toLowerCase();\n    final filteredChannels = query.trim().isEmpty\n        ? widget.playlist\n        : widget.playlist\n              .where((c) => c.name.toLowerCase().contains(query))\n              .toList();\n"""
+new_filter = """    final query = _channelListQuery.toLowerCase();\n    final filteredChannels = !_showChannelList\n        ? const <Channel>[]\n        : query.trim().isEmpty\n            ? widget.playlist\n            : widget.playlist\n                .where((c) => c.name.toLowerCase().contains(query))\n                .toList();\n"""
+if old_filter in player:
+    player = player.replace(old_filter, new_filter, 1)
+elif "final filteredChannels = !_showChannelList" not in player:
+    raise SystemExit('player channel filter marker not found')
+
+old_drawer = """          AnimatedPositioned(\n            duration: const Duration(milliseconds: 200),\n            curve: Curves.easeOutCubic,\n            top: 0,\n            bottom: 0,\n            right: _showChannelList ? 0 : -370,\n            width: 370,\n"""
+new_drawer = """          if (_showChannelList)\n            Positioned(\n              top: 0,\n              bottom: 0,\n              right: 0,\n              width: 370,\n"""
+if old_drawer in player:
+    player = player.replace(old_drawer, new_drawer, 1)
+elif "if (_showChannelList)\n            Positioned(" not in player:
+    raise SystemExit('player drawer marker not found')
+
 LIVE.write_text(text)
+PLAYER.write_text(player)
 print('Android TV runtime optimization applied')
