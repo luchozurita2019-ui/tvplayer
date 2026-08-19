@@ -11,12 +11,11 @@ dependencies:
     sdk: flutter
 
   # --- Reproducción de video/audio ---
-  # media_kit usa libmpv/FFmpeg por debajo: decodificación nativa, GPU,
-  # muy superior en fluidez a un WebView o a video_player estándar.
-  # Soporta HLS/TS/M3U8 (streams IPTV en vivo) de forma nativa.
-  media_kit: ^1.1.11
-  media_kit_video: ^1.2.5
-  media_kit_libs_video: ^1.0.5 # trae los binarios nativos para todas las plataformas
+  # V2 TV congela exactamente las versiones usadas por la V1 probada para que
+  # la comparación de rendimiento no cambie el motor por una actualización.
+  media_kit: 1.2.6
+  media_kit_video: 1.3.1
+  media_kit_libs_video: 1.0.7
 
   # --- Estado de la app ---
   provider: ^6.1.2
