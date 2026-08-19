@@ -1,0 +1,118 @@
+name: Build Android Mobile Payment Status V1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-mobile-payment-status-v1
+    paths:
+      - '.github/scripts/apply_android_mobile_remote_sync_v2.py'
+      - '.github/scripts/apply_android_mobile_portrait_ui_v3.py'
+      - '.github/workflows/build-android-mobile-payment-status-v1.yml'
+      - 'lib/**'
+      - 'pubspec.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-mobile:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout mobile payment branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-mobile-payment-status-v1
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Apply macOS-style panel list sync
+        run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
+
+      - name: Apply portrait responsive UI
+        run: python3 .github/scripts/apply_android_mobile_portrait_ui_v3.py
+
+      - name: Format payment remote sync and responsive UI files
+        run: dart format lib/main.dart lib/screens/remote_access_gate.dart lib/services/remote_provisioning_service.dart lib/providers/iptv_provider.dart lib/screens/source_content_screen.dart lib/screens/player_screen.dart lib/widgets/live_video_view.dart
+
+      - name: Analyze app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify payment panel sync and portrait UI markers
+        shell: bash
+        run: |
+          grep -q 'RemoteAccessGate' lib/main.dart
+          grep -q 'RemoteDeviceAccessBlockedException' lib/services/remote_provisioning_service.dart
+          grep -q "reason == 'payment_due'" lib/services/remote_provisioning_service.dart
+          grep -q "'platform': 'android'" lib/services/remote_provisioning_service.dart
+          grep -q 'RemoteProvisioningConfiguration' lib/services/remote_provisioning_service.dart
+          grep -q 'RemoteProvisionedService' lib/services/remote_provisioning_service.dart
+          grep -q "service.type != 'm3u' && service.type != 'xtream'" lib/services/remote_provisioning_service.dart
+          grep -q 'loadFingerprints' lib/services/remote_provisioning_service.dart
+          grep -q 'syncRemoteServices' lib/providers/iptv_provider.dart
+          grep -q 'tvf_remote_' lib/providers/iptv_provider.dart
+          grep -q 'XtreamService.tryConnectFromPlaylistUrl(url)' lib/providers/iptv_provider.dart
+          grep -q 'PlaylistSourceType.xtream' lib/providers/iptv_provider.dart
+          grep -q 'PlaylistSourceType.m3u' lib/providers/iptv_provider.dart
+          grep -q 'constraints.maxWidth < 520 ? 1.85 : 2.3' lib/screens/source_content_screen.dart
+          grep -q 'MediaQuery.sizeOf(context).width < 600 ? 76 : 18' lib/screens/player_screen.dart
+          grep -q 'portraitPhone' lib/widgets/live_video_view.dart
+          grep -q 'WrapAlignment.center' lib/widgets/live_video_view.dart
+          grep -q 'compactTop' lib/widgets/live_video_view.dart
+          grep -q 'paymentDue' lib/screens/remote_access_gate.dart
+          grep -q 'Reintentar' lib/screens/remote_access_gate.dart
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+
+      - name: Allow Internet in release APK
+        shell: bash
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+          fi
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Verify APK signature and package
+        shell: bash
+        run: |
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -12
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-PRO-Android-Mobile-Panel-Sync-Payment-Portrait-V3.apk
+          sha256sum dist/TV-FULL-PRO-Android-Mobile-Panel-Sync-Payment-Portrait-V3.apk > dist/SHA256.txt
+          git rev-parse HEAD > dist/COMMIT.txt
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-Android-Mobile-Panel-Sync-Payment-Portrait-V3
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

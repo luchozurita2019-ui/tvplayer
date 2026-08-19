@@ -1,0 +1,64 @@
+name: Build Android Test APK
+
+on:
+  push:
+    branches:
+      - performance-engine-v38-hotplayer-baseline
+    paths:
+      - '.github/workflows/build-android-test.yml'
+  workflow_dispatch:
+
+jobs:
+  build-android:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze existing project
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Allow Internet in release APK
+        shell: bash
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            sed -i '/<manifest/a\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+          fi
+
+      - name: Build release APK
+        run: flutter build apk --release
+
+      - name: Prepare APK artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-PRO-Android-Test.apk
+          sha256sum dist/TV-FULL-PRO-Android-Test.apk | tee dist/SHA256.txt
+
+      - name: Upload Android APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-Android-Test
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30

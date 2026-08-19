@@ -1,0 +1,188 @@
+name: Build Android TV Optimized V1
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-payment-status-v1
+    paths:
+      - '.github/scripts/apply_android_mobile_remote_sync_v2.py'
+      - '.github/scripts/apply_android_tv_runtime_v1.py'
+      - '.github/workflows/build-android-tv-optimized-v1.yml'
+      - 'lib/**'
+      - 'pubspec.yaml'
+  pull_request:
+    branches:
+      - main
+    paths:
+      - '.github/scripts/apply_android_mobile_remote_sync_v2.py'
+      - '.github/scripts/apply_android_tv_runtime_v1.py'
+      - '.github/workflows/build-android-tv-optimized-v1.yml'
+      - 'lib/**'
+      - 'pubspec.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-tv:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout TV branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-payment-status-v1
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Preserve TV FULL panel sync
+        run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
+
+      - name: Apply TV-only runtime optimization
+        run: python3 .github/scripts/apply_android_tv_runtime_v1.py
+
+      - name: Format TV files
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/screens/remote_access_gate.dart \
+            lib/screens/tv_home_screen.dart \
+            lib/services/tv_ui_settings_service.dart \
+            lib/widgets/tv_remote_scope.dart \
+            lib/widgets/live_video_view.dart \
+            lib/services/remote_provisioning_service.dart \
+            lib/providers/iptv_provider.dart
+
+      - name: Analyze TV app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify TV and panel invariants
+        shell: bash
+        run: |
+          grep -q 'RemoteAccessGate' lib/main.dart
+          grep -q 'TvHomeScreen' lib/screens/remote_access_gate.dart
+          grep -q 'TvUiSettingsService' lib/main.dart
+          grep -q 'TvRemoteScope' lib/main.dart
+          grep -q 'DeviceOrientation.landscapeLeft' lib/main.dart
+          grep -q 'TV FULL PRO' lib/screens/tv_home_screen.dart
+          ! grep -q 'Tu entretenimiento' lib/screens/tv_home_screen.dart
+          ! grep -q "label: 'Perfil'" lib/screens/tv_home_screen.dart
+          grep -q 'TvTextSize.small' lib/services/tv_ui_settings_service.dart
+          grep -q 'DirectionalFocusIntent' lib/widgets/tv_remote_scope.dart
+          grep -q 'mediaPlayPause' lib/widgets/live_video_view.dart
+          grep -q 'Duration(milliseconds: 1500)' lib/widgets/live_video_view.dart
+          grep -q 'En LIVE no reconstruimos el árbol del Video' lib/widgets/live_video_view.dart
+          grep -q 'RemoteProvisioningConfiguration' lib/services/remote_provisioning_service.dart
+          grep -q 'syncRemoteServices' lib/providers/iptv_provider.dart
+          grep -q 'tvf_remote_' lib/providers/iptv_provider.dart
+          grep -q "reason == 'payment_due'" lib/services/remote_provisioning_service.dart
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+
+      - name: Configure Android TV manifest
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          text = p.read_text()
+
+          if 'android.permission.INTERNET' not in text:
+              text = text.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                  '    <uses-permission android:name="android.permission.INTERNET" />',
+                  1,
+              )
+
+          features = (
+              '    <uses-feature android:name="android.software.leanback" android:required="false" />\n'
+              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+          )
+          if 'android.software.leanback' not in text:
+              text = text.replace('<application', features + '    <application', 1)
+
+          if 'android:screenOrientation="landscape"' not in text:
+              text = text.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity"\n'
+                  '            android:screenOrientation="landscape"\n'
+                  '            android:resizeableActivity="false"',
+                  1,
+              )
+
+          leanback = '<category android:name="android.intent.category.LEANBACK_LAUNCHER"/>'
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in text:
+              text = text.replace(
+                  '<category android:name="android.intent.category.LAUNCHER"/>',
+                  '<category android:name="android.intent.category.LAUNCHER"/>\n'
+                  f'                {leanback}',
+                  1,
+              )
+
+          p.write_text(text)
+          PY
+          cat android/app/src/main/AndroidManifest.xml
+
+      - name: Build TV release APK ARM32 + ARM64
+        run: flutter build apk --release --target-platform android-arm,android-arm64
+
+      - name: Verify APK signature package and required TV ABIs
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -16
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+
+          APK_LIST="$(unzip -l "$APK")"
+          for REQUIRED in \
+            'lib/arm64-v8a/libapp.so' \
+            'lib/arm64-v8a/libflutter.so' \
+            'lib/armeabi-v7a/libapp.so' \
+            'lib/armeabi-v7a/libflutter.so'; do
+            echo "$APK_LIST" | grep -Fq "$REQUIRED" || {
+              echo "ERROR: missing required TV binary: $REQUIRED"
+              exit 1
+            }
+          done
+
+          echo 'ARM32 + ARM64 Flutter binaries verified.'
+          echo 'Note: media_kit/libmpv may bundle additional x86/x86_64 native libraries; these are harmless and are not Flutter app targets.'
+          echo "$APK_LIST" | grep -E 'lib/(armeabi-v7a|arm64-v8a|x86|x86_64)/' | head -40 || true
+
+      - name: Prepare TV APK artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-PRO-Android-TV-Optimized-V1.apk
+          sha256sum dist/TV-FULL-PRO-Android-TV-Optimized-V1.apk > dist/SHA256.txt
+          git rev-parse HEAD > dist/COMMIT.txt
+
+      - name: Upload Android TV APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-Android-TV-Optimized-V1
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
