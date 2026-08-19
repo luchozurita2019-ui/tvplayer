@@ -76,10 +76,12 @@ jobs:
         run: |
           set -euo pipefail
           grep -q 'RemoteProvisioningConfiguration' lib/services/remote_provisioning_service.dart
-          grep -q 'configuration.services.isEmpty' lib/screens/remote_access_gate.dart
-          grep -q 'Vinculá este televisor' lib/screens/remote_access_gate.dart
-          grep -q 'Timer(const Duration(seconds: 6)' lib/screens/remote_access_gate.dart
-          grep -q 'IptvProvider ya fue inicializado por RemoteAccessGate' lib/screens/tv_home_screen.dart
+          grep -q 'configuration.services.isEmpty' lib/services/remote_provisioning_service.dart
+          grep -q "reason: 'awaiting_service'" lib/services/remote_provisioning_service.dart
+          grep -q 'Vinculá este televisor' lib/services/remote_provisioning_service.dart
+          grep -q 'final provider = context.read<IptvProvider>();' lib/screens/remote_access_gate.dart
+          grep -q 'await provider.init();' lib/screens/remote_access_gate.dart
+          grep -q 'provider ya llega sincronizado desde RemoteAccessGate' lib/screens/tv_home_screen.dart
           grep -q '_playPauseFocusNode' lib/widgets/live_video_view.dart
           grep -q 'focusColor: const Color(0xFF1677FF)' lib/widgets/live_video_view.dart
           grep -q 'FocusTraversalGroup' lib/widgets/live_video_view.dart
