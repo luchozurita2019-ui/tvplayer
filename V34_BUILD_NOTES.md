@@ -1,0 +1,1 @@
+V3.4 keeps the V3.3 Media3 + SurfaceView + Hybrid Composition base and adds: hidden per-channel favorite button, explicit top/bottom DPAD focus bridge, non-animated native LIVE controls, decoder fallback, asynchronous MediaCodec queueing, decoder-name diagnostics, and native post-start EOS recovery. VOD remains media_kit/libmpv. Do not merge into main.
