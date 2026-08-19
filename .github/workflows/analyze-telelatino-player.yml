@@ -47,10 +47,10 @@ jobs:
           set -euo pipefail
           rm -rf apkx && mkdir apkx
           unzip -q telelatino.apk -d apkx
-          {
-            find apkx -maxdepth 1 -name 'classes*.dex' -print0 | xargs -0 -r strings -a
-            find apkx/lib -type f -name '*.so' -print0 2>/dev/null | xargs -0 -r strings -a
-          } > report/all-strings.txt
+          find apkx -maxdepth 1 -name 'classes*.dex' -print0 | xargs -0 -r strings -a > report/all-strings.txt
+          if [ -d apkx/lib ]; then
+            find apkx/lib -type f -name '*.so' -print0 | xargs -0 -r strings -a >> report/all-strings.txt || true
+          fi
 
           python3 - <<'PY'
           from pathlib import Path
