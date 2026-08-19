@@ -17,7 +17,7 @@ jobs:
         with:
           ref: analysis-telelatino-apk
 
-      - name: Download exact Telelatino APK
+      - name: Download current Telelatino APK
         shell: bash
         run: |
           set -euo pipefail
@@ -25,13 +25,13 @@ jobs:
           curl -L --fail --retry 3 --retry-delay 2 -A 'Mozilla/5.0' -o telelatino.apk "$URL"
           ls -lh telelatino.apk
           sha256sum telelatino.apk | tee telelatino.sha256
-          grep -q '^57c9a32d146f2bc77c39c61d8807bd9df1a8b611aa7c9a20ff2f9b56e17a3368 ' telelatino.sha256
 
       - name: Inspect APK manifest package and native libraries
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p report
+          cp telelatino.sha256 report/
           BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
           AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
           "$AAPT" dump badging telelatino.apk > report/badging.txt
@@ -41,7 +41,7 @@ jobs:
           echo '--- NATIVE LIBRARIES ---'
           cat report/native-libs.txt
 
-      - name: Fingerprint player engines from DEX and resources
+      - name: Fingerprint player engines from DEX and native libraries
         shell: bash
         run: |
           set -euo pipefail
@@ -50,7 +50,6 @@ jobs:
           {
             find apkx -maxdepth 1 -name 'classes*.dex' -print0 | xargs -0 -r strings -a
             find apkx/lib -type f -name '*.so' -print0 2>/dev/null | xargs -0 -r strings -a
-            find apkx/assets apkx/res -type f -maxdepth 4 -print0 2>/dev/null | xargs -0 -r strings -a 2>/dev/null || true
           } > report/all-strings.txt
 
           python3 - <<'PY'
@@ -83,13 +82,13 @@ jobs:
           print(Path('report/player-fingerprint.txt').read_text())
           PY
 
-      - name: Extract decisive class and surface strings
+      - name: Extract decisive player and surface evidence
         shell: bash
         run: |
           set -euo pipefail
-          grep -Eia 'androidx[./]media3|com[./]google[./]android[./]exoplayer2|ExoPlayer|DefaultLoadControl|MediaCodecVideoRenderer|PlayerView|SurfaceView|TextureView|libvlc|videolan|libmpv|media_kit|ijkplayer|gsyvideoplayer|ffmpeg' report/all-strings.txt \
-            | sort -u | head -2000 > report/player-evidence.txt || true
-          cat report/player-evidence.txt | head -300
+          grep -Eia 'androidx[./]media3|com[./]google[./]android[./]exoplayer2|ExoPlayer|DefaultLoadControl|MediaCodecVideoRenderer|PlayerView|SurfaceView|TextureView|SimpleExoPlayer|libvlc|videolan|libmpv|media_kit|ijkplayer|gsyvideoplayer|ffmpeg' report/all-strings.txt \
+            | sort -u | head -2500 > report/player-evidence.txt || true
+          cat report/player-evidence.txt | head -400
 
       - name: Summarize APK architecture
         shell: bash
@@ -97,15 +96,16 @@ jobs:
           set -euo pipefail
           python3 - <<'PY'
           from pathlib import Path
+          sha=Path('report/telelatino.sha256').read_text(errors='ignore').strip()
           badging=Path('report/badging.txt').read_text(errors='ignore')
           libs=Path('report/native-libs.txt').read_text(errors='ignore')
           fp=Path('report/player-fingerprint.txt').read_text(errors='ignore')
           ev=Path('report/player-evidence.txt').read_text(errors='ignore')
-          summary=['TELELATINO APK PLAYER ANALYSIS','',badging.splitlines()[0] if badging else 'package unknown','',fp,'--- Native libs relevant ---']
+          summary=['TELELATINO APK PLAYER ANALYSIS','',sha,badging.splitlines()[0] if badging else 'package unknown','',fp,'--- Native libs relevant ---']
           for line in libs.splitlines():
               low=line.lower()
               if any(x in low for x in ['mpv','vlc','ijk','ffmpeg','exo','media','flutter']): summary.append(line)
-          summary += ['', '--- Evidence sample ---'] + ev.splitlines()[:200]
+          summary += ['', '--- Evidence sample ---'] + ev.splitlines()[:300]
           Path('report/SUMMARY.txt').write_text('\n'.join(summary)+'\n')
           print(Path('report/SUMMARY.txt').read_text())
           PY
