@@ -1,0 +1,119 @@
+name: Analyze Telelatino APK Player
+
+on:
+  pull_request:
+    branches:
+      - analysis-telelatino-apk
+
+permissions:
+  contents: read
+
+jobs:
+  inspect-apk:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout analysis branch
+        uses: actions/checkout@v4
+        with:
+          ref: analysis-telelatino-apk
+
+      - name: Download exact Telelatino APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://github.com/Duartegame/App/releases/download/version01/telelatino.apk'
+          curl -L --fail --retry 3 --retry-delay 2 -A 'Mozilla/5.0' -o telelatino.apk "$URL"
+          ls -lh telelatino.apk
+          sha256sum telelatino.apk | tee telelatino.sha256
+          grep -q '^57c9a32d146f2bc77c39c61d8807bd9df1a8b611aa7c9a20ff2f9b56e17a3368 ' telelatino.sha256
+
+      - name: Inspect APK manifest package and native libraries
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p report
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+          AAPT="$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt"
+          "$AAPT" dump badging telelatino.apk > report/badging.txt
+          unzip -l telelatino.apk > report/file-list.txt
+          unzip -l telelatino.apk | grep -E 'lib/[^/]+/.*\.so$' > report/native-libs.txt || true
+          cat report/badging.txt | head -30
+          echo '--- NATIVE LIBRARIES ---'
+          cat report/native-libs.txt
+
+      - name: Fingerprint player engines from DEX and resources
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf apkx && mkdir apkx
+          unzip -q telelatino.apk -d apkx
+          {
+            find apkx -maxdepth 1 -name 'classes*.dex' -print0 | xargs -0 -r strings -a
+            find apkx/lib -type f -name '*.so' -print0 2>/dev/null | xargs -0 -r strings -a
+            find apkx/assets apkx/res -type f -maxdepth 4 -print0 2>/dev/null | xargs -0 -r strings -a 2>/dev/null || true
+          } > report/all-strings.txt
+
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('report/all-strings.txt').read_text(errors='ignore')
+          needles = {
+              'AndroidX Media3': ['androidx/media3', 'androidx.media3', 'ExoPlayerImpl', 'DefaultLoadControl', 'MediaCodecVideoRenderer'],
+              'Legacy ExoPlayer2': ['com/google/android/exoplayer2', 'com.google.android.exoplayer2'],
+              'VLC/libVLC': ['org/videolan/libvlc', 'org.videolan.libvlc', 'libvlc', 'VLCVideoLayout'],
+              'libmpv/media_kit': ['libmpv', 'media_kit', 'com.alexmercerind.media_kit_video', 'mpv_render_context'],
+              'IJKPlayer': ['tv/danmaku/ijk', 'tv.danmaku.ijk', 'ijkplayer', 'libijkffmpeg'],
+              'GSYVideoPlayer': ['com/shuyu/gsyvideoplayer', 'GSYVideoPlayer'],
+              'Flutter': ['io/flutter', 'io.flutter', 'libflutter.so'],
+              'React Native video': ['com/brentvatne/exoplayer', 'react-native-video'],
+          }
+          out=[]
+          for family, pats in needles.items():
+              hits=[]
+              for p in pats:
+                  c=text.lower().count(p.lower())
+                  if c:
+                      hits.append((p,c))
+              out.append(f'[{family}]')
+              if hits:
+                  for p,c in hits:
+                      out.append(f'  {p}: {c}')
+              else:
+                  out.append('  NO MATCH')
+          Path('report/player-fingerprint.txt').write_text('\n'.join(out)+'\n')
+          print(Path('report/player-fingerprint.txt').read_text())
+          PY
+
+      - name: Extract decisive class and surface strings
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -Eia 'androidx[./]media3|com[./]google[./]android[./]exoplayer2|ExoPlayer|DefaultLoadControl|MediaCodecVideoRenderer|PlayerView|SurfaceView|TextureView|libvlc|videolan|libmpv|media_kit|ijkplayer|gsyvideoplayer|ffmpeg' report/all-strings.txt \
+            | sort -u | head -2000 > report/player-evidence.txt || true
+          cat report/player-evidence.txt | head -300
+
+      - name: Summarize APK architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+          badging=Path('report/badging.txt').read_text(errors='ignore')
+          libs=Path('report/native-libs.txt').read_text(errors='ignore')
+          fp=Path('report/player-fingerprint.txt').read_text(errors='ignore')
+          ev=Path('report/player-evidence.txt').read_text(errors='ignore')
+          summary=['TELELATINO APK PLAYER ANALYSIS','',badging.splitlines()[0] if badging else 'package unknown','',fp,'--- Native libs relevant ---']
+          for line in libs.splitlines():
+              low=line.lower()
+              if any(x in low for x in ['mpv','vlc','ijk','ffmpeg','exo','media','flutter']): summary.append(line)
+          summary += ['', '--- Evidence sample ---'] + ev.splitlines()[:200]
+          Path('report/SUMMARY.txt').write_text('\n'.join(summary)+'\n')
+          print(Path('report/SUMMARY.txt').read_text())
+          PY
+
+      - name: Upload analysis report
+        uses: actions/upload-artifact@v4
+        with:
+          name: telelatino-player-analysis
+          path: report/
+          if-no-files-found: error
+          retention-days: 7
