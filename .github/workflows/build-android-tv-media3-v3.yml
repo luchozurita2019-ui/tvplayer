@@ -1,0 +1,507 @@
+name: Build Android TV Media3 V3
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-media3-v3-test
+    paths:
+      - '.github/scripts/apply_android_mobile_remote_sync_v2.py'
+      - '.github/scripts/apply_android_tv_runtime_v1.py'
+      - '.github/scripts/apply_android_tv_v2_test.py'
+      - '.github/scripts/apply_android_tv_media3_v3.py'
+      - '.github/workflows/build-android-tv-media3-v3.yml'
+      - 'lib/**'
+      - 'pubspec.yaml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-android-tv-v3:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout TV V3 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-media3-v3-test
+
+      - name: Set up Java
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Get pinned Flutter dependencies
+        run: |
+          flutter pub get
+          flutter pub deps --style=compact | grep -E 'media_kit |media_kit_video |media_kit_libs_video ' || true
+
+      - name: Preserve TV FULL panel sync
+        run: python3 .github/scripts/apply_android_mobile_remote_sync_v2.py
+
+      - name: Apply TV V1 runtime baseline
+        run: python3 .github/scripts/apply_android_tv_runtime_v1.py
+
+      - name: Apply TV V2 pairing focus baseline
+        run: python3 .github/scripts/apply_android_tv_v2_test.py
+
+      - name: Apply V3 Media3 SurfaceView LIVE path
+        run: python3 .github/scripts/apply_android_tv_media3_v3.py
+
+      - name: Format TV V3 Dart files
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/screens/remote_access_gate.dart \
+            lib/screens/tv_home_screen.dart \
+            lib/screens/player_screen.dart \
+            lib/services/tv_ui_settings_service.dart \
+            lib/widgets/tv_remote_scope.dart \
+            lib/widgets/live_video_view.dart \
+            lib/widgets/native_live_player_view.dart \
+            lib/services/remote_provisioning_service.dart \
+            lib/providers/iptv_provider.dart
+
+      - name: Analyze TV V3 app
+        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+
+      - name: Verify V3 source invariants
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'Vinculá este televisor' lib/services/remote_provisioning_service.dart
+          grep -q 'final provider = context.read<IptvProvider>();' lib/screens/remote_access_gate.dart
+          grep -q '_playPauseFocusNode' lib/widgets/live_video_view.dart
+          grep -q 'FocusTraversalGroup' lib/widgets/live_video_view.dart
+          grep -q "viewType: 'tvfull/media3_live_surface'" lib/widgets/native_live_player_view.dart
+          grep -q 'bool get _useMedia3Live => widget.isLiveContent' lib/screens/player_screen.dart
+          grep -q 'Media3 + SurfaceView · primer frame confirmado' lib/screens/player_screen.dart
+          grep -q 'nativeLiveSurface: widget.isLiveContent' lib/screens/player_screen.dart
+          grep -q 'widget.nativeLiveSurface!' lib/widgets/live_video_view.dart
+          grep -q 'unawaited(_initializeAndPlay())' lib/screens/player_screen.dart
+          grep -q 'media_kit: 1.2.6' pubspec.yaml
+          grep -q 'media_kit_video: 1.3.1' pubspec.yaml
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Remove generated template test
+        run: rm -f test/widget_test.dart
+
+      - name: Set isolated V3 test application ID
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          gradle = Path('android/app/build.gradle.kts')
+          text = gradle.read_text()
+          old = 'applicationId = "com.example.iptv_player"'
+          new = 'applicationId = "com.tvfull.pro.tvv3test"'
+          if old not in text:
+              raise SystemExit('Generated applicationId marker not found')
+          gradle.write_text(text.replace(old, new, 1))
+
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          text = text.replace(
+              'android:label="iptv_player"',
+              'android:label="TV FULL V3 TEST"',
+              1,
+          )
+          manifest.write_text(text)
+          PY
+          grep -q 'applicationId = "com.tvfull.pro.tvv3test"' android/app/build.gradle.kts
+          grep -q 'android:label="TV FULL V3 TEST"' android/app/src/main/AndroidManifest.xml
+
+      - name: Configure Android TV and keep Impeller OFF for controlled A-B
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('android/app/src/main/AndroidManifest.xml')
+          text = p.read_text()
+
+          if 'android.permission.INTERNET' not in text:
+              text = text.replace(
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">',
+                  '<manifest xmlns:android="http://schemas.android.com/apk/res/android">\n'
+                  '    <uses-permission android:name="android.permission.INTERNET" />',
+                  1,
+              )
+
+          features = (
+              '    <uses-feature android:name="android.software.leanback" android:required="false" />\n'
+              '    <uses-feature android:name="android.hardware.touchscreen" android:required="false" />\n'
+          )
+          if 'android.software.leanback' not in text:
+              text = text.replace('<application', features + '    <application', 1)
+
+          if 'android:screenOrientation="landscape"' not in text:
+              text = text.replace(
+                  'android:name=".MainActivity"',
+                  'android:name=".MainActivity"\n'
+                  '            android:screenOrientation="landscape"\n'
+                  '            android:resizeableActivity="false"',
+                  1,
+              )
+
+          if 'android.intent.category.LEANBACK_LAUNCHER' not in text:
+              text = text.replace(
+                  '<category android:name="android.intent.category.LAUNCHER"/>',
+                  '<category android:name="android.intent.category.LAUNCHER"/>\n'
+                  '                <category android:name="android.intent.category.LEANBACK_LAUNCHER"/>',
+                  1,
+              )
+
+          impeller = (
+              '        <meta-data\n'
+              '            android:name="io.flutter.embedding.android.EnableImpeller"\n'
+              '            android:value="false" />\n'
+          )
+          if 'io.flutter.embedding.android.EnableImpeller' not in text:
+              marker = '        <activity\n'
+              if marker not in text:
+                  raise SystemExit('Android activity marker not found')
+              text = text.replace(marker, impeller + marker, 1)
+
+          p.write_text(text)
+          PY
+          grep -q 'io.flutter.embedding.android.EnableImpeller' android/app/src/main/AndroidManifest.xml
+          grep -q 'android:value="false"' android/app/src/main/AndroidManifest.xml
+
+      - name: Add AndroidX Media3 1.8.0 native SurfaceView player
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          gradle = Path('android/app/build.gradle.kts')
+          text = gradle.read_text()
+          deps = '''
+
+dependencies {
+    implementation("androidx.media3:media3-exoplayer:1.8.0")
+    implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
+    implementation("androidx.media3:media3-ui:1.8.0")
+}
+'''
+          if 'androidx.media3:media3-exoplayer:1.8.0' not in text:
+              text += deps
+          gradle.write_text(text)
+
+          kotlin_dir = Path('android/app/src/main/kotlin/com/example/iptv_player')
+          kotlin_dir.mkdir(parents=True, exist_ok=True)
+
+          main = kotlin_dir / 'MainActivity.kt'
+          main.write_text('''package com.example.iptv_player
+
+import io.flutter.embedding.android.FlutterActivity
+import io.flutter.embedding.engine.FlutterEngine
+
+class MainActivity : FlutterActivity() {
+    override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
+        super.configureFlutterEngine(flutterEngine)
+        flutterEngine
+            .platformViewsController
+            .registry
+            .registerViewFactory(
+                "tvfull/media3_live_surface",
+                Media3LivePlayerFactory(flutterEngine.dartExecutor.binaryMessenger),
+            )
+    }
+}
+''')
+
+          native = kotlin_dir / 'Media3LivePlayerView.kt'
+          native.write_text(r'''package com.example.iptv_player
+
+import android.content.Context
+import android.view.SurfaceView
+import android.view.View
+import android.widget.FrameLayout
+import androidx.media3.common.MediaItem
+import androidx.media3.common.PlaybackException
+import androidx.media3.common.Player
+import androidx.media3.common.VideoSize
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.datasource.DefaultDataSource
+import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
+import io.flutter.plugin.common.BinaryMessenger
+import io.flutter.plugin.common.MethodCall
+import io.flutter.plugin.common.MethodChannel
+import io.flutter.plugin.common.StandardMessageCodec
+import io.flutter.plugin.platform.PlatformView
+import io.flutter.plugin.platform.PlatformViewFactory
+
+@UnstableApi
+class Media3LivePlayerFactory(
+    private val messenger: BinaryMessenger,
+) : PlatformViewFactory(StandardMessageCodec.INSTANCE) {
+    override fun create(context: Context, viewId: Int, args: Any?): PlatformView {
+        return Media3LivePlayerView(context, viewId, messenger)
+    }
+}
+
+@UnstableApi
+private class Media3LivePlayerView(
+    context: Context,
+    viewId: Int,
+    messenger: BinaryMessenger,
+) : PlatformView, MethodChannel.MethodCallHandler, Player.Listener {
+    private val root = FrameLayout(context)
+    private val playerView = PlayerView(context)
+    private val player = ExoPlayer.Builder(context).build()
+    private val channel = MethodChannel(messenger, "tvfull/media3_live_$viewId")
+    private var openSession = 0
+    private var released = false
+
+    init {
+        playerView.useController = false
+        playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+        playerView.player = player
+        root.addView(
+            playerView,
+            FrameLayout.LayoutParams(
+                FrameLayout.LayoutParams.MATCH_PARENT,
+                FrameLayout.LayoutParams.MATCH_PARENT,
+            ),
+        )
+
+        val surface = playerView.videoSurfaceView
+        if (surface is SurfaceView) {
+            surface.setZOrderOnTop(false)
+            surface.setZOrderMediaOverlay(false)
+            sendEvent(mapOf("type" to "surface", "value" to "SurfaceView", "session" to openSession))
+        } else {
+            sendEvent(
+                mapOf(
+                    "type" to "surface",
+                    "value" to (surface?.javaClass?.simpleName ?: "unknown"),
+                    "session" to openSession,
+                ),
+            )
+        }
+
+        player.addListener(this)
+        channel.setMethodCallHandler(this)
+    }
+
+    override fun getView(): View = root
+
+    override fun onMethodCall(call: MethodCall, result: MethodChannel.Result) {
+        if (released) {
+            result.error("released", "Media3 player already released", null)
+            return
+        }
+
+        when (call.method) {
+            "open" -> {
+                val url = call.argument<String>("url")?.trim().orEmpty()
+                if (url.isEmpty()) {
+                    result.error("invalid_url", "Empty live URL", null)
+                    return
+                }
+
+                val headers = mutableMapOf<String, String>()
+                val rawHeaders = call.argument<Map<*, *>>("headers")
+                rawHeaders?.forEach { (key, value) ->
+                    val k = key?.toString()?.trim().orEmpty()
+                    val v = value?.toString()?.trim().orEmpty()
+                    if (k.isNotEmpty() && v.isNotEmpty()) headers[k] = v
+                }
+
+                openSession += 1
+                try {
+                    val httpFactory = DefaultHttpDataSource.Factory()
+                        .setAllowCrossProtocolRedirects(true)
+                        .setConnectTimeoutMs(10_000)
+                        .setReadTimeoutMs(15_000)
+                        .setDefaultRequestProperties(headers)
+                    headers.entries.firstOrNull { it.key.equals("User-Agent", ignoreCase = true) }
+                        ?.value
+                        ?.takeIf { it.isNotBlank() }
+                        ?.let { httpFactory.setUserAgent(it) }
+
+                    val dataSourceFactory = DefaultDataSource.Factory(root.context, httpFactory)
+                    val mediaSourceFactory = DefaultMediaSourceFactory(dataSourceFactory)
+                    val mediaItem = MediaItem.Builder().setUri(url).build()
+                    val mediaSource = mediaSourceFactory.createMediaSource(mediaItem)
+
+                    player.stop()
+                    player.clearMediaItems()
+                    player.setMediaSource(mediaSource)
+                    player.prepare()
+                    player.playWhenReady = true
+                    sendEvent(mapOf("type" to "opening", "session" to openSession))
+                    result.success(null)
+                } catch (error: Throwable) {
+                    sendEvent(
+                        mapOf(
+                            "type" to "error",
+                            "message" to (error.message ?: error.javaClass.simpleName),
+                            "session" to openSession,
+                        ),
+                    )
+                    result.error("open_failed", error.message, null)
+                }
+            }
+
+            "playPause" -> {
+                if (player.isPlaying) player.pause() else player.play()
+                result.success(null)
+            }
+
+            "setVolume" -> {
+                val value = call.argument<Number>("value")?.toFloat() ?: 100f
+                player.volume = (value / 100f).coerceIn(0f, 1f)
+                result.success(null)
+            }
+
+            "setResizeMode" -> {
+                when (call.argument<Number>("mode")?.toInt() ?: 0) {
+                    1 -> playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    2 -> playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FILL
+                    else -> playerView.resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
+                }
+                result.success(null)
+            }
+
+            "stop" -> {
+                player.stop()
+                result.success(null)
+            }
+
+            else -> result.notImplemented()
+        }
+    }
+
+    override fun onPlaybackStateChanged(playbackState: Int) {
+        when (playbackState) {
+            Player.STATE_BUFFERING -> sendEvent(mapOf("type" to "buffering", "session" to openSession))
+            Player.STATE_READY -> sendEvent(mapOf("type" to "ready", "session" to openSession))
+            Player.STATE_ENDED -> sendEvent(mapOf("type" to "ended", "session" to openSession))
+        }
+    }
+
+    override fun onIsPlayingChanged(isPlaying: Boolean) {
+        sendEvent(mapOf("type" to "isPlaying", "value" to isPlaying, "session" to openSession))
+    }
+
+    override fun onRenderedFirstFrame() {
+        sendEvent(mapOf("type" to "firstFrame", "session" to openSession))
+    }
+
+    override fun onVideoSizeChanged(videoSize: VideoSize) {
+        sendEvent(
+            mapOf(
+                "type" to "videoSize",
+                "width" to videoSize.width,
+                "height" to videoSize.height,
+                "session" to openSession,
+            ),
+        )
+    }
+
+    override fun onPlayerError(error: PlaybackException) {
+        sendEvent(
+            mapOf(
+                "type" to "error",
+                "message" to "${error.errorCodeName}: ${error.message ?: "playback error"}",
+                "session" to openSession,
+            ),
+        )
+    }
+
+    private fun sendEvent(event: Map<String, Any?>) {
+        if (!released) channel.invokeMethod("event", event)
+    }
+
+    override fun dispose() {
+        if (released) return
+        released = true
+        channel.setMethodCallHandler(null)
+        player.removeListener(this)
+        playerView.player = null
+        player.release()
+    }
+}
+''')
+          PY
+
+          grep -q 'androidx.media3:media3-exoplayer:1.8.0' android/app/build.gradle.kts
+          grep -q 'registerViewFactory' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'PlayerView(context)' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
+          grep -q 'surface is SurfaceView' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
+          grep -q 'DefaultMediaSourceFactory' android/app/src/main/kotlin/com/example/iptv_player/Media3LivePlayerView.kt
+
+      - name: Build TV V3 release APK ARM32 + ARM64
+        run: flutter build apk --release --target-platform android-arm,android-arm64
+
+      - name: Verify V3 APK package signature TV ABIs and controlled variables
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="build/app/outputs/flutter-apk/app-release.apk"
+          BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+
+          BADGING="$("$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK")"
+          echo "$BADGING" | head -16
+          echo "$BADGING" | grep -q "package: name='com.tvfull.pro.tvv3test'"
+          echo "$BADGING" | grep -q "application-label:'TV FULL V3 TEST'"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
+          "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump xmltree "$APK" AndroidManifest.xml | grep -A3 -B2 'EnableImpeller'
+
+          APK_LIST="$(unzip -l "$APK")"
+          for REQUIRED in \
+            'lib/arm64-v8a/libapp.so' \
+            'lib/arm64-v8a/libflutter.so' \
+            'lib/armeabi-v7a/libapp.so' \
+            'lib/armeabi-v7a/libflutter.so'; do
+            echo "$APK_LIST" | grep -Fq "$REQUIRED" || {
+              echo "ERROR: missing required TV binary: $REQUIRED"
+              exit 1
+            }
+          done
+
+          echo 'V3 package + ARM32 + ARM64 verified.'
+          echo 'Controlled A/B: Impeller remains OFF exactly like V2.'
+          echo 'LIVE engine: AndroidX Media3 1.8.0 + native PlayerView/SurfaceView.'
+          echo 'VOD engine: media_kit/libmpv unchanged.'
+
+      - name: Prepare TV V3 APK artifact
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp build/app/outputs/flutter-apk/app-release.apk dist/TV-FULL-V3-TEST-Media3-SurfaceView.apk
+          sha256sum dist/TV-FULL-V3-TEST-Media3-SurfaceView.apk > dist/SHA256.txt
+          git rev-parse HEAD > dist/COMMIT.txt
+          printf '%s\n' \
+            'TV FULL Android TV V3 controlled player test' \
+            'Package: com.tvfull.pro.tvv3test' \
+            'Label: TV FULL V3 TEST' \
+            'Impeller: OFF (same as V2)' \
+            'LIVE: AndroidX Media3 1.8.0 + PlayerView SurfaceView' \
+            'VOD: media_kit/libmpv unchanged' \
+            'Panel / pairing / M3U / Xtream semantics: preserved' \
+            'Installable side-by-side with V2' > dist/TEST-NOTES.txt
+
+      - name: Upload Android TV V3 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-V3-TEST-Media3-SurfaceView
+          path: dist/
+          if-no-files-found: error
+          retention-days: 30
