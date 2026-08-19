@@ -145,18 +145,31 @@ jobs:
       - name: Build TV release APK ARM32 + ARM64
         run: flutter build apk --release --target-platform android-arm,android-arm64
 
-      - name: Verify APK signature package and TV ABIs
+      - name: Verify APK signature package and required TV ABIs
         shell: bash
         run: |
+          set -euo pipefail
           APK="build/app/outputs/flutter-apk/app-release.apk"
           BUILD_TOOLS="$(ls -1 "$ANDROID_HOME/build-tools" | sort -V | tail -1)"
+
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/aapt" dump badging "$APK" | head -16
           "$ANDROID_HOME/build-tools/$BUILD_TOOLS/apksigner" verify --verbose --print-certs "$APK"
-          unzip -l "$APK" | grep -E 'lib/(armeabi-v7a|arm64-v8a)/lib(app|flutter)\.so'
-          if unzip -l "$APK" | grep -q 'lib/x86_64/'; then
-            echo 'ERROR: x86_64 should not be present in TV build'
-            exit 1
-          fi
+
+          APK_LIST="$(unzip -l "$APK")"
+          for REQUIRED in \
+            'lib/arm64-v8a/libapp.so' \
+            'lib/arm64-v8a/libflutter.so' \
+            'lib/armeabi-v7a/libapp.so' \
+            'lib/armeabi-v7a/libflutter.so'; do
+            echo "$APK_LIST" | grep -Fq "$REQUIRED" || {
+              echo "ERROR: missing required TV binary: $REQUIRED"
+              exit 1
+            }
+          done
+
+          echo 'ARM32 + ARM64 Flutter binaries verified.'
+          echo 'Note: media_kit/libmpv may bundle additional x86/x86_64 native libraries; these are harmless and are not Flutter app targets.'
+          echo "$APK_LIST" | grep -E 'lib/(armeabi-v7a|arm64-v8a|x86|x86_64)/' | head -40 || true
 
       - name: Prepare TV APK artifact
         shell: bash
