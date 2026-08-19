@@ -18,8 +18,8 @@ def rep(text: str, old: str, new: str, label: str) -> str:
     raise SystemExit(f'{label} marker not found')
 
 
-def remove_icon_buttons_by_callback(text: str, callback: str) -> tuple[str, int]:
-    removed = 0
+def hide_icon_buttons_by_callback(text: str, callback: str) -> tuple[str, int]:
+    hidden = 0
     marker = f'onPressed: {callback},'
     while marker in text:
         marker_pos = text.index(marker)
@@ -53,13 +53,11 @@ def remove_icon_buttons_by_callback(text: str, callback: str) -> tuple[str, int]
                     break
         if end < 0:
             raise SystemExit(f'IconButton end not found for {callback}')
-        while end < len(text) and text[end] in ' \t':
-            end += 1
-        if end < len(text) and text[end] == ',':
-            end += 1
-        text = text[:start] + text[end:]
-        removed += 1
-    return text, removed
+        # Replace only the IconButton expression. Do NOT consume its comma or
+        # surrounding widget structure: cards sometimes wrap this as child:.
+        text = text[:start] + 'const SizedBox.shrink()' + text[end:]
+        hidden += 1
+    return text, hidden
 
 # 1) Android TV: eliminate favorite controls from every channel view. We keep
 # provider/model APIs intact for storage compatibility, but no TV card/row can
@@ -71,8 +69,8 @@ channel = re.sub(
     flags=re.S,
 )
 
-catalog, removed = remove_icon_buttons_by_callback(catalog, 'onFavoriteToggle')
-if removed < 1:
+catalog, hidden = hide_icon_buttons_by_callback(catalog, 'onFavoriteToggle')
+if hidden < 1:
     raise SystemExit('V3.6 catalog favorite buttons not found')
 if 'Icons.favorite' in catalog or 'Icons.favorite_border' in catalog:
     raise SystemExit('V3.6 favorite icon still present in channel_list_screen.dart')
@@ -101,4 +99,4 @@ live = rep(live, old_controls, new_controls, 'v36 compact controls')
 LIVE.write_text(live)
 CATALOG.write_text(catalog)
 CHANNEL.write_text(channel)
-print(f'Android TV V3.6 UI applied: removed {removed} catalog favorite buttons, compact controls, reliable 3s auto-hide')
+print(f'Android TV V3.6 UI applied: hid {hidden} catalog favorite buttons, compact controls, reliable 3s auto-hide')
