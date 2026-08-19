@@ -2,8 +2,10 @@ from pathlib import Path
 
 LIVE = Path('lib/widgets/live_video_view.dart')
 PLAYER = Path('lib/screens/player_screen.dart')
+CATALOG = Path('lib/screens/channel_list_screen.dart')
 text = LIVE.read_text()
 player = PLAYER.read_text()
+catalog = CATALOG.read_text()
 
 # TV remote keys are handled only in the visual layer. Playback/network logic is
 # intentionally untouched.
@@ -129,11 +131,7 @@ if "_remoteFocusNode.dispose();" not in text:
     marker = "    _overlayTimer?.cancel();\n"
     if marker not in text:
         raise SystemExit('dispose overlay marker not found')
-    text = text.replace(
-        marker,
-        marker + "    _remoteFocusNode.dispose();\n",
-        1,
-    )
+    text = text.replace(marker, marker + "    _remoteFocusNode.dispose();\n", 1)
 
 old_build = """  @override\n  Widget build(BuildContext context) {\n    return MouseRegion(\n      onHover: (_) => _showOverlay(),\n      child: Listener(\n        behavior: HitTestBehavior.translucent,\n        onPointerDown: (_) => _showOverlay(),\n        child: Video(\n          controller: widget.controller,\n          fit: _videoFit,\n          controls: (videoState) => _buildControls(videoState),\n        ),\n      ),\n    );\n  }\n"""
 new_build = """  @override\n  Widget build(BuildContext context) {\n    return Focus(\n      focusNode: _remoteFocusNode,\n      autofocus: true,\n      onKeyEvent: _handleTvRemoteKey,\n      child: RepaintBoundary(\n        child: MouseRegion(\n          onHover: (_) => _showOverlay(),\n          child: Listener(\n            behavior: HitTestBehavior.translucent,\n            onPointerDown: (_) => _showOverlay(),\n            child: Video(\n              controller: widget.controller,\n              fit: _videoFit,\n              controls: (videoState) => _buildControls(videoState),\n            ),\n          ),\n        ),\n      ),\n    );\n  }\n"""
@@ -159,6 +157,34 @@ if old_drawer in player:
 elif "if (_showChannelList)\n            Positioned(" not in player:
     raise SystemExit('player drawer marker not found')
 
+# Catalog cards: remove mouse-style zoom/elevation and make DPAD focus explicit.
+if "bool _focused = false;" not in catalog:
+    catalog = catalog.replace(
+        "class _CatalogCardState extends State<_CatalogCard> {\n  bool _hovered = false;",
+        "class _CatalogCardState extends State<_CatalogCard> {\n  bool _hovered = false;\n  bool _focused = false;",
+        1,
+    )
+
+catalog = catalog.replace("scale: _hovered ? 1.025 : 1,", "scale: 1,", 1)
+catalog = catalog.replace("elevation: _hovered ? 7 : 1,", "elevation: 1,", 1)
+catalog = catalog.replace(
+    "color: _hovered\n                  ? primary.withValues(alpha: 0.75)",
+    "color: (_hovered || _focused)\n                  ? primary.withValues(alpha: 0.90)",
+    1,
+)
+catalog = catalog.replace(
+    "width: _hovered ? 1.4 : 1,",
+    "width: _focused ? 2 : 1,",
+    1,
+)
+old_inkwell = """          child: InkWell(\n            onTap: widget.onTap,\n            child: widget.mode.usesPoster\n"""
+new_inkwell = """          child: InkWell(\n            canRequestFocus: true,\n            onFocusChange: (value) => setState(() => _focused = value),\n            onTap: widget.onTap,\n            child: widget.mode.usesPoster\n"""
+if old_inkwell in catalog:
+    catalog = catalog.replace(old_inkwell, new_inkwell, 1)
+elif "onFocusChange: (value) => setState(() => _focused = value)" not in catalog:
+    raise SystemExit('catalog focus marker not found')
+
 LIVE.write_text(text)
 PLAYER.write_text(player)
+CATALOG.write_text(catalog)
 print('Android TV runtime optimization applied')
