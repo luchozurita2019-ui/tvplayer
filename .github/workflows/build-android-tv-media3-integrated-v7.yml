@@ -1,0 +1,98 @@
+name: Build Android TV Media3 Integrated V7
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-media3-integrated-v7
+    paths:
+      - '.github/workflows/build-android-tv-media3-integrated-v7.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_integrated_v7.py'
+      - '.github/scripts/fix_android_media3_integrated_v7_compile.py'
+      - '.github/scripts/fix_v7_install_compat.py'
+  pull_request:
+    paths:
+      - '.github/workflows/build-android-tv-media3-integrated-v7.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_integrated_v7.py'
+      - '.github/scripts/fix_android_media3_integrated_v7_compile.py'
+      - '.github/scripts/fix_v7_install_compat.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build-v7:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout V7 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-media3-integrated-v7
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Apply proven V6 SurfaceTexture base
+        run: python3 .github/scripts/apply_android_media3_texture_v6.py
+
+      - name: Apply integrated V7 improvements
+        run: python3 .github/scripts/apply_android_media3_integrated_v7.py
+
+      - name: Apply V7 compile correction
+        run: python3 .github/scripts/fix_android_media3_integrated_v7_compile.py
+
+      - name: Apply V7 install compatibility
+        run: python3 .github/scripts/fix_v7_install_compat.py
+
+      - name: Format Dart changes
+        run: dart format lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze V7 playback files
+        run: dart analyze --no-fatal-warnings lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
+
+      - name: Build ARM32 plus ARM64 Android TV V7 release APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "Integrated V7 ARM32+ARM64 build attempt $attempt/2"
+            if flutter build apk --release --target-platform android-arm,android-arm64 --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-V7-MEDIA3-INTEGRATED-COMPAT.apk
+          sha256sum artifact/TV-FULL-PRO-V7-MEDIA3-INTEGRATED-COMPAT.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-V7-MEDIA3-INTEGRATED-COMPAT
+          path: artifact/
+          retention-days: 30
