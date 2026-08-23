@@ -1,0 +1,114 @@
+name: Build Android TV V10 Safe VOD
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-v10-vod-safe-clean
+    paths:
+      - '.github/workflows/build-android-tv-v10.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_vod_v8.py'
+      - '.github/scripts/apply_android_tv_clean_v9.py'
+      - '.github/scripts/apply_android_tv_v10.py'
+      - '.github/scripts/fix_android_tv_clean_v9_compile.py'
+  pull_request:
+    paths:
+      - '.github/workflows/build-android-tv-v10.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_vod_v8.py'
+      - '.github/scripts/apply_android_tv_clean_v9.py'
+      - '.github/scripts/apply_android_tv_v10.py'
+      - '.github/scripts/fix_android_tv_clean_v9_compile.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build-v10:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout V10 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-v10-vod-safe-clean
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Apply proven V6 Media3 SurfaceTexture base
+        run: python3 .github/scripts/apply_android_media3_texture_v6.py
+
+      - name: Add Media3 VOD capabilities
+        run: python3 .github/scripts/apply_android_media3_vod_v8.py
+
+      - name: Apply Hot Player aligned V9 cleanup
+        run: python3 .github/scripts/apply_android_tv_clean_v9.py
+
+      - name: Fix standalone TV catalog item
+        run: python3 .github/scripts/fix_android_tv_clean_v9_compile.py
+
+      - name: Apply V10 safe VOD and compact TV UI
+        run: python3 .github/scripts/apply_android_tv_v10.py
+
+      - name: Format V10 files
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/screens/home_screen.dart \
+            lib/screens/source_content_screen.dart \
+            lib/screens/channel_list_screen.dart \
+            lib/screens/xtream_movies_screen.dart \
+            lib/screens/xtream_series_screen.dart \
+            lib/screens/android_media3_texture_player_screen.dart \
+            lib/screens/android_media3_vod_player_screen.dart \
+            lib/services/xtream_vod_service.dart \
+            lib/services/xtream_series_service.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze V10 TV files
+        run: dart analyze --no-fatal-warnings lib/main.dart lib/screens/channel_list_screen.dart lib/screens/xtream_series_screen.dart lib/screens/android_media3_texture_player_screen.dart lib/screens/android_media3_vod_player_screen.dart lib/services/xtream_vod_service.dart lib/services/xtream_series_service.dart
+
+      - name: Build universal ARM TV APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "V10 build attempt $attempt/2"
+            if flutter build apk --release --target-platform android-arm,android-arm64 --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-V10-VOD-SAFE-CLEAN.apk
+          sha256sum artifact/TV-FULL-V10-VOD-SAFE-CLEAN.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-V10-VOD-SAFE-CLEAN
+          path: artifact/
+          retention-days: 30
