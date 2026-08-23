@@ -9,6 +9,7 @@ on:
       - '.github/workflows/build-android-tv-media3-v7-integrated.yml'
       - '.github/scripts/apply_android_media3_texture_v6.py'
       - '.github/scripts/apply_android_media3_v7_integrated.py'
+      - '.github/scripts/apply_android_media3_v7_stream_policy.py'
       - '.github/scripts/apply_android_v7_arm64_packaging.py'
   pull_request:
     branches:
@@ -16,6 +17,7 @@ on:
     paths:
       - '.github/workflows/build-android-tv-media3-v7-integrated.yml'
       - '.github/scripts/apply_android_media3_v7_integrated.py'
+      - '.github/scripts/apply_android_media3_v7_stream_policy.py'
       - '.github/scripts/apply_android_v7_arm64_packaging.py'
 
 permissions:
@@ -51,6 +53,9 @@ jobs:
 
       - name: Apply integrated V7 tuning
         run: python3 .github/scripts/apply_android_media3_v7_integrated.py
+
+      - name: Apply distinct TS and HLS policy
+        run: python3 .github/scripts/apply_android_media3_v7_stream_policy.py
 
       - name: Restrict native packaging to ARM64
         run: python3 .github/scripts/apply_android_v7_arm64_packaging.py
