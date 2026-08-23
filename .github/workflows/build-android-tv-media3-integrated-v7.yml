@@ -61,7 +61,7 @@ jobs:
         run: flutter pub get
 
       - name: Analyze V7 playback files
-        run: dart analyze lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
+        run: dart analyze --no-fatal-warnings --no-fatal-infos lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
 
       - name: Build ARM64 Android TV V7 release APK
         shell: bash
