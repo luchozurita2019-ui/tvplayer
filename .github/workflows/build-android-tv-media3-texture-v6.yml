@@ -1,0 +1,80 @@
+name: Build Android TV Media3 Texture V6
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-media3-texture-v6
+    paths:
+      - '.github/workflows/build-android-tv-media3-texture-v6.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+  pull_request:
+    paths:
+      - '.github/workflows/build-android-tv-media3-texture-v6.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build-media3-texture-v6:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout V6 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-media3-texture-v6
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Apply Media3 Texture V6
+        run: python3 .github/scripts/apply_android_media3_texture_v6.py
+
+      - name: Format Dart changes
+        run: dart format lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Android TV V6 release APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "Media3 Texture V6 build attempt $attempt/2"
+            if flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-V6-MEDIA3-TEXTURE.apk
+          sha256sum artifact/TV-FULL-PRO-V6-MEDIA3-TEXTURE.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-V6-MEDIA3-TEXTURE
+          path: artifact/
+          retention-days: 30
