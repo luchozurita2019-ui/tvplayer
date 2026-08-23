@@ -9,6 +9,11 @@ on:
       - '.github/workflows/build-android-tv-v6-vod-media3-v8.yml'
       - '.github/scripts/apply_android_media3_texture_v6.py'
       - '.github/scripts/apply_android_media3_vod_v8.py'
+  pull_request:
+    paths:
+      - '.github/workflows/build-android-tv-v6-vod-media3-v8.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_vod_v8.py'
 
 permissions:
   contents: read
