@@ -9,12 +9,14 @@ on:
       - '.github/workflows/build-android-tv-media3-v7-integrated.yml'
       - '.github/scripts/apply_android_media3_texture_v6.py'
       - '.github/scripts/apply_android_media3_v7_integrated.py'
+      - '.github/scripts/apply_android_v7_arm64_packaging.py'
   pull_request:
     branches:
       - android-tv-media3-texture-v6
     paths:
       - '.github/workflows/build-android-tv-media3-v7-integrated.yml'
       - '.github/scripts/apply_android_media3_v7_integrated.py'
+      - '.github/scripts/apply_android_v7_arm64_packaging.py'
 
 permissions:
   contents: read
@@ -50,6 +52,9 @@ jobs:
       - name: Apply integrated V7 tuning
         run: python3 .github/scripts/apply_android_media3_v7_integrated.py
 
+      - name: Restrict native packaging to ARM64
+        run: python3 .github/scripts/apply_android_v7_arm64_packaging.py
+
       - name: Format Dart changes
         run: dart format lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
 
@@ -82,8 +87,16 @@ jobs:
             echo 'ERROR: x86_64 libraries found in ARM64 APK'
             exit 1
           fi
+          if unzip -l "$apk" | grep -q 'lib/x86/'; then
+            echo 'ERROR: x86 libraries found in ARM64 APK'
+            exit 1
+          fi
           if unzip -l "$apk" | grep -q 'lib/armeabi-v7a/'; then
             echo 'ERROR: armeabi-v7a libraries found in ARM64 APK'
+            exit 1
+          fi
+          if ! unzip -l "$apk" | grep -q 'lib/arm64-v8a/libflutter.so'; then
+            echo 'ERROR: ARM64 Flutter runtime missing'
             exit 1
           fi
           ls -lh "$apk"
