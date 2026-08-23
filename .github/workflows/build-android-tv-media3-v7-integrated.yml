@@ -1,0 +1,122 @@
+name: Build Android TV Media3 V7 Integrated
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-media3-v7-integrated
+    paths:
+      - '.github/workflows/build-android-tv-media3-v7-integrated.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_v7_integrated.py'
+      - '.github/scripts/apply_android_media3_v7_stream_policy.py'
+      - '.github/scripts/apply_android_v7_arm64_packaging.py'
+  pull_request:
+    branches:
+      - android-tv-media3-texture-v6
+    paths:
+      - '.github/workflows/build-android-tv-media3-v7-integrated.yml'
+      - '.github/scripts/apply_android_media3_v7_integrated.py'
+      - '.github/scripts/apply_android_media3_v7_stream_policy.py'
+      - '.github/scripts/apply_android_v7_arm64_packaging.py'
+
+permissions:
+  contents: read
+
+jobs:
+  build-media3-v7:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout V7 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-media3-v7-integrated
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Apply proven V6 SurfaceTexture engine
+        run: python3 .github/scripts/apply_android_media3_texture_v6.py
+
+      - name: Apply integrated V7 tuning
+        run: python3 .github/scripts/apply_android_media3_v7_integrated.py
+
+      - name: Apply distinct TS and HLS policy
+        run: python3 .github/scripts/apply_android_media3_v7_stream_policy.py
+
+      - name: Restrict native packaging to ARM64
+        run: python3 .github/scripts/apply_android_v7_arm64_packaging.py
+
+      - name: Format Dart changes
+        run: dart format lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze V7 player sources
+        run: flutter analyze lib/screens/android_media3_texture_player_screen.dart lib/screens/player_screen.dart --no-fatal-infos --no-fatal-warnings
+
+      - name: Build Android TV V7 ARM64 release APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "Media3 V7 ARM64 build attempt $attempt/2"
+            if flutter build apk --release --target-platform android-arm64 --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Verify APK architecture and size
+        shell: bash
+        run: |
+          apk=build/app/outputs/flutter-apk/app-release.apk
+          unzip -l "$apk" | grep 'lib/' | head -80
+          if unzip -l "$apk" | grep -q 'lib/x86_64/'; then
+            echo 'ERROR: x86_64 libraries found in ARM64 APK'
+            exit 1
+          fi
+          if unzip -l "$apk" | grep -q 'lib/x86/'; then
+            echo 'ERROR: x86 libraries found in ARM64 APK'
+            exit 1
+          fi
+          if unzip -l "$apk" | grep -q 'lib/armeabi-v7a/'; then
+            echo 'ERROR: armeabi-v7a libraries found in ARM64 APK'
+            exit 1
+          fi
+          if ! unzip -l "$apk" | grep -q 'lib/arm64-v8a/libflutter.so'; then
+            echo 'ERROR: ARM64 Flutter runtime missing'
+            exit 1
+          fi
+          ls -lh "$apk"
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-V7-MEDIA3-INTEGRATED-ARM64.apk
+          sha256sum artifact/TV-FULL-PRO-V7-MEDIA3-INTEGRATED-ARM64.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-V7-MEDIA3-INTEGRATED-ARM64
+          path: artifact/
+          retention-days: 30
