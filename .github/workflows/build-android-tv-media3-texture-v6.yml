@@ -8,6 +8,10 @@ on:
     paths:
       - '.github/workflows/build-android-tv-media3-texture-v6.yml'
       - '.github/scripts/apply_android_media3_texture_v6.py'
+  pull_request:
+    paths:
+      - '.github/workflows/build-android-tv-media3-texture-v6.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
 
 permissions:
   contents: read
