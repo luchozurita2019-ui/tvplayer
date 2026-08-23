@@ -12,6 +12,7 @@ on:
       - '.github/scripts/apply_android_tv_clean_v9.py'
       - '.github/scripts/apply_android_tv_v10.py'
       - '.github/scripts/fix_android_tv_clean_v9_compile.py'
+      - '.github/scripts/fix_android_tv_v10_compile.py'
   pull_request:
     paths:
       - '.github/workflows/build-android-tv-v10.yml'
@@ -20,6 +21,7 @@ on:
       - '.github/scripts/apply_android_tv_clean_v9.py'
       - '.github/scripts/apply_android_tv_v10.py'
       - '.github/scripts/fix_android_tv_clean_v9_compile.py'
+      - '.github/scripts/fix_android_tv_v10_compile.py'
 
 permissions:
   contents: read
@@ -63,6 +65,9 @@ jobs:
 
       - name: Apply V10 safe VOD and compact TV UI
         run: python3 .github/scripts/apply_android_tv_v10.py
+
+      - name: Fix V10 compact catalog item
+        run: python3 .github/scripts/fix_android_tv_v10_compile.py
 
       - name: Format V10 files
         run: |
