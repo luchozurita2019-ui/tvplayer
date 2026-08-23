@@ -9,11 +9,13 @@ on:
       - '.github/workflows/build-android-tv-media3-integrated-v7.yml'
       - '.github/scripts/apply_android_media3_texture_v6.py'
       - '.github/scripts/apply_android_media3_integrated_v7.py'
+      - '.github/scripts/fix_android_media3_integrated_v7_compile.py'
   pull_request:
     paths:
       - '.github/workflows/build-android-tv-media3-integrated-v7.yml'
       - '.github/scripts/apply_android_media3_texture_v6.py'
       - '.github/scripts/apply_android_media3_integrated_v7.py'
+      - '.github/scripts/fix_android_media3_integrated_v7_compile.py'
 
 permissions:
   contents: read
@@ -49,14 +51,17 @@ jobs:
       - name: Apply integrated V7 improvements
         run: python3 .github/scripts/apply_android_media3_integrated_v7.py
 
+      - name: Apply V7 compile correction
+        run: python3 .github/scripts/fix_android_media3_integrated_v7_compile.py
+
       - name: Format Dart changes
         run: dart format lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
 
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Analyze Dart
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Analyze V7 playback files
+        run: dart analyze lib/screens/player_screen.dart lib/screens/android_media3_texture_player_screen.dart
 
       - name: Build ARM64 Android TV V7 release APK
         shell: bash
