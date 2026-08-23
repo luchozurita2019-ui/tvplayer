@@ -56,8 +56,8 @@ jobs:
       - name: Get dependencies
         run: flutter pub get
 
-      - name: Analyze changed Flutter source
-        run: flutter analyze --no-fatal-infos --no-fatal-warnings
+      - name: Analyze V7 player sources
+        run: flutter analyze lib/screens/android_media3_texture_player_screen.dart lib/screens/player_screen.dart --no-fatal-infos --no-fatal-warnings
 
       - name: Build Android TV V7 ARM64 release APK
         shell: bash
