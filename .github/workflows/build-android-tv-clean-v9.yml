@@ -10,12 +10,14 @@ on:
       - '.github/scripts/apply_android_media3_texture_v6.py'
       - '.github/scripts/apply_android_media3_vod_v8.py'
       - '.github/scripts/apply_android_tv_clean_v9.py'
+      - '.github/scripts/fix_android_tv_clean_v9_compile.py'
   pull_request:
     paths:
       - '.github/workflows/build-android-tv-clean-v9.yml'
       - '.github/scripts/apply_android_media3_texture_v6.py'
       - '.github/scripts/apply_android_media3_vod_v8.py'
       - '.github/scripts/apply_android_tv_clean_v9.py'
+      - '.github/scripts/fix_android_tv_clean_v9_compile.py'
 
 permissions:
   contents: read
@@ -53,6 +55,9 @@ jobs:
 
       - name: Apply Hot Player aligned V9 cleanup
         run: python3 .github/scripts/apply_android_tv_clean_v9.py
+
+      - name: Fix standalone TV catalog item
+        run: python3 .github/scripts/fix_android_tv_clean_v9_compile.py
 
       - name: Format V9 files
         run: |
