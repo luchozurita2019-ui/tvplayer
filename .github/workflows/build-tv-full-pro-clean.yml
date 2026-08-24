@@ -1,5 +1,6 @@
 name: Build TV FULL PRO Clean
-# Clean source normalized and cacheExtent API verified.
+# Release build is intentionally manual/final-only. Development pushes use the
+# validation workflow so we do not generate a new release APK for every layer.
 
 on:
   workflow_dispatch:
@@ -7,10 +8,7 @@ on:
     branches:
       - android-tv-full-pro-clean-source
     paths:
-      - '.github/workflows/build-tv-full-pro-clean.yml'
-      - 'lib/**'
-      - 'android/**'
-      - 'pubspec.yaml'
+      - '.github/final-build-request.txt'
 
 permissions:
   contents: write
