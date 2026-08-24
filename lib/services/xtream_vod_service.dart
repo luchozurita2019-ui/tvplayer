@@ -35,12 +35,13 @@ class XtreamVodSummary {
   });
 
   Channel toChannel(XtreamConnectionResult connection) => Channel(
-        name: name,
-        url: _resolveDirect(connection.streamServer, directSource) ??
-            _movieUrl(connection, id, extension),
-        logoUrl: _resolveArtwork(connection.streamServer, cover),
-        group: category,
-      );
+    name: name,
+    url:
+        _resolveDirect(connection.streamServer, directSource) ??
+        _movieUrl(connection, id, extension),
+    logoUrl: _resolveArtwork(connection.streamServer, cover),
+    group: category,
+  );
 }
 
 class XtreamVodDetails {
@@ -75,13 +76,14 @@ class XtreamVodDetails {
   });
 
   Channel toChannel(XtreamConnectionResult connection) => Channel(
-        name: movie.name,
-        url: _resolveDirect(connection.streamServer, directSource) ??
-            _resolveDirect(connection.streamServer, movie.directSource) ??
-            _movieUrl(connection, movie.id, extension),
-        logoUrl: _resolveArtwork(connection.streamServer, movie.cover),
-        group: movie.category,
-      );
+    name: movie.name,
+    url:
+        _resolveDirect(connection.streamServer, directSource) ??
+        _resolveDirect(connection.streamServer, movie.directSource) ??
+        _movieUrl(connection, movie.id, extension),
+    logoUrl: _resolveArtwork(connection.streamServer, movie.cover),
+    group: movie.category,
+  );
 
   Channel? trailerChannel() {
     final value = trailerUrl?.trim() ?? '';
@@ -141,7 +143,7 @@ class XtreamVodService {
           category: categoryId == null
               ? _firstText(item, const ['category_name', 'category'])
               : categories[categoryId] ??
-                  _firstText(item, const ['category_name', 'category']),
+                    _firstText(item, const ['category_name', 'category']),
           rating: _firstText(item, const ['rating', 'rating_5based']),
           releaseDate: _firstText(item, const [
             'releasedate',
@@ -176,7 +178,7 @@ class XtreamVodService {
 
     final catalogPlayable =
         _resolveDirect(active.streamServer, summary.directSource) ??
-            _movieUrl(active, summary.id, summary.extension);
+        _movieUrl(active, summary.id, summary.extension);
 
     try {
       final uri = _endpoint(active.apiServer, {
@@ -185,8 +187,9 @@ class XtreamVodService {
         'action': 'get_vod_info',
         'vod_id': summary.id,
       });
-      final response =
-          await _client.get(uri, headers: _headers).timeout(timeout);
+      final response = await _client
+          .get(uri, headers: _headers)
+          .timeout(timeout);
       if (response.statusCode != 200) {
         throw Exception('get_vod_info HTTP ${response.statusCode}');
       }
@@ -208,7 +211,8 @@ class XtreamVodService {
             summary.extension,
         fallback: summary.extension,
       );
-      final direct = _resolveDirect(
+      final direct =
+          _resolveDirect(
             active.streamServer,
             _firstText(movieData, const ['direct_source']) ??
                 _firstText(info, const ['direct_source']),
@@ -230,7 +234,8 @@ class XtreamVodService {
         cast: pick(const ['cast', 'actors']),
         director: pick(const ['director']),
         genre: pick(const ['genre']) ?? summary.genre,
-        releaseDate: pick(const [
+        releaseDate:
+            pick(const [
               'releasedate',
               'releaseDate',
               'release_date',
@@ -294,8 +299,10 @@ class XtreamVodService {
     if (response.statusCode != 200) {
       throw Exception('Xtream $action respondió HTTP ${response.statusCode}.');
     }
-    final body =
-        await response.stream.transform(utf8.decoder).timeout(timeout).join();
+    final body = await response.stream
+        .transform(utf8.decoder)
+        .timeout(timeout)
+        .join();
     final decoded = jsonDecode(body);
     return decoded is List ? decoded : const [];
   }
@@ -355,7 +362,8 @@ class XtreamVodService {
     final uri = Uri.tryParse(value);
     if (uri == null ||
         !(uri.scheme == 'http' || uri.scheme == 'https') ||
-        uri.host.isEmpty) return null;
+        uri.host.isEmpty)
+      return null;
     final host = uri.host.toLowerCase();
     if (host.contains('youtube.com') ||
         host == 'youtu.be' ||
@@ -374,7 +382,8 @@ String? _resolveDirect(Uri base, String? raw) {
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty)
+    return parsed.toString();
   return value.startsWith('/') ? base.resolve(value).toString() : null;
 }
 
@@ -386,7 +395,8 @@ String? _resolveArtwork(Uri base, String? raw) {
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty)
+    return parsed.toString();
   return base.resolve(value).toString();
 }
 
@@ -397,17 +407,19 @@ String _movieUrl(
 ) {
   final base = connection.streamServer;
   final prefix = base.pathSegments.where((e) => e.trim().isNotEmpty);
-  return base.replace(
-    pathSegments: [
-      ...prefix,
-      'movie',
-      connection.username,
-      connection.password,
-      '$streamId.$extension',
-    ],
-    query: '',
-    fragment: '',
-  ).toString();
+  return base
+      .replace(
+        pathSegments: [
+          ...prefix,
+          'movie',
+          connection.username,
+          connection.password,
+          '$streamId.$extension',
+        ],
+        query: '',
+        fragment: '',
+      )
+      .toString();
 }
 
 String _cleanExtension(String? raw, {required String fallback}) {

@@ -85,20 +85,20 @@ class HostPlaybackStats {
   }
 
   Map<String, dynamic> toJson() => {
-        'host': host,
-        'startupCount': startupCount,
-        'startupTotalMs': startupTotalMs,
-        'fastestStartupMs': fastestStartupMs,
-        'slowestStartupMs': slowestStartupMs,
-        'failures': failures,
-        'stalls': stalls,
-        'fastProbeFallbacks': fastProbeFallbacks,
-        'zapCount': zapCount,
-        'zapTotalMs': zapTotalMs,
-        'fastestZapMs': fastestZapMs,
-        'slowestZapMs': slowestZapMs,
-        'lastUpdatedEpochMs': lastUpdatedEpochMs,
-      };
+    'host': host,
+    'startupCount': startupCount,
+    'startupTotalMs': startupTotalMs,
+    'fastestStartupMs': fastestStartupMs,
+    'slowestStartupMs': slowestStartupMs,
+    'failures': failures,
+    'stalls': stalls,
+    'fastProbeFallbacks': fastProbeFallbacks,
+    'zapCount': zapCount,
+    'zapTotalMs': zapTotalMs,
+    'fastestZapMs': fastestZapMs,
+    'slowestZapMs': slowestZapMs,
+    'lastUpdatedEpochMs': lastUpdatedEpochMs,
+  };
 
   factory HostPlaybackStats.fromJson(Map<String, dynamic> json) {
     return HostPlaybackStats(
@@ -169,10 +169,9 @@ class PlaybackMetricsService {
   Future<void> _save() async {
     final prefs = await SharedPreferences.getInstance();
     final values =
-        _stats.values.where((stats) => stats.sampleScore > 0).toList()
-          ..sort(
-            (a, b) => b.lastUpdatedEpochMs.compareTo(a.lastUpdatedEpochMs),
-          );
+        _stats.values.where((stats) => stats.sampleScore > 0).toList()..sort(
+          (a, b) => b.lastUpdatedEpochMs.compareTo(a.lastUpdatedEpochMs),
+        );
 
     final compact = values.take(100).map((e) => e.toJson()).toList();
     await prefs.setString(_storageKey, jsonEncode(compact));
@@ -255,7 +254,8 @@ class PlaybackMetricsService {
       );
     }
 
-    final looksFast = average != null &&
+    final looksFast =
+        average != null &&
         average <= 900 &&
         stats.failureRatio <= 0.10 &&
         stats.stallRatio <= 0.08;
@@ -275,7 +275,8 @@ class PlaybackMetricsService {
       );
     }
 
-    final looksUnstable = (average != null && average >= 1800) ||
+    final looksUnstable =
+        (average != null && average >= 1800) ||
         stats.failureRatio >= 0.20 ||
         stats.stallRatio >= 0.15;
 

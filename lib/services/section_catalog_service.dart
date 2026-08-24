@@ -28,7 +28,7 @@ class SectionCatalogService {
 
   final TvLocalStore _store = TvLocalStore.instance;
   final Map<String, Future<Map<TvSectionKind, SectionCatalogSnapshot>>>
-      _pending = {};
+  _pending = {};
 
   Future<SectionCatalogSnapshot?> loadCached(
     Playlist playlist,
@@ -77,8 +77,7 @@ class SectionCatalogService {
 
   Future<Map<TvSectionKind, SectionCatalogSnapshot>> refreshAll(
     Playlist playlist,
-  ) =>
-      _refreshAll(playlist, force: true);
+  ) => _refreshAll(playlist, force: true);
 
   Future<Map<TvSectionKind, SectionCatalogSnapshot>> _refreshAll(
     Playlist playlist, {
@@ -182,15 +181,15 @@ class SectionCatalogService {
   }
 
   bool _hasVideoFile(String path) => const [
-        '.mp4',
-        '.mkv',
-        '.avi',
-        '.mov',
-        '.m4v',
-        '.webm',
-        '.wmv',
-        '.flv',
-      ].any(path.endsWith);
+    '.mp4',
+    '.mkv',
+    '.avi',
+    '.mov',
+    '.m4v',
+    '.webm',
+    '.wmv',
+    '.flv',
+  ].any(path.endsWith);
 
   bool _containsAny(String value, List<String> terms) {
     for (final term in terms) {

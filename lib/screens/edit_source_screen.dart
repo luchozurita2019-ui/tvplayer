@@ -72,9 +72,7 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
             children: [
               Text(
                 'Editar ${playlist.sourceType.label}',
-                style: Theme.of(context)
-                    .textTheme
-                    .headlineSmall
+                style: Theme.of(context).textTheme.headlineSmall
                     ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 8),
@@ -120,8 +118,9 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
                         child: Text(
                           provider.error!,
                           style: TextStyle(
-                            color:
-                                Theme.of(context).colorScheme.onErrorContainer,
+                            color: Theme.of(context)
+                                .colorScheme
+                                .onErrorContainer,
                           ),
                         ),
                       ),

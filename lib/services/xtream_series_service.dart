@@ -7,7 +7,8 @@ import '../models/channel.dart';
 import 'xtream_http_client.dart';
 import 'xtream_service.dart';
 
-const String _seriesUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+const String _seriesUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/96.0.4664.18 Safari/537.36';
 
@@ -195,7 +196,8 @@ class XtreamSeriesService {
     final enriched = XtreamSeriesSummary(
       id: summary.id,
       name: _cleanText(info['name']) ?? summary.name,
-      cover: _resolveArtwork(active.streamServer, _cleanText(info['cover'])) ??
+      cover:
+          _resolveArtwork(active.streamServer, _cleanText(info['cover'])) ??
           summary.cover,
       category: summary.category,
       plot: _cleanText(info['plot']) ?? summary.plot,
@@ -204,15 +206,15 @@ class XtreamSeriesService {
       genre: _cleanText(info['genre']) ?? summary.genre,
       releaseDate:
           _firstText(info, const ['releaseDate', 'release_date', 'year']) ??
-              summary.releaseDate,
+          summary.releaseDate,
       rating:
           _firstText(info, const ['rating', 'rating_5based']) ?? summary.rating,
       backdrops: _stringList(info['backdrop_path']).isEmpty
           ? summary.backdrops
           : _stringList(info['backdrop_path'])
-              .map((value) => _resolveArtwork(active.streamServer, value))
-              .whereType<String>()
-              .toList(growable: false),
+                .map((value) => _resolveArtwork(active.streamServer, value))
+                .whereType<String>()
+                .toList(growable: false),
     );
 
     final seasons = <int, List<XtreamSeriesEpisode>>{};
@@ -253,13 +255,16 @@ class XtreamSeriesService {
     final info = item['info'] is Map
         ? Map<String, dynamic>.from(item['info'] as Map)
         : <String, dynamic>{};
-    final season = int.tryParse(item['season']?.toString() ?? '') ??
+    final season =
+        int.tryParse(item['season']?.toString() ?? '') ??
         int.tryParse(info['season']?.toString() ?? '') ??
         fallbackSeason;
-    final number = int.tryParse(item['episode_num']?.toString() ?? '') ??
+    final number =
+        int.tryParse(item['episode_num']?.toString() ?? '') ??
         int.tryParse(info['episode_num']?.toString() ?? '') ??
         1;
-    final rawDirect = _firstText(item, const [
+    final rawDirect =
+        _firstText(item, const [
           'direct_source',
           'directSource',
           'stream_source',
@@ -282,11 +287,13 @@ class XtreamSeriesService {
       id: id,
       season: season <= 0 ? 1 : season,
       number: number <= 0 ? 1 : number,
-      title: _cleanText(item['title']) ??
+      title:
+          _cleanText(item['title']) ??
           _cleanText(info['name']) ??
           'Episodio ${number <= 0 ? id : number}',
       extension: extension,
-      directSource: _resolveDirect(connection.streamServer, rawDirect) ??
+      directSource:
+          _resolveDirect(connection.streamServer, rawDirect) ??
           _seriesUrl(connection, id, extension),
       plot: _cleanText(info['plot']),
       duration: _cleanText(info['duration']),
@@ -337,7 +344,8 @@ String? _resolveDirect(Uri base, String? raw) {
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty)
+    return parsed.toString();
   return value.startsWith('/') ? base.resolve(value).toString() : null;
 }
 
@@ -349,7 +357,8 @@ String? _resolveArtwork(Uri base, String? raw) {
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty)
+    return parsed.toString();
   return base.resolve(value).toString();
 }
 
@@ -361,17 +370,19 @@ String _seriesUrl(
   final prefix = connection.streamServer.pathSegments.where(
     (segment) => segment.trim().isNotEmpty,
   );
-  return connection.streamServer.replace(
-    pathSegments: [
-      ...prefix,
-      'series',
-      connection.username,
-      connection.password,
-      '$episodeId.$extension',
-    ],
-    query: '',
-    fragment: '',
-  ).toString();
+  return connection.streamServer
+      .replace(
+        pathSegments: [
+          ...prefix,
+          'series',
+          connection.username,
+          connection.password,
+          '$episodeId.$extension',
+        ],
+        query: '',
+        fragment: '',
+      )
+      .toString();
 }
 
 Uri _endpoint(Uri base, Map<String, String> query) {

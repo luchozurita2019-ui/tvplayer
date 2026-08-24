@@ -421,17 +421,19 @@ String _liveUrl(
   final prefix = base.pathSegments.where(
     (segment) => segment.trim().isNotEmpty,
   );
-  return base.replace(
-    pathSegments: <String>[
-      ...prefix,
-      'live',
-      username,
-      password,
-      '$streamId.$extension',
-    ],
-    query: '',
-    fragment: '',
-  ).toString();
+  return base
+      .replace(
+        pathSegments: <String>[
+          ...prefix,
+          'live',
+          username,
+          password,
+          '$streamId.$extension',
+        ],
+        query: '',
+        fragment: '',
+      )
+      .toString();
 }
 
 Uri _endpoint(Uri base, String action, XtreamConnectionResult connection) {

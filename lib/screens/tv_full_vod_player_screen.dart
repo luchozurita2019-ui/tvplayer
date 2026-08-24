@@ -8,7 +8,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
 
-const String _vodUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+const String _vodUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/96.0.4664.18 Safari/537.36';
 
@@ -207,8 +208,9 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   }
 
   Future<void> _chooseAudio() async {
-    final items =
-        _tracks.audio.where((item) => item.id != 'no').toList(growable: false);
+    final items = _tracks.audio
+        .where((item) => item.id != 'no')
+        .toList(growable: false);
     if (items.isEmpty) return;
     final chosen = await showDialog<AudioTrack>(
       context: context,
@@ -428,48 +430,47 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   }
 
   Widget _errorView() => Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 520),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xEE10161D),
-            borderRadius: BorderRadius.circular(16),
+    child: Container(
+      constraints: const BoxConstraints(maxWidth: 520),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xEE10161D),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.movie_filter_outlined,
+            size: 44,
+            color: Colors.white54,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
-                Icons.movie_filter_outlined,
-                size: 44,
-                color: Colors.white54,
+              FilledButton(
+                autofocus: true,
+                onPressed: () => unawaited(_open()),
+                child: const Text('Reintentar'),
               ),
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style:
-                    const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  FilledButton(
-                    autofocus: true,
-                    onPressed: () => unawaited(_open()),
-                    child: const Text('Reintentar'),
-                  ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    child: const Text('Volver'),
-                  ),
-                ],
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('Volver'),
               ),
             ],
           ),
-        ),
-      );
+        ],
+      ),
+    ),
+  );
 }
 
 class _ControlButton extends StatelessWidget {
@@ -486,14 +487,14 @@ class _ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5),
-        child: OutlinedButton.icon(
-          autofocus: autofocus,
-          onPressed: onPressed,
-          icon: Icon(icon, size: 19),
-          label: Text(label),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 5),
+    child: OutlinedButton.icon(
+      autofocus: autofocus,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 19),
+      label: Text(label),
+    ),
+  );
 }
 
 class _TrackDialog<T> extends StatelessWidget {
@@ -517,48 +518,45 @@ class _TrackDialog<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Dialog(
-        backgroundColor: const Color(0xFF0D151E),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                      fontSize: 21, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: tracks.length,
-                    itemBuilder: (context, index) {
-                      final item = tracks[index];
-                      final selected = _id(item) == selectedId;
-                      return ListTile(
-                        autofocus:
-                            selected || (selectedId.isEmpty && index == 0),
-                        selected: selected,
-                        selectedTileColor:
-                            const Color(0xFF1677FF).withValues(alpha: .18),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        title: Text(label(item)),
-                        trailing:
-                            selected ? const Icon(Icons.check_rounded) : null,
-                        onTap: () => Navigator.of(context).pop(item),
-                      );
-                    },
-                  ),
-                ),
-              ],
+    backgroundColor: const Color(0xFF0D151E),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 520),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
             ),
-          ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: tracks.length,
+                itemBuilder: (context, index) {
+                  final item = tracks[index];
+                  final selected = _id(item) == selectedId;
+                  return ListTile(
+                    autofocus: selected || (selectedId.isEmpty && index == 0),
+                    selected: selected,
+                    selectedTileColor: const Color(0xFF1677FF)
+                        .withValues(alpha: .18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    title: Text(label(item)),
+                    trailing: selected ? const Icon(Icons.check_rounded) : null,
+                    onTap: () => Navigator.of(context).pop(item),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }

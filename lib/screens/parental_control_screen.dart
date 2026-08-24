@@ -42,10 +42,10 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
         final filteredGroups = normalizedQuery.isEmpty
             ? groups
             : groups
-                .where(
-                  (group) => group.toLowerCase().contains(normalizedQuery),
-                )
-                .toList(growable: false);
+                  .where(
+                    (group) => group.toLowerCase().contains(normalizedQuery),
+                  )
+                  .toList(growable: false);
 
         return Scaffold(
           appBar: AppBar(title: const Text('Control parental')),
@@ -80,9 +80,7 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
               width: 52,
               height: 52,
               decoration: BoxDecoration(
-                color: Theme.of(context)
-                    .colorScheme
-                    .primary
+                color: Theme.of(context).colorScheme.primary
                     .withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(16),
               ),
@@ -90,8 +88,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
                 !active
                     ? Icons.shield_outlined
                     : unlocked
-                        ? Icons.lock_open_rounded
-                        : Icons.lock_rounded,
+                    ? Icons.lock_open_rounded
+                    : Icons.lock_rounded,
                 color: Theme.of(context).colorScheme.primary,
               ),
             ),
@@ -104,11 +102,9 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
                     !active
                         ? 'Control parental desactivado'
                         : unlocked
-                            ? 'Contenido protegido desbloqueado'
-                            : 'Contenido protegido bloqueado',
-                    style: Theme.of(context)
-                        .textTheme
-                        .titleMedium
+                        ? 'Contenido protegido desbloqueado'
+                        : 'Contenido protegido bloqueado',
+                    style: Theme.of(context).textTheme.titleMedium
                         ?.copyWith(fontWeight: FontWeight.w800),
                   ),
                   const SizedBox(height: 4),
@@ -116,8 +112,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
                     !_parental.pinConfigured
                         ? 'Creá un PIN de 4 dígitos para comenzar.'
                         : active
-                            ? 'TV FULL protege categorías y resultados adultos con tu PIN.'
-                            : 'Tu PIN está guardado y podés volver a activar la protección cuando quieras.',
+                        ? 'TV FULL protege categorías y resultados adultos con tu PIN.'
+                        : 'Tu PIN está guardado y podés volver a activar la protección cuando quieras.',
                   ),
                 ],
               ),
@@ -137,9 +133,7 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
           children: [
             Text(
               'Crear PIN parental',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleLarge
+              style: Theme.of(context).textTheme.titleLarge
                   ?.copyWith(fontWeight: FontWeight.w800),
             ),
             const SizedBox(height: 8),
@@ -247,9 +241,7 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
             padding: const EdgeInsets.fromLTRB(18, 18, 18, 8),
             child: Text(
               'Categorías protegidas',
-              style: Theme.of(context)
-                  .textTheme
-                  .titleMedium
+              style: Theme.of(context).textTheme.titleMedium
                   ?.copyWith(fontWeight: FontWeight.w800),
             ),
           ),

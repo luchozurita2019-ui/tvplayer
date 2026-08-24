@@ -147,8 +147,8 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     final visible = _category == null
         ? data.items
         : data.items
-            .where((item) => item.category == _category)
-            .toList(growable: false);
+              .where((item) => item.category == _category)
+              .toList(growable: false);
     return Row(
       children: [
         SizedBox(
@@ -170,15 +170,16 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(11),
                     ),
-                    selectedTileColor:
-                        const Color(0xFF1677FF).withValues(alpha: .18),
+                    selectedTileColor: const Color(0xFF1677FF)
+                        .withValues(alpha: .18),
                     title: Text(
                       value ?? 'Todas',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontWeight:
-                            selected ? FontWeight.w800 : FontWeight.w600,
+                        fontWeight: selected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
                       ),
                     ),
                     onTap: () => setState(() => _category = value),
@@ -209,7 +210,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                     final columns = constraints.maxWidth >= 1000 ? 4 : 3;
                     return GridView.builder(
                       padding: const EdgeInsets.fromLTRB(18, 0, 22, 24),
-                      scrollCacheExtent: 90,
+                      scrollCacheExtent: const ScrollCacheExtent.pixels(90),
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: columns,
                         crossAxisSpacing: 10,
@@ -381,33 +382,37 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                         ),
                         Expanded(
                           child: ListView(
-                            children: widget.model.seasons.keys.map((season) {
-                              final selected = season == _season;
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 3,
-                                ),
-                                child: ListTile(
-                                  autofocus:
-                                      season == widget.model.seasons.keys.first,
-                                  selected: selected,
-                                  selectedTileColor: const Color(0xFF1677FF)
-                                      .withValues(alpha: .18),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  title: Text(
-                                    'Temporada $season',
-                                    style: TextStyle(
-                                      fontWeight: selected
-                                          ? FontWeight.w800
-                                          : FontWeight.w600,
+                            children: widget.model.seasons.keys
+                                .map((season) {
+                                  final selected = season == _season;
+                                  return Padding(
+                                    padding: const EdgeInsets.symmetric(
+                                      vertical: 3,
                                     ),
-                                  ),
-                                  onTap: () => setState(() => _season = season),
-                                ),
-                              );
-                            }).toList(growable: false),
+                                    child: ListTile(
+                                      autofocus:
+                                          season ==
+                                          widget.model.seasons.keys.first,
+                                      selected: selected,
+                                      selectedTileColor: const Color(0xFF1677FF)
+                                          .withValues(alpha: .18),
+                                      shape: RoundedRectangleBorder(
+                                        borderRadius: BorderRadius.circular(10),
+                                      ),
+                                      title: Text(
+                                        'Temporada $season',
+                                        style: TextStyle(
+                                          fontWeight: selected
+                                              ? FontWeight.w800
+                                              : FontWeight.w600,
+                                        ),
+                                      ),
+                                      onTap: () =>
+                                          setState(() => _season = season),
+                                    ),
+                                  );
+                                })
+                                .toList(growable: false),
                           ),
                         ),
                       ],
@@ -530,73 +535,73 @@ class _SeriesCardState extends State<_SeriesCard> {
   bool _focused = false;
   @override
   Widget build(BuildContext context) => Material(
-        color: _focused ? const Color(0xFF10283B) : const Color(0xFF0B151F),
-        borderRadius: BorderRadius.circular(11),
-        child: InkWell(
-          autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(11),
-          onFocusChange: (value) => setState(() => _focused = value),
-          onTap: widget.onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 58,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(7),
-                    child: CachedArtworkImage(
-                      url: widget.item.cover,
-                      fit: BoxFit.cover,
-                      cacheWidth: 116,
-                      cacheHeight: 174,
-                      prefetchExtent: 0,
-                      fallback: const ColoredBox(
-                        color: Color(0xFF111E29),
-                        child: Icon(
-                          Icons.video_library_outlined,
-                          color: Colors.white30,
-                          size: 23,
-                        ),
-                      ),
+    color: _focused ? const Color(0xFF10283B) : const Color(0xFF0B151F),
+    borderRadius: BorderRadius.circular(11),
+    child: InkWell(
+      autofocus: widget.autofocus,
+      borderRadius: BorderRadius.circular(11),
+      onFocusChange: (value) => setState(() => _focused = value),
+      onTap: widget.onTap,
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 58,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(7),
+                child: CachedArtworkImage(
+                  url: widget.item.cover,
+                  fit: BoxFit.cover,
+                  cacheWidth: 116,
+                  cacheHeight: 174,
+                  prefetchExtent: 0,
+                  fallback: const ColoredBox(
+                    color: Color(0xFF111E29),
+                    child: Icon(
+                      Icons.video_library_outlined,
+                      color: Colors.white30,
+                      size: 23,
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.item.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      if ((widget.item.category ?? '').isNotEmpty) ...[
-                        const SizedBox(height: 5),
-                        Text(
-                          widget.item.category!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white38,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                mainAxisAlignment: MainAxisAlignment.center,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    widget.item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  if ((widget.item.category ?? '').isNotEmpty) ...[
+                    const SizedBox(height: 5),
+                    Text(
+                      widget.item.category!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
 
 class _SeriesData {
@@ -607,20 +612,19 @@ class _SeriesData {
   factory _SeriesData.xtream(
     XtreamConnectionResult connection,
     List<XtreamSeriesSummary> series,
-  ) =>
-      _SeriesData(
-        connection,
-        series
-            .map(
-              (item) => _SeriesItem(
-                name: item.name,
-                cover: _resolveArtwork(connection.streamServer, item.cover),
-                category: item.category,
-                summary: item,
-              ),
-            )
-            .toList(growable: false),
-      );
+  ) => _SeriesData(
+    connection,
+    series
+        .map(
+          (item) => _SeriesItem(
+            name: item.name,
+            cover: _resolveArtwork(connection.streamServer, item.cover),
+            category: item.category,
+            summary: item,
+          ),
+        )
+        .toList(growable: false),
+  );
 
   factory _SeriesData.m3u(List<Channel> channels) {
     final byKey = <String, _SeriesItem>{};
@@ -720,7 +724,9 @@ class _SeriesDetailModel {
   factory _SeriesDetailModel.fromM3u(_SeriesItem item) {
     final seasons = <int, List<_EpisodeItem>>{};
     for (final episode in item.m3uEpisodes ?? const <_M3uEpisode>[]) {
-      seasons.putIfAbsent(episode.season, () => []).add(
+      seasons
+          .putIfAbsent(episode.season, () => [])
+          .add(
             _EpisodeItem(
               number: episode.number,
               title: episode.channel.name,
@@ -797,8 +803,9 @@ _M3uEpisode _parseM3uEpisode(Channel channel) {
     );
   }
   return _M3uEpisode(
-    seriesTitle:
-        channel.group?.trim().isNotEmpty == true ? channel.group!.trim() : name,
+    seriesTitle: channel.group?.trim().isNotEmpty == true
+        ? channel.group!.trim()
+        : name,
     season: 1,
     number: 1,
     channel: channel,
@@ -813,7 +820,8 @@ String? _resolveArtwork(Uri base, String? raw) {
   final uri = Uri.tryParse(value);
   if (uri != null &&
       (uri.scheme == 'http' || uri.scheme == 'https') &&
-      uri.host.isNotEmpty) return uri.toString();
+      uri.host.isNotEmpty)
+    return uri.toString();
   return base.resolve(value).toString();
 }
 
@@ -822,19 +830,19 @@ class _CenteredLoading extends StatelessWidget {
   const _CenteredLoading({required this.label});
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 34,
-              height: 34,
-              child: CircularProgressIndicator(strokeWidth: 3),
-            ),
-            const SizedBox(height: 14),
-            Text(label, style: const TextStyle(color: Colors.white60)),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 34,
+          height: 34,
+          child: CircularProgressIndicator(strokeWidth: 3),
         ),
-      );
+        const SizedBox(height: 14),
+        Text(label, style: const TextStyle(color: Colors.white60)),
+      ],
+    ),
+  );
 }
 
 class _CenteredError extends StatelessWidget {
@@ -843,19 +851,19 @@ class _CenteredError extends StatelessWidget {
   const _CenteredError({required this.label, required this.onRetry});
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(
-              Icons.video_library_outlined,
-              size: 44,
-              color: Colors.white38,
-            ),
-            const SizedBox(height: 12),
-            Text(label),
-            const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(
+          Icons.video_library_outlined,
+          size: 44,
+          color: Colors.white38,
         ),
-      );
+        const SizedBox(height: 12),
+        Text(label),
+        const SizedBox(height: 16),
+        FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
+      ],
+    ),
+  );
 }

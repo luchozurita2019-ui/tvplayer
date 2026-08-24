@@ -46,7 +46,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final androidTv = _androidTvBuild &&
+    final androidTv =
+        _androidTvBuild &&
         !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android;
 

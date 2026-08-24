@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
 
-const String _vodUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+const String _vodUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/96.0.4664.18 Safari/537.36';
 
@@ -314,11 +315,11 @@ class _AndroidMedia3VodPlayerScreenState
       off
           ? <String, Object?>{'off': true}
           : track == null
-              ? <String, Object?>{'auto': true}
-              : <String, Object?>{
-                  'groupIndex': track.groupIndex,
-                  'trackIndex': track.trackIndex,
-                },
+          ? <String, Object?>{'auto': true}
+          : <String, Object?>{
+              'groupIndex': track.groupIndex,
+              'trackIndex': track.trackIndex,
+            },
     );
     _showOverlay();
   }
@@ -350,8 +351,9 @@ class _AndroidMedia3VodPlayerScreenState
                 (track) => ListTile(
                   leading: const Icon(Icons.volume_up_rounded),
                   title: Text(track.displayName),
-                  trailing:
-                      track.selected ? const Icon(Icons.check_rounded) : null,
+                  trailing: track.selected
+                      ? const Icon(Icons.check_rounded)
+                      : null,
                   onTap: () {
                     Navigator.of(dialogContext).pop();
                     unawaited(_selectAudio(track));
@@ -383,8 +385,9 @@ class _AndroidMedia3VodPlayerScreenState
                 (track) => ListTile(
                   leading: const Icon(Icons.subtitles_rounded),
                   title: Text(track.displayName),
-                  trailing:
-                      track.selected ? const Icon(Icons.check_rounded) : null,
+                  trailing: track.selected
+                      ? const Icon(Icons.check_rounded)
+                      : null,
                   onTap: () {
                     Navigator.of(dialogContext).pop();
                     unawaited(_selectSubtitle(track));

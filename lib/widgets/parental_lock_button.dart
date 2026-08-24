@@ -15,15 +15,16 @@ class ParentalLockButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hidden = unlocked ? 0 : hiddenCategoryCount;
-    final hiddenLabel =
-        hidden == 1 ? '1 categoría oculta' : '$hidden categorías ocultas';
+    final hiddenLabel = hidden == 1
+        ? '1 categoría oculta'
+        : '$hidden categorías ocultas';
 
     return IconButton(
       tooltip: unlocked
           ? 'Bloquear contenido protegido'
           : hidden > 0
-              ? 'Desbloquear · $hiddenLabel'
-              : 'Desbloquear contenido protegido',
+          ? 'Desbloquear · $hiddenLabel'
+          : 'Desbloquear contenido protegido',
       onPressed: onPressed,
       icon: SizedBox(
         width: 34,

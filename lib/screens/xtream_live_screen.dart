@@ -139,7 +139,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     final parsed = Uri.tryParse(value);
     if (parsed != null &&
         (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-        parsed.host.isNotEmpty) return parsed.toString();
+        parsed.host.isNotEmpty)
+      return parsed.toString();
     return base.resolve(value).toString();
   }
 
@@ -198,8 +199,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     final visible = _category == null
         ? data.channels
         : data.channels
-            .where((item) => item.group == _category)
-            .toList(growable: false);
+              .where((item) => item.group == _category)
+              .toList(growable: false);
 
     return Row(
       children: [
@@ -222,15 +223,16 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                     shape: RoundedRectangleBorder(
                       borderRadius: BorderRadius.circular(11),
                     ),
-                    selectedTileColor:
-                        const Color(0xFF1677FF).withValues(alpha: .18),
+                    selectedTileColor: const Color(0xFF1677FF)
+                        .withValues(alpha: .18),
                     title: Text(
                       category ?? 'Todos',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontWeight:
-                            selected ? FontWeight.w800 : FontWeight.w600,
+                        fontWeight: selected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
                       ),
                     ),
                     onTap: () => setState(() => _category = category),
@@ -259,7 +261,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(18, 0, 24, 24),
-                  scrollCacheExtent: 80,
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(80),
                   itemCount: visible.length,
                   itemBuilder: (context, index) {
                     final channel = visible[index];
@@ -387,8 +389,11 @@ class _ChannelRowState extends State<_ChannelRow> {
   }
 
   String _initials(String value) {
-    final words =
-        value.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).take(2);
+    final words = value
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((e) => e.isNotEmpty)
+        .take(2);
     final text = words.map((e) => e.substring(0, 1).toUpperCase()).join();
     return text.isEmpty ? 'TV' : text;
   }
@@ -415,19 +420,19 @@ class _Loading extends StatelessWidget {
   const _Loading({required this.message});
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(
-              width: 34,
-              height: 34,
-              child: CircularProgressIndicator(strokeWidth: 3),
-            ),
-            const SizedBox(height: 14),
-            Text(message, style: const TextStyle(color: Colors.white60)),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 34,
+          height: 34,
+          child: CircularProgressIndicator(strokeWidth: 3),
         ),
-      );
+        const SizedBox(height: 14),
+        Text(message, style: const TextStyle(color: Colors.white60)),
+      ],
+    ),
+  );
 }
 
 class _ErrorView extends StatelessWidget {
@@ -436,15 +441,15 @@ class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.message, required this.onRetry});
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.tv_off_outlined, size: 44, color: Colors.white38),
-            const SizedBox(height: 12),
-            Text(message, style: const TextStyle(fontSize: 17)),
-            const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
-          ],
-        ),
-      );
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.tv_off_outlined, size: 44, color: Colors.white38),
+        const SizedBox(height: 12),
+        Text(message, style: const TextStyle(fontSize: 17)),
+        const SizedBox(height: 16),
+        FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
+      ],
+    ),
+  );
 }

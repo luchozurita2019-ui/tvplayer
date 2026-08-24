@@ -85,15 +85,15 @@ class Channel {
   }
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'url': url,
-        'logoUrl': logoUrl,
-        'group': group,
-        'tvgId': tvgId,
-        'httpUserAgent': httpUserAgent,
-        'httpReferrer': httpReferrer,
-        if (httpHeaders != null) 'httpHeaders': httpHeaders,
-      };
+    'name': name,
+    'url': url,
+    'logoUrl': logoUrl,
+    'group': group,
+    'tvgId': tvgId,
+    'httpUserAgent': httpUserAgent,
+    'httpReferrer': httpReferrer,
+    if (httpHeaders != null) 'httpHeaders': httpHeaders,
+  };
 
   factory Channel.fromJson(Map<String, dynamic> json) {
     final rawHeaders = json['httpHeaders'];

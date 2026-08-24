@@ -21,7 +21,8 @@ class ArtworkCacheService {
   static const int _trimToBytes = 48 * 1024 * 1024;
   static const Duration _connectTimeout = Duration(seconds: 7);
   static const Duration _chunkTimeout = Duration(seconds: 6);
-  static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+  static const String _userAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/96.0.4664.18 Safari/537.36';
 
@@ -274,7 +275,8 @@ class ArtworkCacheService {
     final uri = Uri.tryParse(value);
     if (uri == null ||
         !(uri.scheme == 'http' || uri.scheme == 'https') ||
-        uri.host.isEmpty) return null;
+        uri.host.isEmpty)
+      return null;
     return uri.toString();
   }
 

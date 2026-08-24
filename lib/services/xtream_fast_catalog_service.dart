@@ -984,16 +984,16 @@ List<XtreamSeriesSummary> _seriesListFromPrepared(dynamic raw) {
 }
 
 Map<String, dynamic> _movieToMap(XtreamVodSummary movie) => <String, dynamic>{
-      'id': movie.id,
-      'name': movie.name,
-      'extension': movie.extension,
-      'cover': movie.cover,
-      'category': movie.category,
-      'rating': movie.rating,
-      'releaseDate': movie.releaseDate,
-      'genre': movie.genre,
-      'directSource': movie.directSource,
-    };
+  'id': movie.id,
+  'name': movie.name,
+  'extension': movie.extension,
+  'cover': movie.cover,
+  'category': movie.category,
+  'rating': movie.rating,
+  'releaseDate': movie.releaseDate,
+  'genre': movie.genre,
+  'directSource': movie.directSource,
+};
 
 XtreamConnectionResult? _provisionalConnectionFromPlaylistUrl(String raw) {
   final uri = Uri.tryParse(raw.trim());
