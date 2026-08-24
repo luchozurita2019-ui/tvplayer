@@ -33,10 +33,14 @@ class _AndroidMedia3TexturePlayerScreenState
   static const EventChannel _events = EventChannel(
     'tvfull/media3_texture_events',
   );
-  static const Duration _liveStartupTimeout = Duration(seconds: 5);
-  static const Duration _liveRebufferTimeout = Duration(seconds: 8);
+  static const Duration _liveStartupTimeout = Duration(seconds: 4);
+  static const Duration _liveRebufferTimeout = Duration(seconds: 7);
 
   final FocusNode _rootFocus = FocusNode(debugLabel: 'tvfull-pro-live');
+  final FocusNode _channelListFocus = FocusNode(
+    debugLabel: 'tvfull-pro-live-selected-channel',
+  );
+  final ScrollController _channelScrollController = ScrollController();
   StreamSubscription<dynamic>? _eventSub;
   Timer? _overlayTimer;
   Timer? _retryTimer;
@@ -191,7 +195,9 @@ class _AndroidMedia3TexturePlayerScreenState
     final permanentHttp = combined.contains('401') ||
         combined.contains('403') ||
         combined.contains('404');
-    final transient = !permanentHttp &&
+    final watchdogTimeout = combined.contains('live_buffer_timeout');
+    final transient = !watchdogTimeout &&
+        !permanentHttp &&
         (combined.contains('network') ||
             combined.contains('timeout') ||
             combined.contains('connection') ||
@@ -238,6 +244,9 @@ class _AndroidMedia3TexturePlayerScreenState
   }
 
   String _friendlyMessage(String value) {
+    if (value.contains('live_buffer_timeout')) {
+      return 'Canal no disponible';
+    }
     if (value.contains('parsing_container') ||
         value.contains('parser') ||
         value.contains('malformed')) {
@@ -286,6 +295,37 @@ class _AndroidMedia3TexturePlayerScreenState
       _overlayVisible = true;
       _channelListVisible = true;
     });
+    _scrollChannelListToCurrent();
+  }
+
+  void _closeChannelList() {
+    if (!mounted) return;
+    setState(() => _channelListVisible = false);
+    _rootFocus.requestFocus();
+    _showOverlay();
+  }
+
+  void _scrollChannelListToCurrent() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted ||
+          !_channelListVisible ||
+          !_channelScrollController.hasClients) {
+        return;
+      }
+      const rowExtent = 58.0;
+      final max = _channelScrollController.position.maxScrollExtent;
+      final target = (_index * rowExtent - rowExtent * 2)
+          .clamp(0.0, max)
+          .toDouble();
+      _channelScrollController.jumpTo(target);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted &&
+            _channelListVisible &&
+            _channelListFocus.canRequestFocus) {
+          _channelListFocus.requestFocus();
+        }
+      });
+    });
   }
 
   void _selectChannel(int index) {
@@ -295,6 +335,7 @@ class _AndroidMedia3TexturePlayerScreenState
       _channelListVisible = false;
       _overlayVisible = true;
     });
+    _rootFocus.requestFocus();
     unawaited(_prepareCurrent());
     _showOverlay();
   }
@@ -315,8 +356,25 @@ class _AndroidMedia3TexturePlayerScreenState
 
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
-    if (_channelListVisible) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    final isBack = key == LogicalKeyboardKey.goBack ||
+        key == LogicalKeyboardKey.escape;
+
+    if (_channelListVisible) {
+      if (isBack) {
+        _closeChannelList();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.ignored;
+    }
+
+    if (isBack && _overlayVisible) {
+      _overlayTimer?.cancel();
+      setState(() => _overlayVisible = false);
+      _rootFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
+
     if (key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter) {
@@ -351,6 +409,8 @@ class _AndroidMedia3TexturePlayerScreenState
     _retryTimer?.cancel();
     _cancelBufferingWatchdog();
     _eventSub?.cancel();
+    _channelScrollController.dispose();
+    _channelListFocus.dispose();
     _rootFocus.dispose();
     unawaited(_player.invokeMethod<void>('dispose'));
     super.dispose();
@@ -416,25 +476,15 @@ class _AndroidMedia3TexturePlayerScreenState
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    _channel.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 16,
-                      fontWeight: FontWeight.w800,
+                  child: Container(
+                    height: 2,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent,
+                      borderRadius: BorderRadius.circular(2),
                     ),
                   ),
                 ),
-                Container(
-                  width: 130,
-                  height: 2,
-                  decoration: BoxDecoration(
-                    color: Colors.redAccent,
-                    borderRadius: BorderRadius.circular(2),
-                  ),
-                ),
-                const SizedBox(width: 10),
+                const SizedBox(width: 12),
                 const Icon(Icons.circle, size: 10, color: Colors.redAccent),
                 const SizedBox(width: 6),
                 const Text(
@@ -482,11 +532,7 @@ class _AndroidMedia3TexturePlayerScreenState
                           ),
                         ),
                         IconButton(
-                          onPressed: () {
-                            setState(() => _channelListVisible = false);
-                            _rootFocus.requestFocus();
-                            _showOverlay();
-                          },
+                          onPressed: _closeChannelList,
                           icon: const Icon(Icons.close_rounded),
                         ),
                       ],
@@ -494,6 +540,7 @@ class _AndroidMedia3TexturePlayerScreenState
                   ),
                   Expanded(
                     child: ListView.builder(
+                      controller: _channelScrollController,
                       padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
                       scrollCacheExtent: const ScrollCacheExtent.pixels(70),
                       itemCount: widget.playlist.length,
@@ -503,6 +550,7 @@ class _AndroidMedia3TexturePlayerScreenState
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 2),
                           child: ListTile(
+                            focusNode: selected ? _channelListFocus : null,
                             autofocus: selected,
                             selected: selected,
                             minTileHeight: 54,
