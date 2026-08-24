@@ -1,4 +1,4 @@
-# validate persisted clean source after VOD startup watchdog
+# validate persisted clean source after normalized VOD startup watchdog
 name: Validate TV FULL PRO Clean
 
 on:
