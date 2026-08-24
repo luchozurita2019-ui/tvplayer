@@ -1,4 +1,4 @@
-# one-time formatting pass for compact movie metadata
+# one-time integrated formatting and validation pass
 name: Validate TV FULL PRO Clean
 
 on:
@@ -20,10 +20,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: android-tv-full-pro-clean-source
-
-      - name: Preserve normal validator
-        shell: bash
-        run: git show HEAD^:.github/workflows/validate-tv-full-pro-clean.yml > /tmp/normal-validator.yml
 
       - name: Record validation run id
         shell: bash
@@ -50,8 +46,8 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Format compact movie source
-        run: dart format lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart
+      - name: Format complete Dart source
+        run: dart format lib
 
       - name: Analyze complete Dart source
         run: flutter analyze
@@ -62,10 +58,10 @@ jobs:
           --dart-define=TV_FULL_ANDROID_TV=true
           --target-platform android-arm64
 
-      - name: Persist formatted source and restore validator
+      - name: Persist validated formatting and restore normal validator
         shell: bash
         run: |
-          cp /tmp/normal-validator.yml .github/workflows/validate-tv-full-pro-clean.yml
-          git add lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart .github/workflows/validate-tv-full-pro-clean.yml
-          git commit -m "Validate compact Xtream movie metadata"
+          git show 1160c48c9cd5e156803bf162fb15631fd4b96ae7:.github/workflows/validate-tv-full-pro-clean.yml > .github/workflows/validate-tv-full-pro-clean.yml
+          git add lib .github/workflows/validate-tv-full-pro-clean.yml
+          git commit -m "Validate integrated TV FULL PRO source" || true
           git push origin HEAD:android-tv-full-pro-clean-source
