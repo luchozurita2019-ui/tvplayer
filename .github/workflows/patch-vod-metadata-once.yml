@@ -1,0 +1,270 @@
+name: Patch VOD Metadata Once
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/workflows/patch-vod-metadata-once.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply compact Xtream metadata support
+        shell: python
+        run: |
+          from pathlib import Path
+
+          service = Path('lib/services/xtream_vod_service.dart')
+          text = service.read_text()
+
+          old = '''  final String? duration;
+  final String? country;
+  final String? backdrop;
+'''
+          new = '''  final String? duration;
+  final String? country;
+  final String? language;
+  final String? originalLanguage;
+  final String? audioInfo;
+  final String? translation;
+  final String? backdrop;
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''    this.duration,
+    this.country,
+    this.backdrop,
+'''
+          new = '''    this.duration,
+    this.country,
+    this.language,
+    this.originalLanguage,
+    this.audioInfo,
+    this.translation,
+    this.backdrop,
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''      String? pick(List<String> keys) =>
+          _firstText(info, keys) ?? _firstText(movieData, keys);
+'''
+          new = '''      String? pick(List<String> keys) =>
+          _firstText(info, keys) ?? _firstText(movieData, keys);
+      String? pickMetadata(List<String> keys) =>
+          _firstMetadataText(info, keys) ??
+          _firstMetadataText(movieData, keys);
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''        rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
+        duration: pick(const ['duration', 'duration_secs']),
+        country: pick(const ['country']),
+        backdrop: backdrop,
+'''
+          new = '''        rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
+        duration: pick(const ['duration']) ??
+            _durationFromSeconds(pick(const ['duration_secs'])),
+        country: pickMetadata(const ['country']),
+        language: pickMetadata(const ['language', 'spoken_languages', 'languages']),
+        originalLanguage:
+            pickMetadata(const ['original_language', 'originalLanguage']),
+        audioInfo: pickMetadata(
+          const ['audio_language', 'audio_languages', 'audio_info', 'audio'],
+        ),
+        translation: pickMetadata(
+          const ['translation', 'translation_type', 'audio_translation', 'dubbing'],
+        ),
+        backdrop: backdrop,
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''  static String? _firstImage(dynamic raw) {
+'''
+          new = '''  static String? _firstMetadataText(
+    Map<String, dynamic> source,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = _metadataText(source[key]);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  static String? _metadataText(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is bool) return raw ? 'Sí' : null;
+    if (raw is List) {
+      final values = raw
+          .map(_metadataText)
+          .whereType<String>()
+          .where((value) => value.isNotEmpty)
+          .toList(growable: false);
+      return values.isEmpty ? null : values.join(', ');
+    }
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      for (final key in const ['name', 'label', 'language', 'title', 'iso_639_1']) {
+        final value = _metadataText(map[key]);
+        if (value != null) return value;
+      }
+      return null;
+    }
+    if (raw is String) {
+      final value = raw.trim();
+      if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
+        return null;
+      }
+      if (value.startsWith('[') || value.startsWith('{')) {
+        try {
+          return _metadataText(jsonDecode(value));
+        } catch (_) {}
+      }
+      return value;
+    }
+    return _text(raw);
+  }
+
+  static String? _durationFromSeconds(String? raw) {
+    final seconds = int.tryParse(raw?.trim() ?? '');
+    if (seconds == null || seconds <= 0) return null;
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    if (hours > 0) return '${hours}h ${minutes.toString().padLeft(2, '0')} min';
+    return '${minutes.clamp(1, 59)} min';
+  }
+
+  static String? _firstImage(dynamic raw) {
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+          service.write_text(text)
+
+          screen = Path('lib/screens/xtream_movies_screen.dart')
+          text = screen.read_text()
+
+          old = '''            rating: details.rating,
+            duration: details.duration,
+            channel: details.toChannel(data.connection!),
+'''
+          new = '''            rating: details.rating,
+            duration: details.duration,
+            country: details.country,
+            language: details.language,
+            originalLanguage: details.originalLanguage,
+            audioInfo: details.audioInfo,
+            translation: details.translation,
+            channel: details.toChannel(data.connection!),
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''  final String? rating;
+  final String? duration;
+  final Channel channel;
+'''
+          new = '''  final String? rating;
+  final String? duration;
+  final String? country;
+  final String? language;
+  final String? originalLanguage;
+  final String? audioInfo;
+  final String? translation;
+  final Channel channel;
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''    this.rating,
+    this.duration,
+  });
+'''
+          new = '''    this.rating,
+    this.duration,
+    this.country,
+    this.language,
+    this.originalLanguage,
+    this.audioInfo,
+    this.translation,
+  });
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''      if ((rating ?? '').trim().isNotEmpty) '★ ${rating!.trim()}',
+    ];
+    return Scaffold(
+'''
+          new = '''      if ((rating ?? '').trim().isNotEmpty) '★ ${rating!.trim()}',
+    ];
+    final languageDetails = <String>[
+      if ((language ?? '').trim().isNotEmpty) 'Idioma: ${language!.trim()}',
+      if ((originalLanguage ?? '').trim().isNotEmpty &&
+          originalLanguage!.trim().toLowerCase() !=
+              (language ?? '').trim().toLowerCase())
+        'Original: ${originalLanguage!.trim()}',
+      if ((audioInfo ?? '').trim().isNotEmpty) 'Audio: ${audioInfo!.trim()}',
+      if ((translation ?? '').trim().isNotEmpty)
+        'Traducción: ${translation!.trim()}',
+      if ((country ?? '').trim().isNotEmpty) country!.trim(),
+    ];
+    return Scaffold(
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+
+          old = '''                  const SizedBox(height: 18),
+                  Text(
+                    (plot ?? '').trim().isEmpty
+'''
+          new = '''                  if (languageDetails.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      languageDetails.join('  ·  '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white46,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
+                  Text(
+                    (plot ?? '').trim().isEmpty
+'''
+          assert old in text
+          text = text.replace(old, new, 1)
+          screen.write_text(text)
+
+      - name: Format changed Dart files
+        run: dart format lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart
+
+      - name: Commit source and remove one-time workflow
+        shell: bash
+        run: |
+          rm .github/workflows/patch-vod-metadata-once.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart .github/workflows/patch-vod-metadata-once.yml
+          git commit -m "Add compact Xtream movie language metadata"
+          git push origin HEAD:android-tv-full-pro-clean-source
