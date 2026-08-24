@@ -37,35 +37,56 @@ class ContentBuckets {
 class ContentClassifier {
   const ContentClassifier._();
 
-  /// Clasificación conservadora: una categoría o un canal que se llame
-  /// "Películas", "Cine" o "Series" puede seguir siendo TV lineal 24/7.
-  /// Por eso los nombres/grupos NO convierten un canal en VOD.
+  /// Respeta primero las señales explícitas del proveedor. Una extensión
+  /// `.ts` o `.m3u8` por sí sola nunca decide que algo sea LIVE: muchos
+  /// proveedores entregan VOD y episodios con esos contenedores.
   static IptvContentKind classify(Channel channel) {
     final url = channel.url.toLowerCase();
     final uri = Uri.tryParse(channel.url);
     final path = (uri?.path ?? url).toLowerCase();
-    final group = (channel.group ?? '').toLowerCase();
+    final group = _normalize(channel.group ?? '');
 
-    // Xtream Codes expone rutas inequívocas para VOD y series.
     if (path.contains('/movie/')) return IptvContentKind.movies;
     if (path.contains('/series/')) return IptvContentKind.series;
     if (path.contains('/radio/') || url.startsWith('icy://')) {
       return IptvContentKind.radios;
     }
 
-    // Un archivo de video directo es VOD. Un .ts/.m3u8 sigue siendo LIVE,
-    // aunque el grupo se llame Películas, Cine, Series, Novelas, etc.
-    if (_hasVideoFileExtension(path)) return IptvContentKind.movies;
+    // En M3U, group-title es estructura explícita entregada por el proveedor.
+    // Se conserva su intención y su orden; no se reordena ni se aplana A–Z.
+    if (_containsAny(group, const [
+      'series',
+      'serie',
+      'temporada',
+      'episodios',
+      'episodio',
+      'novelas',
+    ])) {
+      return IptvContentKind.series;
+    }
+    if (_containsAny(group, const [
+      'peliculas',
+      'pelicula',
+      'movies',
+      'movie',
+      'vod',
+      'cine',
+      'films',
+      'film',
+    ])) {
+      return IptvContentKind.movies;
+    }
 
+    if (_hasVideoFileExtension(path)) return IptvContentKind.movies;
     if (_hasAudioFileExtension(path) || _looksLikeRadioGroup(group)) {
       return IptvContentKind.radios;
     }
 
+    // Sólo cuando no existe ninguna señal explícita de VOD/Series/Radio se
+    // conserva como LIVE. Esto evita repetir la regresión de V13.
     return IptvContentKind.live;
   }
 
-  /// Particiona toda la lista una sola vez para evitar recorrer miles de
-  /// entradas nuevamente al mostrar contadores o abrir una sección.
   static ContentBuckets partition(Iterable<Channel> channels) {
     final live = <Channel>[];
     final movies = <Channel>[];
@@ -115,6 +136,7 @@ class ContentClassifier {
       '.m4v',
       '.webm',
       '.wmv',
+      '.flv',
     ].any(path.endsWith);
   }
 
@@ -138,4 +160,22 @@ class ContentClassifier {
         normalized.contains('radio fm') ||
         normalized.contains('fm radio');
   }
+
+  static bool _containsAny(String value, List<String> terms) {
+    for (final term in terms) {
+      if (value.contains(term)) return true;
+    }
+    return false;
+  }
+
+  static String _normalize(String value) => value
+      .trim()
+      .toLowerCase()
+      .replaceAll('á', 'a')
+      .replaceAll('é', 'e')
+      .replaceAll('í', 'i')
+      .replaceAll('ó', 'o')
+      .replaceAll('ú', 'u')
+      .replaceAll('ü', 'u')
+      .replaceAll('ñ', 'n');
 }
