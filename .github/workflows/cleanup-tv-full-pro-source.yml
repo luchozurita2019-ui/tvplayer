@@ -20,6 +20,16 @@ jobs:
         with:
           ref: android-tv-full-pro-clean-source
 
+      - name: Record cleanup run id
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .github/last-cleanup-run.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-cleanup-run.txt
+          git commit -m "Record source cleanup run $GITHUB_RUN_ID" || exit 0
+          git push origin HEAD:android-tv-full-pro-clean-source
+
       - name: Set up Flutter
         uses: subosito/flutter-action@v2
         with:
@@ -41,11 +51,9 @@ jobs:
               if count:
                   p.write_text(text.replace(old, new))
 
-          # Flutter opacity constants that do not exist as Colors getters.
           replace('lib/screens/xtream_series_screen.dart', 'Colors.white65', 'const Color(0xA6FFFFFF)', expected=1)
           replace('lib/screens/xtream_series_screen.dart', 'Colors.white45', 'const Color(0x73FFFFFF)', expected=2)
 
-          # Flutter 3.47 renamed the scroll cache parameter.
           for path in [
               'lib/screens/android_media3_texture_player_screen.dart',
               'lib/screens/channel_list_screen.dart',
@@ -55,7 +63,6 @@ jobs:
           ]:
               replace(path, 'cacheExtent:', 'scrollCacheExtent:')
 
-          # LIVE player: keep only state that is actually rendered/used.
           p = Path('lib/screens/android_media3_texture_player_screen.dart')
           text = p.read_text()
           text = text.replace("import 'package:flutter/foundation.dart';\n", '')
@@ -72,8 +79,6 @@ jobs:
               text = text.replace(line, '')
           p.write_text(text)
 
-          # VOD player: remove an unused startup marker; playback state comes
-          # from position/playing/buffering streams.
           p = Path('lib/screens/tv_full_vod_player_screen.dart')
           text = p.read_text()
           for line in [
@@ -84,8 +89,6 @@ jobs:
               text = text.replace(line, '')
           p.write_text(text)
 
-          # Fast Xtream catalog: preserve provider order and remove legacy dead
-          # helpers from the pre-clean architecture.
           p = Path('lib/services/xtream_fast_catalog_service.dart')
           text = p.read_text()
           text = text.replace(
