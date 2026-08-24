@@ -9,6 +9,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/remote_access_guard.dart';
 import '../services/section_catalog_service.dart';
 import '../services/xtream_live_fast_service.dart';
 import '../widgets/cached_artwork_image.dart';
@@ -64,8 +65,6 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         }
       } catch (_) {}
 
-      // La capacidad es por sección. Si LIVE nativo viene vacío, se consulta
-      // la M3U de esta misma cuenta sin convertir globalmente el servicio.
       return _loadM3uFallback();
     }
 
@@ -95,7 +94,6 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         widget.playlist.source,
         onProgress: (p) => _setStatus(p.label),
       );
-      // Una respuesta vacía no reemplaza un snapshot bueno que ya está visible.
       if (!mounted || fresh.channels.isEmpty) return;
       setState(
         () => _future = Future.value(
@@ -153,13 +151,16 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   String? _resolveArtwork(Uri base, String? raw) {
     final value = raw?.trim() ?? '';
-    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
       return null;
+    }
     if (value.startsWith('//')) return '${base.scheme}:$value';
     final parsed = Uri.tryParse(value);
     if (parsed != null &&
         (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-        parsed.host.isNotEmpty) return parsed.toString();
+        parsed.host.isNotEmpty) {
+      return parsed.toString();
+    }
     return base.resolve(value).toString();
   }
 
@@ -170,6 +171,12 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final provider = context.watch<IptvProvider>();
+    final blocked = remoteAccessBlockMessage(provider);
+    if (blocked != null) {
+      return _BlockedCatalog(message: blocked);
+    }
+
     return Scaffold(
       backgroundColor: const Color(0xFF05090F),
       appBar: AppBar(
@@ -224,37 +231,20 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     return Row(
       children: [
         SizedBox(
-          width: 260,
+          width: 220,
           child: ColoredBox(
             color: const Color(0xFF08111B),
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 16, 12, 20),
+              padding: const EdgeInsets.fromLTRB(10, 12, 10, 16),
               itemCount: categories.length + 1,
               itemBuilder: (context, index) {
                 final category = index == 0 ? null : categories[index - 1];
                 final selected = category == _category;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: ListTile(
-                    autofocus: false,
-                    selected: selected,
-                    minTileHeight: 50,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    selectedTileColor:
-                        const Color(0xFF1677FF).withValues(alpha: .18),
-                    title: Text(
-                      category ?? 'Todos',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight:
-                            selected ? FontWeight.w800 : FontWeight.w600,
-                      ),
-                    ),
-                    onTap: () => setState(() => _category = category),
-                  ),
+                return _CategoryRow(
+                  label: category ?? 'Todos',
+                  selected: selected,
+                  autofocus: index == 0,
+                  onTap: () => setState(() => _category = category),
                 );
               },
             ),
@@ -266,19 +256,19 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Padding(
-                padding: const EdgeInsets.fromLTRB(24, 18, 24, 12),
+                padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                 child: Text(
                   '${_category ?? 'Todos'}  ·  ${visible.length} canales',
                   style: const TextStyle(
                     color: Colors.white60,
-                    fontSize: 14,
+                    fontSize: 13,
                     fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
               Expanded(
                 child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(18, 0, 24, 24),
+                  padding: const EdgeInsets.fromLTRB(14, 0, 20, 20),
                   scrollCacheExtent: const ScrollCacheExtent.pixels(80),
                   itemCount: visible.length,
                   itemBuilder: (context, index) {
@@ -308,6 +298,68 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
           initialIndex: index,
           settings: provider.playbackSettings,
           isLiveContent: true,
+        ),
+      ),
+    );
+  }
+}
+
+class _CategoryRow extends StatefulWidget {
+  final String label;
+  final bool selected;
+  final bool autofocus;
+  final VoidCallback onTap;
+
+  const _CategoryRow({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    this.autofocus = false,
+  });
+
+  @override
+  State<_CategoryRow> createState() => _CategoryRowState();
+}
+
+class _CategoryRowState extends State<_CategoryRow> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final highlighted = _focused || widget.selected;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Material(
+        color: highlighted
+            ? const Color(0xFF12324A)
+            : Colors.transparent,
+        borderRadius: BorderRadius.circular(9),
+        child: InkWell(
+          autofocus: widget.autofocus,
+          borderRadius: BorderRadius.circular(9),
+          onFocusChange: (value) => setState(() => _focused = value),
+          onTap: widget.onTap,
+          child: Container(
+            height: 44,
+            padding: const EdgeInsets.symmetric(horizontal: 12),
+            alignment: Alignment.centerLeft,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(9),
+              border: Border.all(
+                color: _focused ? const Color(0xFF58B9FF) : Colors.transparent,
+              ),
+            ),
+            child: Text(
+              widget.label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                fontSize: 14,
+                fontWeight:
+                    highlighted ? FontWeight.w800 : FontWeight.w600,
+              ),
+            ),
+          ),
         ),
       ),
     );
@@ -344,20 +396,20 @@ class _ChannelRowState extends State<_ChannelRow> {
           onFocusChange: (value) => setState(() => _focused = value),
           onTap: widget.onTap,
           child: SizedBox(
-            height: 62,
+            height: 58,
             child: Row(
               children: [
-                const SizedBox(width: 12),
+                const SizedBox(width: 10),
                 SizedBox(
-                  width: 42,
-                  height: 42,
+                  width: 40,
+                  height: 40,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(8),
                     child: CachedArtworkImage(
                       url: widget.channel.logoUrl,
                       fit: BoxFit.contain,
-                      cacheWidth: 84,
-                      cacheHeight: 84,
+                      cacheWidth: 80,
+                      cacheHeight: 80,
                       prefetchExtent: 0,
                       fallback: Container(
                         alignment: Alignment.center,
@@ -373,28 +425,28 @@ class _ChannelRowState extends State<_ChannelRow> {
                     ),
                   ),
                 ),
-                const SizedBox(width: 14),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Text(
                     widget.channel.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: const TextStyle(
-                      fontSize: 16,
+                      fontSize: 15,
                       fontWeight: FontWeight.w700,
                     ),
                   ),
                 ),
                 if ((widget.channel.group ?? '').trim().isNotEmpty)
                   Padding(
-                    padding: const EdgeInsets.only(right: 18),
+                    padding: const EdgeInsets.only(right: 16),
                     child: Text(
                       widget.channel.group!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
                         color: Colors.white38,
-                        fontSize: 12,
+                        fontSize: 11,
                       ),
                     ),
                   ),
@@ -467,4 +519,32 @@ class _ErrorView extends StatelessWidget {
           ],
         ),
       );
+}
+
+class _BlockedCatalog extends StatelessWidget {
+  final String message;
+  const _BlockedCatalog({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF05090F),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.lock_outline_rounded, size: 46),
+            const SizedBox(height: 14),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            FilledButton(
+              autofocus: true,
+              onPressed: () => Navigator.of(context).maybePop(),
+              child: const Text('Volver'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
