@@ -1,0 +1,129 @@
+name: Build Android TV V12 Software VOD Logo Fix
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-v12-software-vod-logo-fix
+    paths:
+      - '.github/workflows/build-android-tv-v12.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_vod_v8.py'
+      - '.github/scripts/apply_android_tv_clean_v9.py'
+      - '.github/scripts/apply_android_tv_v10.py'
+      - '.github/scripts/apply_android_tv_v11.py'
+      - '.github/scripts/apply_android_tv_v12.py'
+      - '.github/scripts/fix_android_tv_clean_v9_compile.py'
+      - '.github/scripts/fix_android_tv_v10_compile.py'
+
+permissions:
+  contents: write
+
+jobs:
+  build-v12:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout V12 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-v12-software-vod-logo-fix
+
+      - name: Record V12 run id
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .github/last-v12-run.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-v12-run.txt
+          git commit -m "Record V12 workflow run $GITHUB_RUN_ID" || exit 0
+          git push origin HEAD:android-tv-v12-software-vod-logo-fix
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Apply V6 Media3 LIVE base
+        run: python3 .github/scripts/apply_android_media3_texture_v6.py
+
+      - name: Add V8 Media3 VOD base
+        run: python3 .github/scripts/apply_android_media3_vod_v8.py
+
+      - name: Apply V9 cleanup
+        run: python3 .github/scripts/apply_android_tv_clean_v9.py
+
+      - name: Fix V9 catalog compile
+        run: python3 .github/scripts/fix_android_tv_clean_v9_compile.py
+
+      - name: Apply V10 safe bridge and UI
+        run: python3 .github/scripts/apply_android_tv_v10.py
+
+      - name: Fix V10 catalog compile
+        run: python3 .github/scripts/fix_android_tv_v10_compile.py
+
+      - name: Apply V11 lazy data and VOD route
+        run: python3 .github/scripts/apply_android_tv_v11.py
+
+      - name: Apply V12 software VOD and logo normalization
+        run: python3 .github/scripts/apply_android_tv_v12.py
+
+      - name: Format V12 files
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/providers/iptv_provider.dart \
+            lib/screens/home_screen.dart \
+            lib/screens/player_screen.dart \
+            lib/screens/channel_list_screen.dart \
+            lib/screens/xtream_movies_screen.dart \
+            lib/screens/xtream_series_screen.dart \
+            lib/services/xtream_service.dart \
+            lib/services/xtream_live_fast_service.dart \
+            lib/services/xtream_vod_service.dart \
+            lib/services/xtream_series_service.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze V12 TV files
+        run: dart analyze --no-fatal-warnings lib/main.dart lib/providers/iptv_provider.dart lib/screens/home_screen.dart lib/screens/player_screen.dart lib/screens/channel_list_screen.dart lib/screens/xtream_movies_screen.dart lib/screens/xtream_series_screen.dart lib/services/xtream_service.dart lib/services/xtream_live_fast_service.dart lib/services/xtream_vod_service.dart lib/services/xtream_series_service.dart
+
+      - name: Build universal ARM TV APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "V12 build attempt $attempt/2"
+            if flutter build apk --release --target-platform android-arm,android-arm64 --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-V12-SOFTWARE-VOD-LOGO-FIX.apk
+          sha256sum artifact/TV-FULL-V12-SOFTWARE-VOD-LOGO-FIX.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-V12-SOFTWARE-VOD-LOGO-FIX
+          path: artifact/
+          retention-days: 30
