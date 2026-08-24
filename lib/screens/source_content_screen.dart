@@ -150,7 +150,8 @@ class SourceContentScreen extends StatelessWidget {
                       return Padding(
                         padding: const EdgeInsets.symmetric(vertical: 4),
                         child: ListTile(
-                          autofocus: index == 0,
+                          autofocus:
+                              selected || (currentId == null && index == 0),
                           selected: selected,
                           selectedTileColor:
                               const Color(0xFF1677FF).withValues(alpha: .18),
