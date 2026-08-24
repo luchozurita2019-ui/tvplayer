@@ -1,0 +1,124 @@
+name: Build Android TV V13 Hot Player Flow
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-v13-hotplayer-flow
+    paths:
+      - '.github/workflows/build-android-tv-v13.yml'
+      - '.github/scripts/apply_android_media3_texture_v6.py'
+      - '.github/scripts/apply_android_media3_vod_v8.py'
+      - '.github/scripts/apply_android_tv_clean_v9.py'
+      - '.github/scripts/fix_android_tv_clean_v9_compile.py'
+      - '.github/scripts/apply_android_tv_v10.py'
+      - '.github/scripts/fix_android_tv_v10_compile.py'
+      - '.github/scripts/apply_android_tv_v13.py'
+
+permissions:
+  contents: write
+
+jobs:
+  build-v13:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout V13 branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-v13-hotplayer-flow
+
+      - name: Record V13 run id
+        shell: bash
+        run: |
+          printf '%s\n' "$GITHUB_RUN_ID" > .github/last-v13-run.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-v13-run.txt
+          git commit -m "Record V13 workflow run $GITHUB_RUN_ID" || exit 0
+          git push origin HEAD:android-tv-v13-hotplayer-flow
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Generate Android project
+        run: flutter create --platforms=android .
+
+      - name: Apply stable V6 Media3 SurfaceTexture LIVE base
+        run: python3 .github/scripts/apply_android_media3_texture_v6.py
+
+      - name: Add V8 VOD bridge base
+        run: python3 .github/scripts/apply_android_media3_vod_v8.py
+
+      - name: Apply V9 Hot Player aligned cleanup
+        run: python3 .github/scripts/apply_android_tv_clean_v9.py
+
+      - name: Fix V9 catalog compile
+        run: python3 .github/scripts/fix_android_tv_clean_v9_compile.py
+
+      - name: Apply V10 stable LIVE UI and bridge
+        run: python3 .github/scripts/apply_android_tv_v10.py
+
+      - name: Fix V10 compact catalog compile
+        run: python3 .github/scripts/fix_android_tv_v10_compile.py
+
+      - name: Apply V13 local-first architecture
+        run: python3 .github/scripts/apply_android_tv_v13.py
+
+      - name: Format V13 files
+        run: |
+          dart format \
+            lib/main.dart \
+            lib/providers/iptv_provider.dart \
+            lib/screens/home_screen.dart \
+            lib/screens/player_screen.dart \
+            lib/screens/channel_list_screen.dart \
+            lib/screens/xtream_live_screen.dart \
+            lib/screens/xtream_movies_screen.dart \
+            lib/screens/xtream_series_screen.dart \
+            lib/services/xtream_live_fast_service.dart \
+            lib/services/remote_provisioning_service.dart
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Analyze V13 critical files
+        run: dart analyze --no-fatal-warnings lib/main.dart lib/providers/iptv_provider.dart lib/screens/home_screen.dart lib/screens/player_screen.dart lib/screens/channel_list_screen.dart lib/screens/xtream_live_screen.dart lib/screens/xtream_movies_screen.dart lib/screens/xtream_series_screen.dart lib/services/xtream_live_fast_service.dart lib/services/remote_provisioning_service.dart
+
+      - name: Build universal ARM TV APK
+        shell: bash
+        run: |
+          for attempt in 1 2; do
+            echo "V13 build attempt $attempt/2"
+            if flutter build apk --release --target-platform android-arm,android-arm64 --dart-define=TV_FULL_ANDROID_TV=true; then
+              exit 0
+            fi
+            if [ "$attempt" = "1" ]; then
+              sleep 10
+            fi
+          done
+          exit 1
+
+      - name: Prepare artifact
+        shell: bash
+        run: |
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-V13-HOTPLAYER-FLOW.apk
+          sha256sum artifact/TV-FULL-V13-HOTPLAYER-FLOW.apk > artifact/SHA256.txt
+          git rev-parse HEAD > artifact/COMMIT.txt
+
+      - name: Upload APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-V13-HOTPLAYER-FLOW
+          path: artifact/
+          retention-days: 30
