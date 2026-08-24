@@ -87,13 +87,17 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
-      - name: Record successful run id
+      - name: Record run id and status
+        if: always()
         shell: bash
         run: |
+          git fetch origin android-tv-full-pro-clean-source
+          git checkout android-tv-full-pro-clean-source
+          git reset --hard origin/android-tv-full-pro-clean-source
           mkdir -p .github
-          printf 'run_id=%s\ncommit=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" > .github/tv-full-pro-build.txt
+          printf 'run_id=%s\nsource_commit=%s\nstatus=%s\n' "$GITHUB_RUN_ID" "$GITHUB_SHA" "${{ job.status }}" > .github/tv-full-pro-build.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/tv-full-pro-build.txt
-          git commit -m "Record successful TV FULL PRO build ${GITHUB_RUN_ID}"
+          git commit -m "Record TV FULL PRO build ${GITHUB_RUN_ID} status" || true
           git push origin HEAD:android-tv-full-pro-clean-source
