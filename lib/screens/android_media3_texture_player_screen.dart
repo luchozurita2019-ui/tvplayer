@@ -464,41 +464,67 @@ class _AndroidMedia3TexturePlayerScreenState
         child: Align(
           alignment: Alignment.bottomCenter,
           child: Container(
-            height: 64,
-            margin: const EdgeInsets.fromLTRB(24, 0, 24, 18),
-            padding: const EdgeInsets.symmetric(horizontal: 18),
+            height: 54,
+            margin: const EdgeInsets.fromLTRB(18, 0, 18, 14),
+            padding: const EdgeInsets.symmetric(horizontal: 12),
             decoration: BoxDecoration(
               color: const Color(0xE80A1017),
-              borderRadius: BorderRadius.circular(12),
+              borderRadius: BorderRadius.circular(10),
               border: Border.all(color: Colors.white12),
             ),
             child: Row(
               children: [
-                Expanded(
-                  child: Container(
-                    height: 2,
-                    decoration: BoxDecoration(
-                      color: Colors.redAccent,
-                      borderRadius: BorderRadius.circular(2),
+                SizedBox(
+                  width: 34,
+                  height: 34,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(7),
+                    child: CachedArtworkImage(
+                      url: _channel.logoUrl,
+                      fit: BoxFit.contain,
+                      cacheWidth: 68,
+                      cacheHeight: 68,
+                      prefetchExtent: 0,
+                      fallback: const Icon(Icons.live_tv_rounded, size: 20),
                     ),
                   ),
                 ),
-                const SizedBox(width: 12),
-                const Icon(Icons.circle, size: 10, color: Colors.redAccent),
-                const SizedBox(width: 6),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    _channel.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+                Container(width: 1, height: 24, color: Colors.white12),
+                const SizedBox(width: 10),
+                const Icon(Icons.circle, size: 8, color: Colors.redAccent),
+                const SizedBox(width: 5),
                 const Text(
-                  'EN VIVO',
+                  'LIVE',
                   style: TextStyle(
                     color: Colors.redAccent,
-                    fontSize: 12,
+                    fontSize: 11,
                     fontWeight: FontWeight.w900,
                   ),
                 ),
-                const SizedBox(width: 22),
-                OutlinedButton.icon(
-                  onPressed: _openChannelList,
-                  icon: const Icon(Icons.list_rounded, size: 20),
-                  label: const Text('Lista de canales'),
+                const SizedBox(width: 12),
+                SizedBox(
+                  height: 34,
+                  child: OutlinedButton.icon(
+                    style: OutlinedButton.styleFrom(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    onPressed: _openChannelList,
+                    icon: const Icon(Icons.list_rounded, size: 18),
+                    label: const Text('Catálogo'),
+                  ),
                 ),
               ],
             ),
@@ -513,7 +539,7 @@ class _AndroidMedia3TexturePlayerScreenState
           elevation: 16,
           child: SafeArea(
             child: SizedBox(
-              width: 390,
+              width: 350,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
