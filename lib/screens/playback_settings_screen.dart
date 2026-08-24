@@ -102,7 +102,9 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                 Expanded(
                   child: Text(
                     'Probar velocidad de Internet',
-                    style: Theme.of(context).textTheme.titleMedium
+                    style: Theme.of(context)
+                        .textTheme
+                        .titleMedium
                         ?.copyWith(fontWeight: FontWeight.w800),
                   ),
                 ),
@@ -174,11 +176,15 @@ class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {
                 Container(
                   padding: const EdgeInsets.all(14),
                   decoration: BoxDecoration(
-                    color: Theme.of(context).colorScheme.primary
+                    color: Theme.of(context)
+                        .colorScheme
+                        .primary
                         .withValues(alpha: 0.10),
                     borderRadius: BorderRadius.circular(14),
                     border: Border.all(
-                      color: Theme.of(context).colorScheme.primary
+                      color: Theme.of(context)
+                          .colorScheme
+                          .primary
                           .withValues(alpha: 0.30),
                     ),
                   ),
@@ -510,14 +516,16 @@ class _SpeedMetric extends StatelessWidget {
               Text(
                 label,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Colors.white60,
-                  fontWeight: FontWeight.w700,
-                ),
+                      color: Colors.white60,
+                      fontWeight: FontWeight.w700,
+                    ),
               ),
               const SizedBox(height: 2),
               Text(
                 value,
-                style: Theme.of(context).textTheme.titleMedium
+                style: Theme.of(context)
+                    .textTheme
+                    .titleMedium
                     ?.copyWith(fontWeight: FontWeight.w900),
               ),
             ],

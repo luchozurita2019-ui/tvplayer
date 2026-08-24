@@ -4,11 +4,11 @@ enum IptvContentKind { live, movies, series, radios }
 
 extension IptvContentKindLabel on IptvContentKind {
   String get label => switch (this) {
-    IptvContentKind.live => 'TV en vivo',
-    IptvContentKind.movies => 'Películas',
-    IptvContentKind.series => 'Series',
-    IptvContentKind.radios => 'Radios',
-  };
+        IptvContentKind.live => 'TV en vivo',
+        IptvContentKind.movies => 'Películas',
+        IptvContentKind.series => 'Series',
+        IptvContentKind.radios => 'Radios',
+      };
 }
 
 class ContentBuckets {
@@ -25,11 +25,11 @@ class ContentBuckets {
   });
 
   List<Channel> forKind(IptvContentKind kind) => switch (kind) {
-    IptvContentKind.live => live,
-    IptvContentKind.movies => movies,
-    IptvContentKind.series => series,
-    IptvContentKind.radios => radios,
-  };
+        IptvContentKind.live => live,
+        IptvContentKind.movies => movies,
+        IptvContentKind.series => series,
+        IptvContentKind.radios => radios,
+      };
 
   int count(IptvContentKind kind) => forKind(kind).length;
 }
@@ -96,7 +96,8 @@ class ContentClassifier {
   static List<Channel> filter(
     Iterable<Channel> channels,
     IptvContentKind kind,
-  ) => partition(channels).forKind(kind);
+  ) =>
+      partition(channels).forKind(kind);
 
   static Map<IptvContentKind, int> counts(Iterable<Channel> channels) {
     final buckets = partition(channels);

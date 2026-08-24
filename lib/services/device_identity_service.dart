@@ -14,8 +14,8 @@ class DeviceIdentityService {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
     if (_cachedHash != null) return _cachedHash;
     try {
-      final value = (await _channel.invokeMethod<String>('getAndroidId'))
-          ?.trim();
+      final value =
+          (await _channel.invokeMethod<String>('getAndroidId'))?.trim();
       if (value == null || value.isEmpty) return null;
       final hash = sha256
           .convert(utf8.encode('tvfull-pro|android-id|$value'))

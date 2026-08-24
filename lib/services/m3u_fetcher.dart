@@ -38,7 +38,8 @@ class M3uFetcher {
         final request = http.Request('GET', Uri.parse(url))
           ..headers.addAll(const {
             'User-Agent': _browserUserAgent,
-            'Accept': 'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
+            'Accept':
+                'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
           });
 
         // IMPORTANTE: send() completa cuando llegan los headers. El viejo

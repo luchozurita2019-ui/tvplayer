@@ -52,8 +52,7 @@ class _HomeScreenState extends State<HomeScreen> {
     final selected = provider.selectedPlaylist;
     if (selected == null) {
       return _StartupView(
-        message:
-            provider.remoteSyncError ??
+        message: provider.remoteSyncError ??
             'Vinculá esta TV desde el panel para comenzar.',
         deviceCode: provider.remoteDeviceCode,
         busy: provider.remoteSyncing,
