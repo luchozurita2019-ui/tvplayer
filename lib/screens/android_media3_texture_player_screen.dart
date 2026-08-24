@@ -33,11 +33,14 @@ class _AndroidMedia3TexturePlayerScreenState
   static const EventChannel _events = EventChannel(
     'tvfull/media3_texture_events',
   );
+  static const Duration _liveStartupTimeout = Duration(seconds: 5);
+  static const Duration _liveRebufferTimeout = Duration(seconds: 8);
 
   final FocusNode _rootFocus = FocusNode(debugLabel: 'tvfull-pro-live');
   StreamSubscription<dynamic>? _eventSub;
   Timer? _overlayTimer;
   Timer? _retryTimer;
+  Timer? _bufferingWatchdog;
 
   late int _index;
   int? _textureId;
@@ -48,6 +51,7 @@ class _AndroidMedia3TexturePlayerScreenState
   String? _friendlyError;
   int _openGeneration = 0;
   int _autoRetryCount = 0;
+  bool _hasReachedReady = false;
 
   Channel get _channel => widget.playlist[_index];
   Map<String, String> get _headers =>
@@ -93,6 +97,8 @@ class _AndroidMedia3TexturePlayerScreenState
     if (widget.playlist.isEmpty || _textureId == null) return;
     final generation = ++_openGeneration;
     _retryTimer?.cancel();
+    _cancelBufferingWatchdog();
+    _hasReachedReady = false;
     if (!preserveRetry) _autoRetryCount = 0;
     if (mounted) {
       setState(() {
@@ -101,6 +107,8 @@ class _AndroidMedia3TexturePlayerScreenState
         _channelListVisible = false;
       });
     }
+
+    _startBufferingWatchdog(_liveStartupTimeout);
 
     final headers = Map<String, String>.from(_headers);
     String? userAgent;
@@ -130,9 +138,14 @@ class _AndroidMedia3TexturePlayerScreenState
     switch (event['eventType']?.toString()) {
       case 'bufferingStart':
         setState(() => _buffering = true);
+        _startBufferingWatchdog(
+          _hasReachedReady ? _liveRebufferTimeout : _liveStartupTimeout,
+        );
         break;
       case 'prepared':
       case 'bufferingEnd':
+        _cancelBufferingWatchdog();
+        _hasReachedReady = true;
         _autoRetryCount = 0;
         setState(() {
           _buffering = false;
@@ -158,9 +171,11 @@ class _AndroidMedia3TexturePlayerScreenState
         _handleTechnicalError(codeName, detail);
         break;
       case 'completed':
-        _handleTechnicalError(
-          'STREAM_ENDED',
-          'La señal terminó inesperadamente.',
+        // Media3 nativo ya hizo sus recuperaciones LIVE estilo Hot Player.
+        // No repetimos otra cascada desde Dart.
+        _finishWithError(
+          'Canal no disponible',
+          'STREAM_ENDED · La señal terminó inesperadamente.',
         );
         break;
       case 'codecError':
@@ -170,13 +185,18 @@ class _AndroidMedia3TexturePlayerScreenState
   }
 
   void _handleTechnicalError(String code, String detail) {
+    _cancelBufferingWatchdog();
     debugPrint('TV FULL PRO LIVE [$code] $detail');
     final combined = '$code $detail'.toLowerCase();
-    final transient = combined.contains('http') ||
-        combined.contains('network') ||
-        combined.contains('timeout') ||
-        combined.contains('connection') ||
-        combined.contains('stream_ended');
+    final permanentHttp = combined.contains('401') ||
+        combined.contains('403') ||
+        combined.contains('404');
+    final transient = !permanentHttp &&
+        (combined.contains('network') ||
+            combined.contains('timeout') ||
+            combined.contains('connection') ||
+            combined.contains('io_bad_http_status') ||
+            combined.contains('response_code_5'));
 
     if (transient && _autoRetryCount < 1) {
       _autoRetryCount++;
@@ -193,6 +213,28 @@ class _AndroidMedia3TexturePlayerScreenState
     }
 
     _finishWithError(_friendlyMessage(combined), '$code · $detail');
+  }
+
+  void _startBufferingWatchdog(Duration timeout) {
+    _bufferingWatchdog?.cancel();
+    final generation = _openGeneration;
+    _bufferingWatchdog = Timer(timeout, () {
+      if (!mounted ||
+          generation != _openGeneration ||
+          !_buffering ||
+          _friendlyError != null) {
+        return;
+      }
+      _handleTechnicalError(
+        'LIVE_BUFFER_TIMEOUT',
+        'La señal no comenzó a reproducirse dentro del tiempo esperado.',
+      );
+    });
+  }
+
+  void _cancelBufferingWatchdog() {
+    _bufferingWatchdog?.cancel();
+    _bufferingWatchdog = null;
   }
 
   String _friendlyMessage(String value) {
@@ -216,6 +258,8 @@ class _AndroidMedia3TexturePlayerScreenState
   }
 
   void _finishWithError(String friendly, String technical) {
+    _retryTimer?.cancel();
+    _cancelBufferingWatchdog();
     debugPrint('TV FULL PRO LIVE error: $technical');
     if (!mounted) return;
     _overlayTimer?.cancel();
@@ -305,6 +349,7 @@ class _AndroidMedia3TexturePlayerScreenState
     _openGeneration++;
     _overlayTimer?.cancel();
     _retryTimer?.cancel();
+    _cancelBufferingWatchdog();
     _eventSub?.cancel();
     _rootFocus.dispose();
     unawaited(_player.invokeMethod<void>('dispose'));
