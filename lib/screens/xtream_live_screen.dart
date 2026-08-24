@@ -53,13 +53,26 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         }
         return _LiveData(channels);
       }
-      final fresh = await service.refresh(
-        widget.playlist.source,
-        onProgress: (p) => _setStatus(p.label),
-      );
-      return _LiveData(_normalizeXtreamChannels(fresh.channels));
+
+      try {
+        final fresh = await service.refresh(
+          widget.playlist.source,
+          onProgress: (p) => _setStatus(p.label),
+        );
+        if (fresh.channels.isNotEmpty) {
+          return _LiveData(_normalizeXtreamChannels(fresh.channels));
+        }
+      } catch (_) {}
+
+      // La capacidad es por sección. Si LIVE nativo viene vacío, se consulta
+      // la M3U de esta misma cuenta sin convertir globalmente el servicio.
+      return _loadM3uFallback();
     }
 
+    return _loadM3uFallback();
+  }
+
+  Future<_LiveData> _loadM3uFallback() async {
     final service = SectionCatalogService.instance;
     final cached = await service.loadCached(
       widget.playlist,
@@ -82,7 +95,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         widget.playlist.source,
         onProgress: (p) => _setStatus(p.label),
       );
-      if (!mounted) return;
+      // Una respuesta vacía no reemplaza un snapshot bueno que ya está visible.
+      if (!mounted || fresh.channels.isEmpty) return;
       setState(
         () => _future = Future.value(
           _LiveData(_normalizeXtreamChannels(fresh.channels)),
