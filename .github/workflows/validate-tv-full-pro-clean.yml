@@ -1,4 +1,4 @@
-# validate persisted clean source after LIVE fail-fast watchdog
+# validate persisted clean source after M3U network priority
 name: Validate TV FULL PRO Clean
 
 on:
