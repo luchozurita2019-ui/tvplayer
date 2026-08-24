@@ -111,7 +111,9 @@ class _StartupView extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   Icon(
-                    blocked ? Icons.lock_outline_rounded : Icons.live_tv_rounded,
+                    blocked
+                        ? Icons.lock_outline_rounded
+                        : Icons.live_tv_rounded,
                     size: blocked ? 48 : 42,
                     color: blocked ? Colors.white70 : const Color(0xFF58B9FF),
                   ),

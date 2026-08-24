@@ -330,9 +330,7 @@ class _CategoryRowState extends State<_CategoryRow> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 2),
       child: Material(
-        color: highlighted
-            ? const Color(0xFF12324A)
-            : Colors.transparent,
+        color: highlighted ? const Color(0xFF12324A) : Colors.transparent,
         borderRadius: BorderRadius.circular(9),
         child: InkWell(
           autofocus: widget.autofocus,
@@ -355,8 +353,7 @@ class _CategoryRowState extends State<_CategoryRow> {
               overflow: TextOverflow.ellipsis,
               style: TextStyle(
                 fontSize: 14,
-                fontWeight:
-                    highlighted ? FontWeight.w800 : FontWeight.w600,
+                fontWeight: highlighted ? FontWeight.w800 : FontWeight.w600,
               ),
             ),
           ),
