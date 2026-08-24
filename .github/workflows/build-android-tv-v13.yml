@@ -1,4 +1,4 @@
-# V13 build trigger
+# V13 build trigger 2
 name: Build Android TV V13 Hot Player Flow
 
 on:
@@ -15,6 +15,7 @@ on:
       - '.github/scripts/apply_android_tv_v10.py'
       - '.github/scripts/fix_android_tv_v10_compile.py'
       - '.github/scripts/apply_android_tv_v13.py'
+      - '.github/scripts/fix_android_tv_v13_apply_script.py'
 
 permissions:
   contents: write
@@ -71,6 +72,9 @@ jobs:
 
       - name: Fix V10 compact catalog compile
         run: python3 .github/scripts/fix_android_tv_v10_compile.py
+
+      - name: Fix V13 apply-script polling guard
+        run: python3 .github/scripts/fix_android_tv_v13_apply_script.py
 
       - name: Apply V13 local-first architecture
         run: python3 .github/scripts/apply_android_tv_v13.py
