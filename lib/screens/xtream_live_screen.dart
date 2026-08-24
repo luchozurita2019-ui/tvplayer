@@ -23,6 +23,8 @@ class XtreamLiveScreen extends StatefulWidget {
 }
 
 class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
+  static const Duration _cacheFreshFor = Duration(minutes: 3);
+
   late Future<_LiveData> _future;
   String? _category;
   String _status = 'Cargando TV en vivo…';
@@ -46,7 +48,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       final cached = await service.loadCached(widget.playlist.source);
       if (cached != null && cached.channels.isNotEmpty) {
         final channels = _normalizeXtreamChannels(cached.channels);
-        unawaited(_refreshXtream());
+        if (DateTime.now().difference(cached.savedAt) >= _cacheFreshFor) {
+          unawaited(_refreshXtream());
+        }
         return _LiveData(channels);
       }
       final fresh = await service.refresh(

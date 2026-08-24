@@ -25,6 +25,8 @@ class XtreamMoviesScreen extends StatefulWidget {
 }
 
 class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
+  static const Duration _cacheFreshFor = Duration(minutes: 15);
+
   late Future<_MovieData> _future;
   String? _category;
 
@@ -46,7 +48,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
       final fast = XtreamFastCatalogService.instance;
       final cached = await fast.loadCachedMovies(widget.playlist.source);
       if (cached != null && cached.movies.isNotEmpty) {
-        unawaited(_refreshXtream());
+        if (DateTime.now().difference(cached.savedAt) >= _cacheFreshFor) {
+          unawaited(_refreshXtream());
+        }
         return _MovieData.xtream(cached.connection, cached.movies);
       }
       try {
