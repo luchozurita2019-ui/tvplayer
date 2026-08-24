@@ -1,5 +1,5 @@
 name: Build TV FULL PRO Clean
-# Clean source normalized after pub get and ready for verification.
+# Clean source normalized and cacheExtent API verified.
 
 on:
   workflow_dispatch:
