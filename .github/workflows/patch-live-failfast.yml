@@ -1,0 +1,92 @@
+name: Patch LIVE fail-fast watchdog
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [android-tv-full-pro-clean-source]
+    paths: ['.github/workflows/patch-live-failfast.yml']
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - name: Patch LIVE watchdog and retry policy
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p = Path('lib/screens/android_media3_texture_player_screen.dart')
+          s = p.read_text()
+
+          s = s.replace(
+              "  static const EventChannel _events = EventChannel(\n    'tvfull/media3_texture_events',\n  );\n",
+              "  static const EventChannel _events = EventChannel(\n    'tvfull/media3_texture_events',\n  );\n  static const Duration _liveStartupTimeout = Duration(seconds: 5);\n  static const Duration _liveRebufferTimeout = Duration(seconds: 8);\n"
+          )
+          s = s.replace(
+              "  Timer? _overlayTimer;\n  Timer? _retryTimer;\n",
+              "  Timer? _overlayTimer;\n  Timer? _retryTimer;\n  Timer? _bufferingWatchdog;\n"
+          )
+          s = s.replace(
+              "  int _openGeneration = 0;\n  int _autoRetryCount = 0;\n",
+              "  int _openGeneration = 0;\n  int _autoRetryCount = 0;\n  bool _hasReachedReady = false;\n"
+          )
+          s = s.replace(
+              "    final generation = ++_openGeneration;\n    _retryTimer?.cancel();\n    if (!preserveRetry) _autoRetryCount = 0;\n",
+              "    final generation = ++_openGeneration;\n    _retryTimer?.cancel();\n    _cancelBufferingWatchdog();\n    _hasReachedReady = false;\n    if (!preserveRetry) _autoRetryCount = 0;\n"
+          )
+          s = s.replace(
+              "    final headers = Map<String, String>.from(_headers);\n",
+              "    _startBufferingWatchdog(_liveStartupTimeout);\n\n    final headers = Map<String, String>.from(_headers);\n"
+          )
+          s = s.replace(
+              "      case 'bufferingStart':\n        setState(() => _buffering = true);\n        break;\n",
+              "      case 'bufferingStart':\n        setState(() => _buffering = true);\n        _startBufferingWatchdog(\n          _hasReachedReady ? _liveRebufferTimeout : _liveStartupTimeout,\n        );\n        break;\n"
+          )
+          s = s.replace(
+              "      case 'prepared':\n      case 'bufferingEnd':\n        _autoRetryCount = 0;\n        setState(() {\n",
+              "      case 'prepared':\n      case 'bufferingEnd':\n        _cancelBufferingWatchdog();\n        _hasReachedReady = true;\n        _autoRetryCount = 0;\n        setState(() {\n"
+          )
+          s = s.replace(
+              "      case 'completed':\n        _handleTechnicalError(\n          'STREAM_ENDED',\n          'La señal terminó inesperadamente.',\n        );\n        break;\n",
+              "      case 'completed':\n        // Media3 nativo ya hizo sus recuperaciones LIVE estilo Hot Player.\n        // No repetimos otra cascada desde Dart.\n        _finishWithError(\n          'Canal no disponible',\n          'STREAM_ENDED · La señal terminó inesperadamente.',\n        );\n        break;\n"
+          )
+          old = """  void _handleTechnicalError(String code, String detail) {\n    debugPrint('TV FULL PRO LIVE [$code] $detail');\n    final combined = '$code $detail'.toLowerCase();\n    final transient = combined.contains('http') ||\n        combined.contains('network') ||\n        combined.contains('timeout') ||\n        combined.contains('connection') ||\n        combined.contains('stream_ended');\n\n    if (transient && _autoRetryCount < 1) {\n"""
+          new = """  void _handleTechnicalError(String code, String detail) {\n    _cancelBufferingWatchdog();\n    debugPrint('TV FULL PRO LIVE [$code] $detail');\n    final combined = '$code $detail'.toLowerCase();\n    final permanentHttp = combined.contains('401') ||\n        combined.contains('403') ||\n        combined.contains('404');\n    final transient = !permanentHttp &&\n        (combined.contains('network') ||\n            combined.contains('timeout') ||\n            combined.contains('connection') ||\n            combined.contains('io_bad_http_status') ||\n            combined.contains('response_code_5'));\n\n    if (transient && _autoRetryCount < 1) {\n"""
+          if old not in s:
+              raise SystemExit('handleTechnicalError block not found')
+          s = s.replace(old, new)
+
+          marker = "  String _friendlyMessage(String value) {\n"
+          methods = """  void _startBufferingWatchdog(Duration timeout) {\n    _bufferingWatchdog?.cancel();\n    final generation = _openGeneration;\n    _bufferingWatchdog = Timer(timeout, () {\n      if (!mounted ||\n          generation != _openGeneration ||\n          !_buffering ||\n          _friendlyError != null) {\n        return;\n      }\n      _handleTechnicalError(\n        'LIVE_BUFFER_TIMEOUT',\n        'La señal no comenzó a reproducirse dentro del tiempo esperado.',\n      );\n    });\n  }\n\n  void _cancelBufferingWatchdog() {\n    _bufferingWatchdog?.cancel();\n    _bufferingWatchdog = null;\n  }\n\n"""
+          if marker not in s:
+              raise SystemExit('friendlyMessage marker not found')
+          s = s.replace(marker, methods + marker)
+
+          s = s.replace(
+              "  void _finishWithError(String friendly, String technical) {\n    debugPrint('TV FULL PRO LIVE error: $technical');\n",
+              "  void _finishWithError(String friendly, String technical) {\n    _retryTimer?.cancel();\n    _cancelBufferingWatchdog();\n    debugPrint('TV FULL PRO LIVE error: $technical');\n"
+          )
+          s = s.replace(
+              "    _overlayTimer?.cancel();\n    _retryTimer?.cancel();\n    _eventSub?.cancel();\n",
+              "    _overlayTimer?.cancel();\n    _retryTimer?.cancel();\n    _cancelBufferingWatchdog();\n    _eventSub?.cancel();\n"
+          )
+
+          p.write_text(s)
+          PY
+          flutter pub get
+          dart format lib/screens/android_media3_texture_player_screen.dart
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/patch-live-failfast.yml
+          git add lib/screens/android_media3_texture_player_screen.dart
+          git commit -m "Make LIVE failures fast and deterministic"
+          git push origin HEAD:android-tv-full-pro-clean-source
