@@ -273,6 +273,11 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
             releaseDate: details.releaseDate,
             rating: details.rating,
             duration: details.duration,
+            country: details.country,
+            language: details.language,
+            originalLanguage: details.originalLanguage,
+            audioInfo: details.audioInfo,
+            translation: details.translation,
             channel: details.toChannel(data.connection!),
           ),
         ),
@@ -304,6 +309,11 @@ class _MovieDetailScreen extends StatelessWidget {
   final String? releaseDate;
   final String? rating;
   final String? duration;
+  final String? country;
+  final String? language;
+  final String? originalLanguage;
+  final String? audioInfo;
+  final String? translation;
   final Channel channel;
 
   const _MovieDetailScreen({
@@ -316,6 +326,11 @@ class _MovieDetailScreen extends StatelessWidget {
     this.releaseDate,
     this.rating,
     this.duration,
+    this.country,
+    this.language,
+    this.originalLanguage,
+    this.audioInfo,
+    this.translation,
   });
 
   @override
@@ -326,6 +341,17 @@ class _MovieDetailScreen extends StatelessWidget {
       if ((genre ?? category ?? '').trim().isNotEmpty)
         (genre ?? category)!.trim(),
       if ((rating ?? '').trim().isNotEmpty) '★ ${rating!.trim()}',
+    ];
+    final languageDetails = <String>[
+      if ((language ?? '').trim().isNotEmpty) 'Idioma: ${language!.trim()}',
+      if ((originalLanguage ?? '').trim().isNotEmpty &&
+          originalLanguage!.trim().toLowerCase() !=
+              (language ?? '').trim().toLowerCase())
+        'Original: ${originalLanguage!.trim()}',
+      if ((audioInfo ?? '').trim().isNotEmpty) 'Audio: ${audioInfo!.trim()}',
+      if ((translation ?? '').trim().isNotEmpty)
+        'Traducción: ${translation!.trim()}',
+      if ((country ?? '').trim().isNotEmpty) country!.trim(),
     ];
     return Scaffold(
       backgroundColor: const Color(0xFF05090F),
@@ -386,7 +412,20 @@ class _MovieDetailScreen extends StatelessWidget {
                       ),
                     ),
                   ],
-                  const SizedBox(height: 18),
+                  if (languageDetails.isNotEmpty) ...[
+                    const SizedBox(height: 8),
+                    Text(
+                      languageDetails.join('  ·  '),
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(
+                        color: Colors.white46,
+                        fontSize: 13,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 16),
                   Text(
                     (plot ?? '').trim().isEmpty
                         ? 'Sin descripción disponible.'
@@ -566,8 +605,9 @@ class _MovieData {
     final result = <String>[];
     for (final item in items) {
       final value = item.category?.trim();
-      if (value != null && value.isNotEmpty && seen.add(value))
+      if (value != null && value.isNotEmpty && seen.add(value)) {
         result.add(value);
+      }
     }
     return result;
   }
@@ -590,13 +630,16 @@ class _MovieItem {
 
 String? _resolveArtwork(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
     return null;
+  }
   if (value.startsWith('//')) return '${base.scheme}:$value';
   final uri = Uri.tryParse(value);
   if (uri != null &&
       (uri.scheme == 'http' || uri.scheme == 'https') &&
-      uri.host.isNotEmpty) return uri.toString();
+      uri.host.isNotEmpty) {
+    return uri.toString();
+  }
   return base.resolve(value).toString();
 }
 
