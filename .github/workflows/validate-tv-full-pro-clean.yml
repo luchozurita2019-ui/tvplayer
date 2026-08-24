@@ -1,11 +1,14 @@
 name: Validate TV FULL PRO Clean
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - android-tv-full-pro-clean-source
     paths:
-      - '.github/workflows/validate-tv-full-pro-clean.yml'
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
 
 permissions:
   contents: write
@@ -35,52 +38,8 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Apply TV remote focus polish
-        shell: python
-        run: |
-          from pathlib import Path
-
-          def replace_once(path, old, new, label):
-              p = Path(path)
-              text = p.read_text()
-              if old not in text:
-                  raise RuntimeError(f'Missing {label} in {path}')
-              p.write_text(text.replace(old, new, 1))
-
-          for path in [
-              'lib/screens/xtream_live_screen.dart',
-              'lib/screens/xtream_movies_screen.dart',
-              'lib/screens/xtream_series_screen.dart',
-          ]:
-              replace_once(
-                  path,
-                  '                    autofocus: index == 0,\n                    selected: selected,',
-                  '                    autofocus: false,\n                    selected: selected,',
-                  'catalog category autofocus',
-              )
-
-          replace_once(
-              'lib/screens/xtream_series_screen.dart',
-              "                                  autofocus:\n                                      season == widget.model.seasons.keys.first,\n                                  selected: selected,",
-              "                                  autofocus: false,\n                                  selected: selected,",
-              'season autofocus',
-          )
-
-          replace_once(
-              'lib/screens/tv_full_vod_player_screen.dart',
-              "    final key = event.logicalKey;\n    if (!_overlayVisible) {",
-              "    final key = event.logicalKey;\n    final isBack = key == LogicalKeyboardKey.goBack ||\n        key == LogicalKeyboardKey.escape;\n    if (isBack && _overlayVisible && _error == null) {\n      _overlayTimer?.cancel();\n      setState(() => _overlayVisible = false);\n      _rootFocus.requestFocus();\n      return KeyEventResult.handled;\n    }\n    if (!_overlayVisible) {",
-              'VOD back handling',
-          )
-
-          # Persist the already validated compact movie color instead of
-          # relying on a CI-only sed command.
-          movie = Path('lib/screens/xtream_movies_screen.dart')
-          text = movie.read_text().replace('Colors.white46', 'Color(0x75FFFFFF)')
-          movie.write_text(text)
-
-      - name: Format complete Dart source
-        run: dart format lib
+      - name: Verify Dart formatting
+        run: dart format --output=none --set-exit-if-changed lib
 
       - name: Analyze complete Dart source
         run: flutter analyze
@@ -91,13 +50,13 @@ jobs:
           --dart-define=TV_FULL_ANDROID_TV=true
           --target-platform android-arm64
 
-      - name: Persist validated source
+      - name: Record successful validation
         shell: bash
         run: |
           printf '%s\n' "$GITHUB_RUN_ID" > .github/last-clean-validation-run.txt
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib .github/last-clean-validation-run.txt
-          git commit -m "Polish TV remote focus and VOD back navigation" || true
+          git add .github/last-clean-validation-run.txt
+          git commit -m "Record clean validation run $GITHUB_RUN_ID" || true
           git pull --rebase origin android-tv-full-pro-clean-source
           git push origin HEAD:android-tv-full-pro-clean-source
