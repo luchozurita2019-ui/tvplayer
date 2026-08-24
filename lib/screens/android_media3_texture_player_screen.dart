@@ -449,7 +449,7 @@ class _AndroidMedia3TexturePlayerScreenState
                   Expanded(
                     child: ListView.builder(
                       padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
-                      scrollCacheExtent: const ScrollCacheExtent.pixels(70),
+                      cacheExtent: 70,
                       itemCount: widget.playlist.length,
                       itemBuilder: (context, index) {
                         final item = widget.playlist[index];

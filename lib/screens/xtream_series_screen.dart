@@ -209,7 +209,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                     final columns = constraints.maxWidth >= 1000 ? 4 : 3;
                     return GridView.builder(
                       padding: const EdgeInsets.fromLTRB(18, 0, 22, 24),
-                      scrollCacheExtent: const ScrollCacheExtent.pixels(90),
+                      cacheExtent: 90,
                       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
                         crossAxisCount: columns,
                         crossAxisSpacing: 10,

@@ -259,7 +259,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(18, 0, 24, 24),
-                  scrollCacheExtent: const ScrollCacheExtent.pixels(80),
+                  cacheExtent: 80,
                   itemCount: visible.length,
                   itemBuilder: (context, index) {
                     final channel = visible[index];

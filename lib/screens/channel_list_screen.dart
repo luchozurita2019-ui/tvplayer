@@ -1103,7 +1103,7 @@ class _CatalogGrid extends StatelessWidget {
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(28, 8, 28, 34),
-          scrollCacheExtent: const ScrollCacheExtent.pixels(80),
+          cacheExtent: 80,
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
             crossAxisSpacing: 18,
