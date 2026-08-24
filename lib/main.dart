@@ -59,9 +59,8 @@ class TvFullProApp extends StatelessWidget {
         },
         builder: (context, child) {
           final provider = context.watch<IptvProvider>();
-          final blocked = provider.initialized
-              ? remoteAccessBlockMessage(provider)
-              : null;
+          final blocked =
+              provider.initialized ? remoteAccessBlockMessage(provider) : null;
           if (blocked == null) return child ?? const SizedBox.shrink();
           return Stack(
             fit: StackFit.expand,
