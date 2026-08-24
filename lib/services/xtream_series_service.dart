@@ -7,8 +7,7 @@ import '../models/channel.dart';
 import 'xtream_service.dart';
 import 'xtream_http_client.dart';
 
-const String _seriesUserAgent =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+const String _seriesUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/96.0.4664.18 Safari/537.36';
 
@@ -66,34 +65,24 @@ class XtreamSeriesEpisode {
   });
 
   Channel toChannel(XtreamConnectionResult connection, {String? group}) {
-    // Algunos paneles Xtream entregan una URL exacta por episodio. Si existe,
-    // es más fiable que reconstruir /series/... porque puede apuntar a otro
-    // host, CDN, puerto o contenedor.
-    final direct = _resolvedEpisodeDirectSource(
-      connection.streamServer,
-      directSource,
-    );
-
     final prefix = connection.streamServer.pathSegments
         .where((segment) => segment.trim().isNotEmpty)
         .toList(growable: false);
-    final generated = connection.streamServer
-        .replace(
-          pathSegments: [
-            ...prefix,
-            'series',
-            connection.username,
-            connection.password,
-            '$id.$extension',
-          ],
-          query: '',
-          fragment: '',
-        )
-        .toString();
+    final generated = connection.streamServer.replace(
+      pathSegments: [
+        ...prefix,
+        'series',
+        connection.username,
+        connection.password,
+        '$id.$extension',
+      ],
+      query: '',
+      fragment: '',
+    ).toString();
 
     return Channel(
       name: title,
-      url: direct ?? generated,
+      url: generated,
       logoUrl: image,
       group: group,
     );
@@ -235,7 +224,8 @@ class XtreamSeriesService {
 
     final decoded = jsonDecode(response.body);
     if (decoded is! Map) {
-      throw Exception('El proveedor no devolvió información válida de la serie.');
+      throw Exception(
+          'El proveedor no devolvió información válida de la serie.');
     }
     final root = Map<String, dynamic>.from(decoded);
     final infoRaw = root['info'];
@@ -348,11 +338,7 @@ class XtreamSeriesService {
     // Igual que VOD: el episodio conserva una URL absoluta creada con la
     // conexión recién validada. La pantalla puede haber nacido desde caché,
     // pero PLAY no queda atado a un streamServer antiguo.
-    final playableDirect = XtreamSeriesEpisode._resolvedEpisodeDirectSource(
-          activeConnection.streamServer,
-          directSource,
-        ) ??
-        _seriesUrl(activeConnection, id, extension);
+    final playableDirect = _seriesUrl(activeConnection, id, extension);
 
     return XtreamSeriesEpisode(
       id: id,
@@ -423,29 +409,24 @@ class XtreamSeriesService {
     final prefix = connection.streamServer.pathSegments
         .where((segment) => segment.trim().isNotEmpty)
         .toList(growable: false);
-    return connection.streamServer
-        .replace(
-          pathSegments: <String>[
-            ...prefix,
-            'series',
-            connection.username,
-            connection.password,
-            '$episodeId.$extension',
-          ],
-          query: '',
-          fragment: '',
-        )
-        .toString();
+    return connection.streamServer.replace(
+      pathSegments: <String>[
+        ...prefix,
+        'series',
+        connection.username,
+        connection.password,
+        '$episodeId.$extension',
+      ],
+      query: '',
+      fragment: '',
+    ).toString();
   }
 
   static String _firstValidExtension(Iterable<dynamic> candidates) {
     for (final candidate in candidates) {
-      final value = candidate
-              ?.toString()
-              .trim()
-              .toLowerCase()
-              .replaceFirst('.', '') ??
-          '';
+      final value =
+          candidate?.toString().trim().toLowerCase().replaceFirst('.', '') ??
+              '';
       if (value.isNotEmpty && RegExp(r'^[a-z0-9]{2,6}$').hasMatch(value)) {
         return value;
       }

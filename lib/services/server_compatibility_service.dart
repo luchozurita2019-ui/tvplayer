@@ -93,25 +93,21 @@ class HostCompatibilityProfile {
       host: json['host'] as String? ?? 'desconocido',
       preferredMode: mode,
       directFailures: (json['directFailures'] as num?)?.toInt() ?? 0,
-      nativeHttpFailures:
-          (json['nativeHttpFailures'] as num?)?.toInt() ?? 0,
+      nativeHttpFailures: (json['nativeHttpFailures'] as num?)?.toInt() ?? 0,
       mpvHttpFailures: (json['mpvHttpFailures'] as num?)?.toInt() ?? 0,
-      tlsLegacyFailures:
-          (json['tlsLegacyFailures'] as num?)?.toInt() ?? 0,
+      tlsLegacyFailures: (json['tlsLegacyFailures'] as num?)?.toInt() ?? 0,
       compatibleFailures: (json['compatibleFailures'] as num?)?.toInt() ?? 0,
       liveRecoveryFailures:
           (json['liveRecoveryFailures'] as num?)?.toInt() ?? 0,
       advancedFailures: (json['advancedFailures'] as num?)?.toInt() ?? 0,
-      xtreamHlsFailures:
-          (json['xtreamHlsFailures'] as num?)?.toInt() ?? 0,
+      xtreamHlsFailures: (json['xtreamHlsFailures'] as num?)?.toInt() ?? 0,
       liveEofRecoveries: (json['liveEofRecoveries'] as num?)?.toInt() ?? 0,
       runtimeRecoveries: (json['runtimeRecoveries'] as num?)?.toInt() ?? 0,
       normalProbeFallbacks:
           (json['normalProbeFallbacks'] as num?)?.toInt() ?? 0,
       preferNormalProbe: json['preferNormalProbe'] as bool? ?? false,
       successes: (json['successes'] as num?)?.toInt() ?? 0,
-      lastUpdatedEpochMs:
-          (json['lastUpdatedEpochMs'] as num?)?.toInt() ?? 0,
+      lastUpdatedEpochMs: (json['lastUpdatedEpochMs'] as num?)?.toInt() ?? 0,
     );
   }
 }

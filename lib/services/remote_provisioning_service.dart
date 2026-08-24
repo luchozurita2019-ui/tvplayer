@@ -128,7 +128,7 @@ class RemoteProvisioningService {
           body: jsonEncode(const {
             'platform': 'android_tv',
             'device_name': 'TV FULL Android TV',
-            'app_version': '1.0.0+1-android-tv-panel-v3-native-hw',
+            'app_version': '1.0.0+1-android-tv-v10-vod-safe',
           }),
         )
         .timeout(const Duration(seconds: 15));
@@ -163,16 +163,14 @@ class RemoteProvisioningService {
   Future<RemoteProvisioningConfiguration> fetchConfiguration(
     RemoteDeviceCredentials credentials,
   ) async {
-    final response = await http
-        .get(
-          Uri.parse('$_functionsBase/tvf-device-config'),
-          headers: {
-            'Accept': 'application/json',
-            'x-tvfull-device-code': credentials.code,
-            'x-tvfull-device-secret': credentials.secret,
-          },
-        )
-        .timeout(const Duration(seconds: 15));
+    final response = await http.get(
+      Uri.parse('$_functionsBase/tvf-device-config'),
+      headers: {
+        'Accept': 'application/json',
+        'x-tvfull-device-code': credentials.code,
+        'x-tvfull-device-secret': credentials.secret,
+      },
+    ).timeout(const Duration(seconds: 15));
 
     if (response.statusCode == 403) {
       throw Exception(

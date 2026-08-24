@@ -16,6 +16,8 @@ import '../widgets/parental_unlock_dialog.dart';
 import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
+
 class XtreamMoviesScreen extends StatefulWidget {
   final Playlist playlist;
 
@@ -347,14 +349,14 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         final gridColumns = width >= 1500
             ? 7
             : width >= 1200
-            ? 6
-            : width >= 950
-            ? 5
-            : width >= 700
-            ? 4
-            : width >= 480
-            ? 3
-            : 2;
+                ? 6
+                : width >= 950
+                    ? 5
+                    : width >= 700
+                        ? 4
+                        : width >= 480
+                            ? 3
+                            : 2;
 
         Widget grid() => visible.isEmpty
             ? const Center(child: Text('No hay resultados.'))
@@ -382,6 +384,28 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                 },
               );
 
+        if (_androidTvBuild) {
+          return Row(
+            children: [
+              SizedBox(
+                width: 300,
+                child: _MovieCategorySidebar(
+                  totalCount: visibleTotal,
+                  categories: categories,
+                  categoryCounts: categoryCounts,
+                  selectedCategory: _category,
+                  collapsed: false,
+                  onToggleCollapsed: () {},
+                  onCategorySelected: (value) =>
+                      unawaited(_selectCategory(value)),
+                ),
+              ),
+              Container(width: 1, color: Colors.white12),
+              Expanded(child: grid()),
+            ],
+          );
+        }
+
         if (width >= 760) {
           return Row(
             children: [
@@ -407,9 +431,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                   onHorizontalDragUpdate: _sidebarCollapsed
                       ? null
                       : (details) => _resizeSidebar(details.delta.dx),
-                  onHorizontalDragEnd: _sidebarCollapsed
-                      ? null
-                      : (_) => _persistSidebar(),
+                  onHorizontalDragEnd:
+                      _sidebarCollapsed ? null : (_) => _persistSidebar(),
                   child: Container(
                     width: 9,
                     alignment: Alignment.center,
@@ -535,8 +558,9 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
   }
 
   void _retry() => setState(() {
-    _future = XtreamVodService.fetchDetails(widget.connection, widget.movie);
-  });
+        _future =
+            XtreamVodService.fetchDetails(widget.connection, widget.movie);
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -572,9 +596,9 @@ class _XtreamMovieDetailScreenState extends State<XtreamMovieDetailScreen> {
                 if (snapshot.hasError) {
                   return _MovieError(
                     message: snapshot.error.toString().replaceFirst(
-                      'Exception: ',
-                      '',
-                    ),
+                          'Exception: ',
+                          '',
+                        ),
                     onRetry: _retry,
                   );
                 }
@@ -896,11 +920,10 @@ class _MovieHero extends StatelessWidget {
                     details.movie.name,
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
-                    style:
-                        (compact
-                                ? Theme.of(context).textTheme.headlineSmall
-                                : Theme.of(context).textTheme.headlineMedium)
-                            ?.copyWith(fontWeight: FontWeight.w900),
+                    style: (compact
+                            ? Theme.of(context).textTheme.headlineSmall
+                            : Theme.of(context).textTheme.headlineMedium)
+                        ?.copyWith(fontWeight: FontWeight.w900),
                   ),
                   const SizedBox(height: 8),
                   Wrap(
@@ -1040,8 +1063,8 @@ class _MovieCatalogToolbar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                  ),
+                        fontWeight: FontWeight.w900,
+                      ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -1101,9 +1124,8 @@ class _MovieCategorySidebar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Column(
-          crossAxisAlignment: collapsed
-              ? CrossAxisAlignment.center
-              : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              collapsed ? CrossAxisAlignment.center : CrossAxisAlignment.start,
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -1247,9 +1269,8 @@ class _MovieCategorySidebar extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontWeight: selected
-                                ? FontWeight.w800
-                                : FontWeight.w600,
+                            fontWeight:
+                                selected ? FontWeight.w800 : FontWeight.w600,
                           ),
                         ),
                         trailing: Container(

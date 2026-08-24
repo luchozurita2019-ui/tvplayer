@@ -10,7 +10,9 @@ const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
 
 void main() {
   // Inicializa el motor nativo de media_kit antes de correr la app.
-  MediaKit.ensureInitialized();
+  if (!_androidTvBuild) {
+    MediaKit.ensureInitialized();
+  }
   runApp(const IptvPlayerApp());
 }
 

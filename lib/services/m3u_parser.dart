@@ -78,10 +78,9 @@ class M3uParser {
         }
       } else if (line.startsWith('#EXTHTTP:')) {
         _parseExtHttp(line.substring('#EXTHTTP:'.length), pendingHeaders);
-      } else if (line.startsWith(
-              '#KODIPROP:inputstream.adaptive.stream_headers=') ||
-          line.startsWith(
-              '#KODIPROP:inputstream.adaptive.manifest_headers=')) {
+      } else if (line
+              .startsWith('#KODIPROP:inputstream.adaptive.stream_headers=') ||
+          line.startsWith('#KODIPROP:inputstream.adaptive.manifest_headers=')) {
         final equals = line.indexOf('=');
         if (equals != -1) {
           _parseHeaderQuery(line.substring(equals + 1), pendingHeaders);

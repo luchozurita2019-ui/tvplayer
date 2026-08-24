@@ -109,14 +109,12 @@ class HostPlaybackStats {
       slowestStartupMs: (json['slowestStartupMs'] as num?)?.toInt() ?? 0,
       failures: (json['failures'] as num?)?.toInt() ?? 0,
       stalls: (json['stalls'] as num?)?.toInt() ?? 0,
-      fastProbeFallbacks:
-          (json['fastProbeFallbacks'] as num?)?.toInt() ?? 0,
+      fastProbeFallbacks: (json['fastProbeFallbacks'] as num?)?.toInt() ?? 0,
       zapCount: (json['zapCount'] as num?)?.toInt() ?? 0,
       zapTotalMs: (json['zapTotalMs'] as num?)?.toInt() ?? 0,
       fastestZapMs: (json['fastestZapMs'] as num?)?.toInt() ?? 0,
       slowestZapMs: (json['slowestZapMs'] as num?)?.toInt() ?? 0,
-      lastUpdatedEpochMs:
-          (json['lastUpdatedEpochMs'] as num?)?.toInt() ?? 0,
+      lastUpdatedEpochMs: (json['lastUpdatedEpochMs'] as num?)?.toInt() ?? 0,
     );
   }
 }

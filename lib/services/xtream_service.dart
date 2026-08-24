@@ -95,8 +95,7 @@ class XtreamService {
 
     final userInfo = Map<String, dynamic>.from(userInfoRaw);
     final authValue = userInfo['auth'];
-    final authenticated =
-        authValue == 1 ||
+    final authenticated = authValue == 1 ||
         authValue == '1' ||
         authValue == true ||
         userInfo['status']?.toString().toLowerCase() == 'active';
@@ -270,10 +269,10 @@ class XtreamService {
   ) async {
     final uri =
         _endpoint(connection.apiServer, 'player_api.php', <String, String>{
-          'username': connection.username,
-          'password': connection.password,
-          'action': action,
-        });
+      'username': connection.username,
+      'password': connection.password,
+      'action': action,
+    });
 
     final response = await _getJsonWithAndroidRetry(uri, timeout);
     if (response.statusCode != 200) {
@@ -355,8 +354,7 @@ class XtreamService {
         connection.streamServer,
         item['direct_source']?.toString(),
       );
-      final url =
-          directSource ??
+      final url = directSource ??
           _streamUrl(
             connection.streamServer,
             section: 'live',
@@ -405,8 +403,7 @@ class XtreamService {
         connection.streamServer,
         item['direct_source']?.toString(),
       );
-      final url =
-          directSource ??
+      final url = directSource ??
           _streamUrl(
             connection.streamServer,
             section: 'movie',

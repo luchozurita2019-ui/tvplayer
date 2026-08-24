@@ -10,8 +10,7 @@ class PlaybackSettingsScreen extends StatefulWidget {
   const PlaybackSettingsScreen({super.key});
 
   @override
-  State<PlaybackSettingsScreen> createState() =>
-      _PlaybackSettingsScreenState();
+  State<PlaybackSettingsScreen> createState() => _PlaybackSettingsScreenState();
 }
 
 class _PlaybackSettingsScreenState extends State<PlaybackSettingsScreen> {

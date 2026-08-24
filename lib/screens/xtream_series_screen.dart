@@ -17,6 +17,8 @@ import '../widgets/parental_unlock_dialog.dart';
 import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
+const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
+
 class XtreamSeriesScreen extends StatefulWidget {
   final Playlist playlist;
 
@@ -74,9 +76,8 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     if (!mounted) return;
     final width = prefs.getDouble(_sidebarWidthKey) ?? 320;
     setState(() {
-      _sidebarWidth = width
-          .clamp(_sidebarMinWidth, _sidebarMaxWidth)
-          .toDouble();
+      _sidebarWidth =
+          width.clamp(_sidebarMinWidth, _sidebarMaxWidth).toDouble();
       _sidebarCollapsed = prefs.getBool(_sidebarCollapsedKey) ?? false;
     });
   }
@@ -291,14 +292,14 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         final gridColumns = width >= 1500
             ? 7
             : width >= 1200
-            ? 6
-            : width >= 950
-            ? 5
-            : width >= 700
-            ? 4
-            : width >= 480
-            ? 3
-            : 2;
+                ? 6
+                : width >= 950
+                    ? 5
+                    : width >= 700
+                        ? 4
+                        : width >= 480
+                            ? 3
+                            : 2;
 
         Widget grid() => visible.isEmpty
             ? const Center(child: Text('No hay resultados.'))
@@ -323,6 +324,28 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
 
         // En escritorio usamos exactamente el mismo patrón que TV/Películas:
         // categorías verticales, plegables y con borde redimensionable.
+        if (_androidTvBuild) {
+          return Row(
+            children: [
+              SizedBox(
+                width: 300,
+                child: _SeriesCategorySidebar(
+                  totalCount: visibleTotal,
+                  categories: categories,
+                  categoryCounts: categoryCounts,
+                  selectedCategory: _category,
+                  collapsed: false,
+                  onToggleCollapsed: () {},
+                  onCategorySelected: (value) =>
+                      unawaited(_selectCategory(value)),
+                ),
+              ),
+              Container(width: 1, color: Colors.white12),
+              Expanded(child: grid()),
+            ],
+          );
+        }
+
         if (width >= 760) {
           return Row(
             children: [
@@ -348,9 +371,8 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                   onHorizontalDragUpdate: _sidebarCollapsed
                       ? null
                       : (details) => _resizeSidebar(details.delta.dx),
-                  onHorizontalDragEnd: _sidebarCollapsed
-                      ? null
-                      : (_) => _persistSidebar(),
+                  onHorizontalDragEnd:
+                      _sidebarCollapsed ? null : (_) => _persistSidebar(),
                   child: Container(
                     width: 9,
                     alignment: Alignment.center,
@@ -456,9 +478,9 @@ class _SeriesCatalogToolbar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.5,
-                  ),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -533,9 +555,8 @@ class _SeriesCategorySidebar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Column(
-          crossAxisAlignment: collapsed
-              ? CrossAxisAlignment.center
-              : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              collapsed ? CrossAxisAlignment.center : CrossAxisAlignment.start,
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -559,7 +580,9 @@ class _SeriesCategorySidebar extends StatelessWidget {
                     Expanded(
                       child: Text(
                         'Series',
-                        style: Theme.of(context).textTheme.titleMedium
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
                             ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                     ),
@@ -589,10 +612,10 @@ class _SeriesCategorySidebar extends StatelessWidget {
                       child: Text(
                         'CATEGORÍAS',
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: Colors.white54,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                        ),
+                              color: Colors.white54,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                            ),
                       ),
                     ),
                     const Tooltip(
@@ -685,9 +708,8 @@ class _SeriesCategorySidebar extends StatelessWidget {
                           maxLines: 2,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontWeight: selected
-                                ? FontWeight.w800
-                                : FontWeight.w600,
+                            fontWeight:
+                                selected ? FontWeight.w800 : FontWeight.w600,
                           ),
                         ),
                         trailing: Container(
@@ -771,11 +793,11 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
   }
 
   void _retry() => setState(() {
-    _future = XtreamSeriesService.fetchDetails(
-      widget.connection,
-      widget.summary,
-    );
-  });
+        _future = XtreamSeriesService.fetchDetails(
+          widget.connection,
+          widget.summary,
+        );
+      });
 
   @override
   Widget build(BuildContext context) {
@@ -810,9 +832,9 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
                 if (snapshot.hasError) {
                   return _SeriesError(
                     message: snapshot.error.toString().replaceFirst(
-                      'Exception: ',
-                      '',
-                    ),
+                          'Exception: ',
+                          '',
+                        ),
                     onRetry: _retry,
                   );
                 }
@@ -820,8 +842,8 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
                 final seasons = details.seasonNumbers;
                 final season =
                     _selectedSeason != null && seasons.contains(_selectedSeason)
-                    ? _selectedSeason!
-                    : seasons.first;
+                        ? _selectedSeason!
+                        : seasons.first;
                 final episodes =
                     details.seasons[season] ?? const <XtreamSeriesEpisode>[];
                 return LayoutBuilder(
@@ -843,48 +865,25 @@ class _XtreamSeriesDetailScreenState extends State<XtreamSeriesDetailScreen> {
     List<XtreamSeriesEpisode> episodes,
   ) {
     return Padding(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(14),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           SizedBox(
-            width: 285,
-            child: Column(
-              children: [
-                Expanded(flex: 5, child: _Poster(series: details.series)),
-                const SizedBox(height: 12),
-                Expanded(
-                  flex: 4,
-                  child: _SeasonList(
-                    details: details,
-                    selectedSeason: season,
-                    onSelected: (value) =>
-                        setState(() => _selectedSeason = value),
-                  ),
-                ),
-              ],
+            width: 210,
+            child: _SeasonList(
+              details: details,
+              selectedSeason: season,
+              onSelected: (value) => setState(() => _selectedSeason = value),
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
-            flex: 5,
             child: _EpisodePanel(
               series: details.series,
               season: season,
               episodes: episodes,
               onPlay: (episode) => _play(details, season, episode),
-            ),
-          ),
-          const SizedBox(width: 14),
-          Expanded(
-            flex: 6,
-            child: _SeriesInfoPanel(
-              details: details,
-              season: season,
-              episodes: episodes,
-              onPlayFirst: episodes.isEmpty
-                  ? null
-                  : () => _play(details, season, episodes.first),
             ),
           ),
         ],
@@ -1103,58 +1102,56 @@ class _SeasonList extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final children = details.seasonNumbers
-        .map((season) {
-          final count = details.seasons[season]?.length ?? 0;
-          final selected = season == selectedSeason;
-          return Padding(
-            padding: EdgeInsets.only(
-              right: compact ? 8 : 0,
-              bottom: compact ? 0 : 8,
-            ),
-            child: Material(
-              color: selected
-                  ? Theme.of(context).colorScheme.primary
-                  : Theme.of(context).colorScheme.surfaceContainerHigh,
-              borderRadius: BorderRadius.circular(12),
-              child: InkWell(
-                borderRadius: BorderRadius.circular(12),
-                onTap: () => onSelected(season),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 12,
+    final children = details.seasonNumbers.map((season) {
+      final count = details.seasons[season]?.length ?? 0;
+      final selected = season == selectedSeason;
+      return Padding(
+        padding: EdgeInsets.only(
+          right: compact ? 8 : 0,
+          bottom: compact ? 0 : 8,
+        ),
+        child: Material(
+          color: selected
+              ? Theme.of(context).colorScheme.primary
+              : Theme.of(context).colorScheme.surfaceContainerHigh,
+          borderRadius: BorderRadius.circular(12),
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => onSelected(season),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 14,
+                vertical: 12,
+              ),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    'Temporada $season',
+                    style: TextStyle(
+                      fontWeight: FontWeight.w900,
+                      color: selected ? Colors.white : null,
+                    ),
                   ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        'Temporada $season',
-                        style: TextStyle(
-                          fontWeight: FontWeight.w900,
-                          color: selected ? Colors.white : null,
-                        ),
-                      ),
-                      const SizedBox(width: 10),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 8,
-                          vertical: 3,
-                        ),
-                        decoration: BoxDecoration(
-                          color: Colors.black.withValues(alpha: 0.35),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text('$count Eps'),
-                      ),
-                    ],
+                  const SizedBox(width: 10),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.35),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text('$count Eps'),
                   ),
-                ),
+                ],
               ),
             ),
-          );
-        })
-        .toList(growable: false);
+          ),
+        ),
+      );
+    }).toList(growable: false);
 
     if (compact) {
       return SizedBox(
@@ -1205,9 +1202,8 @@ class _EpisodePanel extends StatelessWidget {
               separatorBuilder: (_, __) => const SizedBox(height: 7),
               itemBuilder: (context, index) {
                 final episode = episodes[index];
-                final episodeNumber = episode.number > 0
-                    ? episode.number
-                    : index + 1;
+                final episodeNumber =
+                    episode.number > 0 ? episode.number : index + 1;
                 return Material(
                   color: Theme.of(context).colorScheme.surfaceContainerHigh,
                   borderRadius: BorderRadius.circular(12),
@@ -1269,9 +1265,8 @@ class _SeriesInfoPanel extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final series = details.series;
-    final backdrop = series.backdrops.isNotEmpty
-        ? series.backdrops.first
-        : series.cover;
+    final backdrop =
+        series.backdrops.isNotEmpty ? series.backdrops.first : series.cover;
     return Card(
       clipBehavior: Clip.antiAlias,
       child: SingleChildScrollView(
@@ -1324,8 +1319,8 @@ class _SeriesInfoPanel extends StatelessWidget {
                   Text(
                     series.name,
                     style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w900,
-                    ),
+                          fontWeight: FontWeight.w900,
+                        ),
                   ),
                   const SizedBox(height: 12),
                   _InfoLine(label: 'Estreno', value: series.releaseDate),

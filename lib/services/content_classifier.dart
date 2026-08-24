@@ -101,7 +101,8 @@ class ContentClassifier {
   static List<Channel> filter(
     Iterable<Channel> channels,
     IptvContentKind kind,
-  ) => partition(channels).forKind(kind);
+  ) =>
+      partition(channels).forKind(kind);
 
   static Map<IptvContentKind, int> counts(Iterable<Channel> channels) {
     final buckets = partition(channels);

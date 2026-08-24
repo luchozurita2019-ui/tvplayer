@@ -44,6 +44,92 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   Widget build(BuildContext context) {
     final nativeXtream = playlist.sourceType == PlaylistSourceType.xtream;
 
+    if (_androidTvBuild) {
+      return Scaffold(
+        backgroundColor: const Color(0xFF05080D),
+        appBar: AppBar(
+          automaticallyImplyLeading: false,
+          title: Row(
+            children: [
+              const Icon(Icons.live_tv_rounded),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text('TV FULL',
+                        style: TextStyle(fontWeight: FontWeight.w900)),
+                    Text(
+                      playlist.name,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall,
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+        body: Padding(
+          padding: const EdgeInsets.fromLTRB(54, 44, 54, 54),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '¿Qué querés ver?',
+                style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 28),
+              Expanded(
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: _ContentCard(
+                        autofocus: true,
+                        icon: Icons.live_tv_rounded,
+                        title: 'TV en vivo',
+                        count: _buckets.count(IptvContentKind.live),
+                        subtitleOverride: nativeXtream ? 'Canales' : null,
+                        enabledOverride: nativeXtream ? true : null,
+                        accent: const Color(0xFF1677FF),
+                        onTap: () => _openKind(context, IptvContentKind.live),
+                      ),
+                    ),
+                    const SizedBox(width: 22),
+                    Expanded(
+                      child: _ContentCard(
+                        icon: Icons.movie_creation_rounded,
+                        title: 'Películas',
+                        count: _buckets.count(IptvContentKind.movies),
+                        subtitleOverride: nativeXtream ? 'Películas' : null,
+                        enabledOverride: nativeXtream ? true : null,
+                        accent: const Color(0xFF7B61FF),
+                        onTap: () => _openKind(context, IptvContentKind.movies),
+                      ),
+                    ),
+                    const SizedBox(width: 22),
+                    Expanded(
+                      child: _ContentCard(
+                        icon: Icons.video_library_rounded,
+                        title: 'Series',
+                        count: _buckets.count(IptvContentKind.series),
+                        subtitleOverride:
+                            nativeXtream ? 'Temporadas y episodios' : null,
+                        enabledOverride: nativeXtream ? true : null,
+                        accent: const Color(0xFF00A7A0),
+                        onTap: () => _openKind(context, IptvContentKind.series),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
     return Scaffold(
       appBar: AppBar(
         title: Column(
@@ -68,10 +154,10 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
           final columns = _androidTvBuild
               ? (constraints.maxWidth >= 1500 ? 4 : 2)
               : constraints.maxWidth >= 1250
-              ? 4
-              : constraints.maxWidth >= 760
-              ? 2
-              : 1;
+                  ? 4
+                  : constraints.maxWidth >= 760
+                      ? 2
+                      : 1;
 
           return ListView(
             padding: EdgeInsets.symmetric(
@@ -81,13 +167,17 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
             children: [
               Text(
                 '¿Qué querés ver?',
-                style: Theme.of(context).textTheme.headlineMedium
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineMedium
                     ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 6),
               Text(
                 'Contenido organizado automáticamente por TV FULL.',
-                style: Theme.of(context).textTheme.bodyLarge
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyLarge
                     ?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 28),
@@ -104,9 +194,8 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.live_tv_rounded,
                     title: 'TV en vivo',
                     count: _buckets.count(IptvContentKind.live),
-                    subtitleOverride: nativeXtream
-                        ? 'TV Xtream nativa rápida'
-                        : null,
+                    subtitleOverride:
+                        nativeXtream ? 'TV Xtream nativa rápida' : null,
                     enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF1677FF),
                     onTap: () => _openKind(context, IptvContentKind.live),
@@ -115,9 +204,8 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.movie_creation_rounded,
                     title: 'Películas',
                     count: _buckets.count(IptvContentKind.movies),
-                    subtitleOverride: nativeXtream
-                        ? 'Catálogo Xtream con fichas'
-                        : null,
+                    subtitleOverride:
+                        nativeXtream ? 'Catálogo Xtream con fichas' : null,
                     enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF4C9DFF),
                     onTap: () => _openKind(context, IptvContentKind.movies),
@@ -126,9 +214,8 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                     icon: Icons.video_library_rounded,
                     title: 'Series',
                     count: _buckets.count(IptvContentKind.series),
-                    subtitleOverride: nativeXtream
-                        ? 'Catálogo Xtream nativo'
-                        : null,
+                    subtitleOverride:
+                        nativeXtream ? 'Catálogo Xtream nativo' : null,
                     enabledOverride: nativeXtream ? true : null,
                     accent: const Color(0xFF2D6DFF),
                     onTap: () => _openKind(context, IptvContentKind.series),
@@ -314,10 +401,10 @@ class _ContentCard extends StatelessWidget {
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                      color: enabled ? Colors.white : Colors.white38,
-                      fontWeight: FontWeight.w900,
-                      fontSize: compact ? 20 : null,
-                    ),
+                          color: enabled ? Colors.white : Colors.white38,
+                          fontWeight: FontWeight.w900,
+                          fontSize: compact ? 20 : null,
+                        ),
                   ),
                   const SizedBox(height: 6),
                   Text(
@@ -326,8 +413,8 @@ class _ContentCard extends StatelessWidget {
                     maxLines: 2,
                     overflow: TextOverflow.ellipsis,
                     style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                      color: enabled ? Colors.white70 : Colors.white30,
-                    ),
+                          color: enabled ? Colors.white70 : Colors.white30,
+                        ),
                   ),
                 ],
               );

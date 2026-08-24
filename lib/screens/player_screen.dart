@@ -12,9 +12,10 @@ import '../services/playback_metrics_service.dart';
 import '../services/server_compatibility_service.dart';
 import '../widgets/channel_tile.dart';
 import '../widgets/live_video_view.dart';
+import 'android_media3_texture_player_screen.dart';
+import 'android_media3_vod_player_screen.dart';
 
-const String _defaultUserAgent =
-    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+const String _defaultUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/96.0.4664.18 Safari/537.36';
 const String _legacyVlcUserAgent =
@@ -49,7 +50,7 @@ class _ConnectionHealthSnapshot {
   );
 }
 
-class PlayerScreen extends StatefulWidget {
+class PlayerScreen extends StatelessWidget {
   final Channel channel;
   final List<Channel> playlist;
   final int initialIndex;
@@ -66,10 +67,62 @@ class PlayerScreen extends StatefulWidget {
   });
 
   @override
-  State<PlayerScreen> createState() => _PlayerScreenState();
+  Widget build(BuildContext context) {
+    final useNativeMedia3Texture = _androidTvBuild &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        isLiveContent;
+
+    if (useNativeMedia3Texture) {
+      return AndroidMedia3TexturePlayerScreen(
+        playlist: playlist,
+        initialIndex: initialIndex,
+      );
+    }
+
+    final useNativeMedia3Vod = _androidTvBuild &&
+        !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        !isLiveContent;
+
+    if (useNativeMedia3Vod) {
+      return AndroidMedia3VodPlayerScreen(
+        playlist: playlist,
+        initialIndex: initialIndex,
+      );
+    }
+
+    return _MpvPlayerScreen(
+      channel: channel,
+      playlist: playlist,
+      initialIndex: initialIndex,
+      settings: settings,
+      isLiveContent: isLiveContent,
+    );
+  }
 }
 
-class _PlayerScreenState extends State<PlayerScreen> {
+class _MpvPlayerScreen extends StatefulWidget {
+  final Channel channel;
+  final List<Channel> playlist;
+  final int initialIndex;
+  final PlaybackSettings settings;
+  final bool isLiveContent;
+
+  const _MpvPlayerScreen({
+    super.key,
+    required this.channel,
+    required this.playlist,
+    required this.initialIndex,
+    required this.settings,
+    this.isLiveContent = true,
+  });
+
+  @override
+  State<_MpvPlayerScreen> createState() => _PlayerScreenState();
+}
+
+class _PlayerScreenState extends State<_MpvPlayerScreen> {
   static const Duration _watchdogInterval = Duration(seconds: 2);
   static const String _fastProbeSize = '131072';
   static const String _liveProbeSize = '524288';
@@ -172,8 +225,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
   final ValueNotifier<_ConnectionHealthSnapshot> _connectionHealth =
       ValueNotifier<_ConnectionHealthSnapshot>(
-        _ConnectionHealthSnapshot.stable,
-      );
+    _ConnectionHealthSnapshot.stable,
+  );
 
   Timer? _watchdogTimer;
   Timer? _connectTimeoutTimer;
@@ -456,12 +509,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
         // fallbacks HTTP/TLS pueden tocar opciones globales del Player, por lo
         // que cada apertura restaura estos valores antes de probar otro modo.
         try {
-          _baselineTlsVerify = (await platform.getProperty('tls-verify'))
-              .trim();
+          _baselineTlsVerify =
+              (await platform.getProperty('tls-verify')).trim();
         } catch (_) {}
         try {
-          _baselineUserAgent = (await platform.getProperty('user-agent'))
-              .trim();
+          _baselineUserAgent =
+              (await platform.getProperty('user-agent')).trim();
         } catch (_) {}
         try {
           _baselineReferrer = (await platform.getProperty('referrer')).trim();
@@ -469,7 +522,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         try {
           _baselineHttpHeaderFields = (await platform.getProperty(
             'http-header-fields',
-          )).trim();
+          ))
+              .trim();
         } catch (_) {}
 
         // keep-open=yes convierte un EOF en una pausa del Player. En IPTV
@@ -541,9 +595,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       _effectiveSettings = applyLiveStabilityFloor
           ? tunedSettings.copyWith(
-              bufferMb: tunedSettings.bufferMb < 16
-                  ? 16
-                  : tunedSettings.bufferMb,
+              bufferMb:
+                  tunedSettings.bufferMb < 16 ? 16 : tunedSettings.bufferMb,
               readaheadSeconds: tunedSettings.readaheadSeconds < 2.5
                   ? 2.5
                   : tunedSettings.readaheadSeconds,
@@ -565,9 +618,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     _useFastProbe = tuning.useFastProbe;
     final modeNeedsNormalProbe =
         _compatibilityMode == ServerCompatibilityMode.compatible ||
-        _compatibilityMode == ServerCompatibilityMode.advanced;
-    _currentOpenUsesFastProbe =
-        !widget.isLiveContent &&
+            _compatibilityMode == ServerCompatibilityMode.advanced;
+    _currentOpenUsesFastProbe = !widget.isLiveContent &&
         _useFastProbe &&
         !forceNormalProbe &&
         !_compatibilityPrefersNormalProbe &&
@@ -592,8 +644,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
           'network-timeout',
           _effectiveSettings.connectTimeoutSeconds.toString(),
         );
-        final useLiveStartupProbe =
-            widget.isLiveContent &&
+        final useLiveStartupProbe = widget.isLiveContent &&
             !forceNormalProbe &&
             _compatibilityMode != ServerCompatibilityMode.compatible &&
             _compatibilityMode != ServerCompatibilityMode.advanced;
@@ -666,7 +717,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
         final disableMime =
             _compatibilityMode == ServerCompatibilityMode.compatible ||
-            _compatibilityMode == ServerCompatibilityMode.advanced;
+                _compatibilityMode == ServerCompatibilityMode.advanced;
         await platform.setProperty(
           'demuxer-lavf-allow-mimetype',
           disableMime ? 'no' : 'yes',
@@ -721,8 +772,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
             seconds: slowConnection
                 ? 45
                 : (_stallThreshold.inSeconds < 30
-                      ? 30
-                      : _stallThreshold.inSeconds),
+                    ? 30
+                    : _stallThreshold.inSeconds),
           )
         : Duration(seconds: slowConnection ? 30 : _stallThreshold.inSeconds);
     final bufferingGrace = widget.isLiveContent
@@ -730,15 +781,15 @@ class _PlayerScreenState extends State<PlayerScreen> {
             seconds: slowConnection
                 ? 60
                 : (_stallThreshold.inSeconds + 20 < 45
-                      ? 45
-                      : _stallThreshold.inSeconds + 20),
+                    ? 45
+                    : _stallThreshold.inSeconds + 20),
           )
         : Duration(
             seconds: slowConnection
                 ? 30
                 : (_stallThreshold.inSeconds < 8
-                      ? 12
-                      : _stallThreshold.inSeconds + 4),
+                    ? 12
+                    : _stallThreshold.inSeconds + 4),
           );
     final effectiveStallThreshold = _isBuffering ? bufferingGrace : liveGrace;
 
@@ -765,7 +816,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         level: _ConnectionHealthLevel.unstable,
         source: _ConnectionIssueSource.unknown,
         title: 'Señal inestable',
-        detail: 'TV FULL está esperando datos. Estamos verificando si el origen es la conexión o el servidor.',
+        detail:
+            'TV FULL está esperando datos. Estamos verificando si el origen es la conexión o el servidor.',
         confidence: 'baja',
       );
     }
@@ -815,12 +867,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
 
     final mediaBits = (_videoBitrate ?? 0) + (_audioBitrate ?? 0);
     final networkBits = (_networkReadBytesPerSecond ?? 0) * 8;
-    final ratio = mediaBits > 0 && networkBits > 0
-        ? networkBits / mediaBits
-        : null;
+    final ratio =
+        mediaBits > 0 && networkBits > 0 ? networkBits / mediaBits : null;
 
-    final currentHostLooksBad =
-        current.startupCount >= 3 &&
+    final currentHostLooksBad = current.startupCount >= 3 &&
         ((current.averageStartupMs ?? 0) >= 1800 ||
             current.failureRatio >= 0.20 ||
             current.stallRatio >= 0.15);
@@ -840,7 +890,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     if (_providerIssueHint || (currentHostLooksBad && otherHostsLookHealthy)) {
       source = _ConnectionIssueSource.provider;
       title = 'Servidor del canal inestable';
-      detail = _lastConnectionDetail ?? 'Este servidor acumula más demoras o cortes que otros servidores usados en TV FULL.';
+      detail = _lastConnectionDetail ??
+          'Este servidor acumula más demoras o cortes que otros servidores usados en TV FULL.';
       confidence = _providerIssueHint ? 'alta' : 'media';
     } else if (ratio != null && ratio < 0.95 && !currentHostLooksBad) {
       source = _ConnectionIssueSource.internet;
@@ -852,7 +903,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else {
       source = _ConnectionIssueSource.unknown;
       title = 'Recepción inestable';
-      detail = _lastConnectionDetail ?? 'La señal está llegando de forma irregular. Puede ser la conexión del usuario o el servidor del canal.';
+      detail = _lastConnectionDetail ??
+          'La señal está llegando de forma irregular. Puede ser la conexión del usuario o el servidor del canal.';
       confidence = 'baja';
     }
 
@@ -951,8 +1003,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         final icon = snapshot.source == _ConnectionIssueSource.provider
             ? Icons.dns_rounded
             : snapshot.source == _ConnectionIssueSource.internet
-            ? Icons.wifi_off_rounded
-            : Icons.network_check_rounded;
+                ? Icons.wifi_off_rounded
+                : Icons.network_check_rounded;
 
         return Material(
           color: Colors.transparent,
@@ -1160,14 +1212,14 @@ class _PlayerScreenState extends State<PlayerScreen> {
       // reconexión, evitando que un EOF haga volver a un modo incompatible.
       final recoveryMode =
           _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
-              _compatibilityMode == ServerCompatibilityMode.mpvHttp ||
-              _compatibilityMode == ServerCompatibilityMode.tlsLegacy ||
-              _compatibilityMode == ServerCompatibilityMode.xtreamHls
-          ? _compatibilityMode
-          : _compatibilityMode == ServerCompatibilityMode.compatible ||
-                _compatibilityMode == ServerCompatibilityMode.advanced
-          ? ServerCompatibilityMode.advanced
-          : ServerCompatibilityMode.liveRecovery;
+                  _compatibilityMode == ServerCompatibilityMode.mpvHttp ||
+                  _compatibilityMode == ServerCompatibilityMode.tlsLegacy ||
+                  _compatibilityMode == ServerCompatibilityMode.xtreamHls
+              ? _compatibilityMode
+              : _compatibilityMode == ServerCompatibilityMode.compatible ||
+                      _compatibilityMode == ServerCompatibilityMode.advanced
+                  ? ServerCompatibilityMode.advanced
+                  : ServerCompatibilityMode.liveRecovery;
       await _compatibility.recordLiveEof(channel.url, recoveryMode);
       if (!mounted) return;
 
@@ -1442,7 +1494,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
     } else if (RegExp(r'\b5\d\d\b').hasMatch(text) && text.contains('http')) {
       diagnostic = 'El servidor respondió con un error HTTP 5xx temporal';
     } else if (text.contains('mime')) {
-      diagnostic = 'El MIME del servidor puede ser incompatible; disponible fallback Compatible';
+      diagnostic =
+          'El MIME del servidor puede ser incompatible; disponible fallback Compatible';
     } else if (text.contains('eof')) {
       diagnostic = 'EOF detectado en la señal en vivo';
     } else if ((log.level == 'error' ||
@@ -1460,8 +1513,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         _startupTransientFailureHint = true;
       }
       if (_isDefinitiveStartupFailureLog(text)) {
-        final startupDiagnostic =
-            diagnostic ??
+        final startupDiagnostic = diagnostic ??
             'mpv/FFmpeg confirmó que el canal no está disponible durante la apertura';
         scheduleMicrotask(() {
           if (!mounted) return;
@@ -1532,8 +1584,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     }
 
     if (!_hasEverPlayed && widget.isLiveContent) {
-      final androidTransient =
-          _isAndroidRuntime &&
+      final androidTransient = _isAndroidRuntime &&
           (_startupTransientFailureHint ||
               _isTransientAndroidStartupFailure(message));
       if (androidTransient &&
@@ -1729,12 +1780,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
       final channel = widget.playlist[_currentIndex];
       final fallbackUserAgent =
           _compatibilityMode == ServerCompatibilityMode.compatible ||
-              _compatibilityMode == ServerCompatibilityMode.advanced
-          ? _legacyVlcUserAgent
-          : _defaultUserAgent;
+                  _compatibilityMode == ServerCompatibilityMode.advanced
+              ? _legacyVlcUserAgent
+              : _defaultUserAgent;
       final nativeHttp =
           _compatibilityMode == ServerCompatibilityMode.nativeHttp ||
-          _compatibilityMode == ServerCompatibilityMode.xtreamHls;
+              _compatibilityMode == ServerCompatibilityMode.xtreamHls;
       final useMpvHttp = _compatibilityMode == ServerCompatibilityMode.mpvHttp;
       final headers = channel.resolvedHttpHeaders(
         fallbackUserAgent,
@@ -1951,8 +2002,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final channel = widget.playlist[_currentIndex];
     final advertised = _advertisedQuality(channel.name);
     final actual = _qualityLabel;
-    final belowAdvertised =
-        advertised != null &&
+    final belowAdvertised = advertised != null &&
         _qualityRank(actual) >= 0 &&
         _qualityRank(actual) < _qualityRank(advertised);
 
@@ -2141,15 +2191,13 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final filteredChannels = query.trim().isEmpty
         ? widget.playlist
         : widget.playlist
-              .where((c) => c.name.toLowerCase().contains(query))
-              .toList();
-    final isChannelMaintenance =
-        widget.isLiveContent &&
+            .where((c) => c.name.toLowerCase().contains(query))
+            .toList();
+    final isChannelMaintenance = widget.isLiveContent &&
         (_errorTitle == 'CANAL EN MANTENIMIENTO' ||
             _errorTitle == 'CANAL TEMPORALMENTE NO DISPONIBLE');
-    final errorAccent = isChannelMaintenance
-        ? Colors.amberAccent
-        : Colors.redAccent;
+    final errorAccent =
+        isChannelMaintenance ? Colors.amberAccent : Colors.redAccent;
     final screenWidth = MediaQuery.sizeOf(context).width;
     final channelPanelWidth = _androidTvBuild
         ? (screenWidth * 0.34).clamp(330.0, 460.0).toDouble()
@@ -2183,9 +2231,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
               onShowChannelList: () =>
                   setState(() => _showChannelList = !_showChannelList),
               onShowStreamInfo: _showStreamInfo,
-              onShowPerformance: _lastStartupMs == null
-                  ? null
-                  : _showPerformanceInfo,
+              onShowPerformance:
+                  _lastStartupMs == null ? null : _showPerformanceInfo,
             ),
           ),
           Positioned(
@@ -2223,10 +2270,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
                           _normalProbeFallbackUsed && _retryCount == 0
                               ? 'Probando modo compatible…'
                               : _reconnecting
-                              ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
-                              : _hasEverPlayed
-                              ? 'Recibiendo datos…'
-                              : 'Cargando…',
+                                  ? 'Reconectando (intento $_retryCount de $_maxAutoRetries)…'
+                                  : _hasEverPlayed
+                                      ? 'Recibiendo datos…'
+                                      : 'Cargando…',
                           style: const TextStyle(
                             color: Colors.white70,
                             fontWeight: FontWeight.w600,
@@ -2407,7 +2454,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
                             decoration: BoxDecoration(
                               color: isCurrent
                                   ? const Color(0xFF1677FF)
-                                        .withValues(alpha: 0.18)
+                                      .withValues(alpha: 0.18)
                                   : Colors.transparent,
                               borderRadius: BorderRadius.circular(12),
                               border: isCurrent

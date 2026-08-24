@@ -21,8 +21,7 @@ class InternetSpeedTestResult {
 class InternetSpeedTestService {
   InternetSpeedTestService._();
 
-  static final InternetSpeedTestService instance =
-      InternetSpeedTestService._();
+  static final InternetSpeedTestService instance = InternetSpeedTestService._();
 
   static const String _userAgent = 'TV FULL Internet Test/1.0';
   static final Uri _downloadEndpoint =
@@ -67,7 +66,8 @@ class InternetSpeedTestService {
 
     final usable = samples.where((sample) => sample.bytes > 0).toList();
     if (usable.isEmpty) {
-      throw Exception('No se recibieron datos suficientes para medir la velocidad.');
+      throw Exception(
+          'No se recibieron datos suficientes para medir la velocidad.');
     }
 
     // Tomamos la mejor muestra sostenida. La muestra pequeña sirve para redes

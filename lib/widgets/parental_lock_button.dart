@@ -15,9 +15,8 @@ class ParentalLockButton extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hidden = unlocked ? 0 : hiddenCategoryCount;
-    final hiddenLabel = hidden == 1
-        ? '1 categoría oculta'
-        : '$hidden categorías ocultas';
+    final hiddenLabel =
+        hidden == 1 ? '1 categoría oculta' : '$hidden categorías ocultas';
 
     return IconButton(
       tooltip: unlocked
@@ -40,7 +39,8 @@ class ParentalLockButton extends StatelessWidget {
                 right: 0,
                 top: 0,
                 child: Container(
-                  constraints: const BoxConstraints(minWidth: 18, minHeight: 18),
+                  constraints:
+                      const BoxConstraints(minWidth: 18, minHeight: 18),
                   padding: const EdgeInsets.symmetric(horizontal: 4),
                   alignment: Alignment.center,
                   decoration: BoxDecoration(

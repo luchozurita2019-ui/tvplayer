@@ -13,8 +13,8 @@ import 'xtream_series_service.dart';
 import 'xtream_service.dart';
 import 'xtream_vod_service.dart';
 
-typedef XtreamCatalogProgressCallback =
-    void Function(XtreamCatalogProgress progress);
+typedef XtreamCatalogProgressCallback = void Function(
+    XtreamCatalogProgress progress);
 
 class XtreamCatalogProgress {
   final String section;
@@ -997,16 +997,16 @@ List<XtreamSeriesSummary> _seriesListFromPrepared(dynamic raw) {
 }
 
 Map<String, dynamic> _movieToMap(XtreamVodSummary movie) => <String, dynamic>{
-  'id': movie.id,
-  'name': movie.name,
-  'extension': movie.extension,
-  'cover': movie.cover,
-  'category': movie.category,
-  'rating': movie.rating,
-  'releaseDate': movie.releaseDate,
-  'genre': movie.genre,
-  'directSource': movie.directSource,
-};
+      'id': movie.id,
+      'name': movie.name,
+      'extension': movie.extension,
+      'cover': movie.cover,
+      'category': movie.category,
+      'rating': movie.rating,
+      'releaseDate': movie.releaseDate,
+      'genre': movie.genre,
+      'directSource': movie.directSource,
+    };
 
 Map<String, dynamic> _seriesToMap(XtreamSeriesSummary series) =>
     <String, dynamic>{

@@ -88,6 +88,22 @@ class _HomeScreenState extends State<HomeScreen> {
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
 
+    if (_androidTvBuild) {
+      if (provider.loading) {
+        return const _TvHomeLoading();
+      }
+      if (provider.playlists.isEmpty) {
+        return _TvHomeLoading(
+          message: provider.error ?? 'Esperando la configuración del servicio…',
+          showProgress: provider.error == null,
+        );
+      }
+      // En TV no mostramos administración de listas, perfil, estadísticas ni
+      // opciones de escritorio. El panel aprovisiona el servicio y entramos
+      // directamente al contenido.
+      return SourceContentScreen(playlist: provider.playlists.first);
+    }
+
     return LayoutBuilder(
       builder: (context, constraints) {
         final desktop = _androidTvBuild || constraints.maxWidth >= 860;
@@ -181,46 +197,46 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   String get _sectionTitle => switch (_section) {
-    0 => 'Servicios',
-    1 => 'Listas favoritas',
-    2 => 'Canales favoritos',
-    3 => 'TV FULL PRO',
-    4 => 'Información',
-    _ => 'Perfil',
-  };
+        0 => 'Servicios',
+        1 => 'Listas favoritas',
+        2 => 'Canales favoritos',
+        3 => 'TV FULL PRO',
+        4 => 'Información',
+        _ => 'Perfil',
+      };
 
   String get _sectionSubtitle => switch (_section) {
-    0 => 'Administrá tus listas y accesos desde un solo lugar.',
-    1 => 'Tus servicios preferidos, siempre primero.',
-    2 => 'Acceso rápido a los canales que marcaste como favoritos.',
-    3 => 'Rendimiento avanzado y configuración premium.',
-    4 => 'Actualizaciones, novedades y datos de TV FULL.',
-    _ => 'Una nueva experiencia de perfiles llegará próximamente.',
-  };
+        0 => 'Administrá tus listas y accesos desde un solo lugar.',
+        1 => 'Tus servicios preferidos, siempre primero.',
+        2 => 'Acceso rápido a los canales que marcaste como favoritos.',
+        3 => 'Rendimiento avanzado y configuración premium.',
+        4 => 'Actualizaciones, novedades y datos de TV FULL.',
+        _ => 'Una nueva experiencia de perfiles llegará próximamente.',
+      };
 
   Widget _sectionBody(IptvProvider provider) {
     return switch (_section) {
       0 => _PlaylistsView(
-        playlists: provider.playlists,
-        loading: provider.loading,
-        favoriteIds: _favoritePlaylistIds,
-        onToggleFavorite: (playlist) =>
-            unawaited(_togglePlaylistFavorite(playlist)),
-        onAddPlaylist: () => _openAddSource(context),
-      ),
+          playlists: provider.playlists,
+          loading: provider.loading,
+          favoriteIds: _favoritePlaylistIds,
+          onToggleFavorite: (playlist) =>
+              unawaited(_togglePlaylistFavorite(playlist)),
+          onAddPlaylist: () => _openAddSource(context),
+        ),
       1 => _FavoritePlaylistsView(
-        playlists: provider.playlists,
-        loading: provider.loading,
-        favoriteIds: _favoritePlaylistIds,
-        onToggleFavorite: (playlist) =>
-            unawaited(_togglePlaylistFavorite(playlist)),
-        onAddPlaylist: () => _openAddSource(context),
-      ),
+          playlists: provider.playlists,
+          loading: provider.loading,
+          favoriteIds: _favoritePlaylistIds,
+          onToggleFavorite: (playlist) =>
+              unawaited(_togglePlaylistFavorite(playlist)),
+          onAddPlaylist: () => _openAddSource(context),
+        ),
       2 => const _ChannelFavoritesView(),
       3 => _PerformanceView(
-        settings: provider.playbackSettings,
-        onOpenSettings: () => _openPlaybackSettings(context),
-      ),
+          settings: provider.playbackSettings,
+          onOpenSettings: () => _openPlaybackSettings(context),
+        ),
       4 => const _InformationView(),
       _ => const _ProfileComingSoonView(),
     };
@@ -281,6 +297,54 @@ class _HomeScreenState extends State<HomeScreen> {
     if (!mounted) return;
     await Navigator.of(context)
         .push(MaterialPageRoute(builder: (_) => const ParentalControlScreen()));
+  }
+}
+
+class _TvHomeLoading extends StatelessWidget {
+  final String? message;
+  final bool showProgress;
+
+  const _TvHomeLoading({this.message, this.showProgress = true});
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF05080D),
+      body: Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Container(
+              width: 110,
+              height: 76,
+              decoration: BoxDecoration(
+                color: const Color(0xFF1677FF),
+                borderRadius: BorderRadius.circular(22),
+              ),
+              child: const Icon(Icons.play_arrow_rounded, size: 58),
+            ),
+            const SizedBox(height: 22),
+            const Text(
+              'TV FULL',
+              style: TextStyle(fontSize: 30, fontWeight: FontWeight.w900),
+            ),
+            const SizedBox(height: 18),
+            if (showProgress)
+              const SizedBox(
+                width: 42,
+                height: 42,
+                child: CircularProgressIndicator(strokeWidth: 3),
+              ),
+            if (showProgress) const SizedBox(height: 18),
+            Text(
+              message ?? 'Cargando tu servicio…',
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.white70, fontSize: 16),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
 
@@ -783,7 +847,8 @@ class _PlaylistsView extends StatelessWidget {
       return _EmptyState(
         icon: Icons.playlist_add_rounded,
         title: 'Todavía no hay servicios',
-        message: 'Agregá una lista M3U/M3U8, Xtream Codes o Portal Stalker para comenzar.',
+        message:
+            'Agregá una lista M3U/M3U8, Xtream Codes o Portal Stalker para comenzar.',
         actionLabel: 'Agregar lista',
         onAction: onAddPlaylist,
       );
@@ -805,9 +870,8 @@ class _PlaylistsView extends StatelessWidget {
       0,
       (total, item) => total + item.groups.length,
     );
-    final favoriteCount = playlists
-        .where((item) => favoriteIds.contains(item.id))
-        .length;
+    final favoriteCount =
+        playlists.where((item) => favoriteIds.contains(item.id)).length;
 
     return LayoutBuilder(
       builder: (context, constraints) {
@@ -908,19 +972,19 @@ class _FavoritePlaylistsView extends StatelessWidget {
       return const Center(child: CircularProgressIndicator(color: _proBlue));
     }
 
-    final favorites =
-        playlists
-            .where((playlist) => favoriteIds.contains(playlist.id))
-            .toList(growable: false)
-          ..sort(
-            (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
-          );
+    final favorites = playlists
+        .where((playlist) => favoriteIds.contains(playlist.id))
+        .toList(growable: false)
+      ..sort(
+        (a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()),
+      );
 
     if (favorites.isEmpty) {
       return _EmptyState(
         icon: Icons.star_border_rounded,
         title: 'Todavía no tenés listas favoritas',
-        message: 'Tocá la estrella de una lista para destacarla con el contorno dorado.',
+        message:
+            'Tocá la estrella de una lista para destacarla con el contorno dorado.',
         actionLabel: playlists.isEmpty ? 'Agregar lista' : null,
         onAction: playlists.isEmpty ? onAddPlaylist : null,
       );
@@ -1271,10 +1335,10 @@ class _PlaylistGrid extends StatelessWidget {
         final columns = _androidTvBuild
             ? (constraints.maxWidth >= 1180 ? 3 : 2)
             : constraints.maxWidth >= 1250
-            ? 3
-            : constraints.maxWidth >= 760
-            ? 2
-            : 1;
+                ? 3
+                : constraints.maxWidth >= 760
+                    ? 2
+                    : 1;
 
         return GridView.builder(
           shrinkWrap: true,
@@ -1586,8 +1650,8 @@ class _ChannelFavoritesView extends StatelessWidget {
     final parental = ParentalControlService.instance;
     final favorites = parental.enabled && parental.isLocked
         ? provider.favorites
-              .where(parental.canShowChannel)
-              .toList(growable: false)
+            .where(parental.canShowChannel)
+            .toList(growable: false)
         : provider.favorites;
 
     if (favorites.isEmpty) {
@@ -1681,13 +1745,13 @@ class _PerformanceView extends StatelessWidget {
   });
 
   String get _profileLabel => switch (settings.profile) {
-    BufferProfile.auto => 'Automático',
-    BufferProfile.ultraFast => 'Ultra rápido',
-    BufferProfile.balanced => 'Equilibrado',
-    BufferProfile.stable => 'Estable',
-    BufferProfile.slowConnection => 'Conexión lenta',
-    BufferProfile.custom => 'Personalizado',
-  };
+        BufferProfile.auto => 'Automático',
+        BufferProfile.ultraFast => 'Ultra rápido',
+        BufferProfile.balanced => 'Equilibrado',
+        BufferProfile.stable => 'Estable',
+        BufferProfile.slowConnection => 'Conexión lenta',
+        BufferProfile.custom => 'Personalizado',
+      };
 
   @override
   Widget build(BuildContext context) {
@@ -1918,7 +1982,8 @@ class _InformationView extends StatelessWidget {
           const _SectionLead(
             icon: Icons.info_outline_rounded,
             title: 'Información de TV FULL PRO',
-            message: 'Este espacio queda preparado para comunicar novedades, versiones y futuras actualizaciones.',
+            message:
+                'Este espacio queda preparado para comunicar novedades, versiones y futuras actualizaciones.',
           ),
           const SizedBox(height: 18),
           Wrap(
@@ -1928,25 +1993,29 @@ class _InformationView extends StatelessWidget {
               _InfoCard(
                 icon: Icons.system_update_alt_rounded,
                 title: 'Centro de actualizaciones',
-                message: 'Acá se mostrarán nuevas versiones, cambios importantes y avisos de actualización.',
+                message:
+                    'Acá se mostrarán nuevas versiones, cambios importantes y avisos de actualización.',
                 accent: _proBlue,
               ),
               _InfoCard(
                 icon: Icons.newspaper_rounded,
                 title: 'Novedades',
-                message: 'Un lugar para informar mejoras de rendimiento, nuevas funciones y cambios de la aplicación.',
+                message:
+                    'Un lugar para informar mejoras de rendimiento, nuevas funciones y cambios de la aplicación.',
                 accent: Color(0xFF9B8CFF),
               ),
               _InfoCard(
                 icon: Icons.verified_user_outlined,
                 title: 'Seguridad',
-                message: 'Acceso rápido a información relacionada con privacidad, control parental y uso seguro.',
+                message:
+                    'Acceso rápido a información relacionada con privacidad, control parental y uso seguro.',
                 accent: Color(0xFF5DD6A8),
               ),
               _InfoCard(
                 icon: Icons.workspace_premium_outlined,
                 title: 'TV FULL PRO',
-                message: 'Las funciones premium y de rendimiento estarán identificadas con el distintivo dorado PRO.',
+                message:
+                    'Las funciones premium y de rendimiento estarán identificadas con el distintivo dorado PRO.',
                 accent: _proGold,
               ),
             ],

@@ -49,10 +49,11 @@ class ParentalControlService extends ChangeNotifier {
         .map(_normalize)
         .where((value) => value.isNotEmpty)
         .toSet();
-    _allowedGroups = (prefs.getStringList(_allowedGroupsKey) ?? const <String>[])
-        .map(_normalize)
-        .where((value) => value.isNotEmpty)
-        .toSet();
+    _allowedGroups =
+        (prefs.getStringList(_allowedGroupsKey) ?? const <String>[])
+            .map(_normalize)
+            .where((value) => value.isNotEmpty)
+            .toSet();
     _initialized = true;
     notifyListeners();
   }
@@ -130,7 +131,8 @@ class ParentalControlService extends ChangeNotifier {
   /// las mismas reglas que usamos para los Channel de una M3U.
   bool isProtectedItem({required String name, String? group}) {
     final normalizedGroup = _normalize(group ?? '');
-    if (normalizedGroup.isNotEmpty && _allowedGroups.contains(normalizedGroup)) {
+    if (normalizedGroup.isNotEmpty &&
+        _allowedGroups.contains(normalizedGroup)) {
       return false;
     }
     if (isProtectedGroup(group)) return true;
@@ -179,7 +181,8 @@ class ParentalControlService extends ChangeNotifier {
     }
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_manualGroupsKey, _manualGroups.toList()..sort());
-    await prefs.setStringList(_allowedGroupsKey, _allowedGroups.toList()..sort());
+    await prefs.setStringList(
+        _allowedGroupsKey, _allowedGroups.toList()..sort());
     notifyListeners();
   }
 

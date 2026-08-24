@@ -35,8 +35,7 @@ class XtreamVodSummary {
   });
 
   Channel toChannel(XtreamConnectionResult connection) {
-    final url = _resolveDirect(connection.streamServer, directSource) ??
-        _movieUrl(connection, id, extension);
+    final url = _movieUrl(connection, id, extension);
     return Channel(
       name: name,
       url: url,
@@ -84,9 +83,7 @@ class XtreamVodDetails {
   }
 
   Channel toChannel(XtreamConnectionResult connection) {
-    final url = _resolveDirect(connection.streamServer, directSource) ??
-        _resolveDirect(connection.streamServer, movie.directSource) ??
-        _movieUrl(connection, movie.id, extension);
+    final url = _movieUrl(connection, movie.id, extension);
     return Channel(
       name: movie.name,
       url: url,
@@ -144,7 +141,8 @@ class XtreamVodService {
             _firstText(item, const ['container_extension', 'extension']),
             fallback: 'mp4',
           ),
-          cover: _firstText(item, const ['stream_icon', 'movie_image', 'cover']),
+          cover:
+              _firstText(item, const ['stream_icon', 'movie_image', 'cover']),
           category: categoryId == null
               ? _firstText(item, const ['category_name', 'category'])
               : categories[categoryId] ??
@@ -186,8 +184,7 @@ class XtreamVodService {
     }
 
     final catalogPlayableUrl =
-        _resolveDirect(activeConnection.streamServer, summary.directSource) ??
-            _movieUrl(activeConnection, summary.id, summary.extension);
+        _movieUrl(activeConnection, summary.id, summary.extension);
 
     try {
       final uri = _endpoint(activeConnection.apiServer, <String, String>{
@@ -196,7 +193,8 @@ class XtreamVodService {
         'action': 'get_vod_info',
         'vod_id': summary.id,
       });
-      final response = await _client.get(uri, headers: _headers).timeout(timeout);
+      final response =
+          await _client.get(uri, headers: _headers).timeout(timeout);
       if (response.statusCode != 200) {
         throw Exception(
           'Xtream get_vod_info respondió HTTP ${response.statusCode}.',
@@ -233,15 +231,7 @@ class XtreamVodService {
             summary.extension,
         fallback: summary.extension,
       );
-      final rawDirect = _firstText(movieData, const ['direct_source']) ??
-          _firstText(info, const ['direct_source']);
-      final playableUrl =
-          _resolveDirect(activeConnection.streamServer, rawDirect) ??
-              _resolveDirect(
-                activeConnection.streamServer,
-                summary.directSource,
-              ) ??
-              _movieUrl(activeConnection, summary.id, extension);
+      final playableUrl = _movieUrl(activeConnection, summary.id, extension);
 
       return XtreamVodDetails(
         movie: summary,
@@ -250,9 +240,9 @@ class XtreamVodService {
         cast: pick(const ['cast', 'actors']),
         director: pick(const ['director']),
         genre: pick(const ['genre']) ?? summary.genre,
-        releaseDate:
-            pick(const ['releasedate', 'releaseDate', 'release_date', 'year']) ??
-                summary.releaseDate,
+        releaseDate: pick(
+                const ['releasedate', 'releaseDate', 'release_date', 'year']) ??
+            summary.releaseDate,
         rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
         duration: pick(const ['duration', 'duration_secs']),
         country: pick(const ['country']),
@@ -312,10 +302,8 @@ class XtreamVodService {
     // El timeout se reinicia cada vez que llega un fragmento del cuerpo.
     // Así un catálogo grande puede tardar más que [timeout] en total siempre
     // que el servidor continúe enviando datos. Sólo falla si queda inactivo.
-    final body = await response.stream
-        .transform(utf8.decoder)
-        .timeout(timeout)
-        .join();
+    final body =
+        await response.stream.transform(utf8.decoder).timeout(timeout).join();
     final decoded = jsonDecode(body);
     return decoded is List ? decoded : const <dynamic>[];
   }
@@ -405,19 +393,17 @@ String _movieUrl(
 ) {
   final base = connection.streamServer;
   final prefix = base.pathSegments.where((e) => e.trim().isNotEmpty).toList();
-  return base
-      .replace(
-        pathSegments: <String>[
-          ...prefix,
-          'movie',
-          connection.username,
-          connection.password,
-          '$streamId.$extension',
-        ],
-        query: '',
-        fragment: '',
-      )
-      .toString();
+  return base.replace(
+    pathSegments: <String>[
+      ...prefix,
+      'movie',
+      connection.username,
+      connection.password,
+      '$streamId.$extension',
+    ],
+    query: '',
+    fragment: '',
+  ).toString();
 }
 
 String _cleanExtension(String? raw, {required String fallback}) {

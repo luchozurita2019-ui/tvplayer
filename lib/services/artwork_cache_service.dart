@@ -29,8 +29,7 @@ class ArtworkCacheService {
   static const Duration _connectTimeout = Duration(seconds: 8);
   static const Duration _chunkTimeout = Duration(seconds: 6);
   static const Duration _touchInterval = Duration(minutes: 10);
-  static const String _userAgent =
-      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+  static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
       'AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/96.0.4664.18 Safari/537.36';
 

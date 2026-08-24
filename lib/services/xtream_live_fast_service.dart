@@ -60,7 +60,8 @@ class XtreamLiveFastService {
       if (channels.isEmpty) return null;
       return XtreamLiveCatalogSnapshot(
         channels: List<Channel>.unmodifiable(channels),
-        categories: List<String>.unmodifiable(_stringList(payload['categories'])),
+        categories:
+            List<String>.unmodifiable(_stringList(payload['categories'])),
         savedAt: _dateFromMillis(payload['savedAt']) ?? DateTime.now(),
         fromCache: true,
       );
@@ -74,7 +75,8 @@ class XtreamLiveFastService {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
-    var connection = await XtreamFastCatalogService.instance.connectionForPlaylist(
+    var connection =
+        await XtreamFastCatalogService.instance.connectionForPlaylist(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
@@ -84,7 +86,8 @@ class XtreamLiveFastService {
     } on _XtreamLiveHttpException catch (error) {
       if (error.statusCode != 401 && error.statusCode != 403) rethrow;
       XtreamFastCatalogService.instance.invalidateSession(playlistUrl);
-      connection = await XtreamFastCatalogService.instance.connectionForPlaylist(
+      connection =
+          await XtreamFastCatalogService.instance.connectionForPlaylist(
         playlistUrl,
         forceRefresh: true,
       );
@@ -159,7 +162,8 @@ class XtreamLiveFastService {
 
     final snapshot = XtreamLiveCatalogSnapshot(
       channels: List<Channel>.unmodifiable(channels),
-      categories: List<String>.unmodifiable(_stringList(prepared['categories'])),
+      categories:
+          List<String>.unmodifiable(_stringList(prepared['categories'])),
       savedAt: DateTime.now(),
       fromCache: false,
     );
@@ -280,7 +284,8 @@ Map<String, dynamic> _prepareLiveCatalog(Map<String, String> input) {
     if (id == null || name == null) continue;
 
     final categoryId = _cleanText(item['category_id']);
-    final categoryFallback = _firstText(item, const ['category_name', 'category']);
+    final categoryFallback =
+        _firstText(item, const ['category_name', 'category']);
     final category = categoryId == null
         ? categoryFallback
         : categoryNames[categoryId] ?? categoryFallback;
@@ -292,14 +297,16 @@ Map<String, dynamic> _prepareLiveCatalog(Map<String, String> input) {
       _firstText(item, const ['container_extension', 'extension']),
       fallback: 'ts',
     );
-    final direct = _resolveDirect(streamServer, _cleanText(item['direct_source']));
-    final url = direct ?? _liveUrl(
-      streamServer,
-      username,
-      password,
-      id,
-      extension,
-    );
+    final direct =
+        _resolveDirect(streamServer, _cleanText(item['direct_source']));
+    final url = direct ??
+        _liveUrl(
+          streamServer,
+          username,
+          password,
+          id,
+          extension,
+        );
 
     prepared.add(<String, dynamic>{
       'name': name,
@@ -328,7 +335,8 @@ Map<String, dynamic> _decodeLiveCachePayload(String raw) {
   return Map<String, dynamic>.from(decoded);
 }
 
-String _encodeLiveCachePayload(Map<String, dynamic> payload) => jsonEncode(payload);
+String _encodeLiveCachePayload(Map<String, dynamic> payload) =>
+    jsonEncode(payload);
 
 List<Channel> _channelsFromPrepared(dynamic raw) {
   if (raw is! List) return const <Channel>[];
@@ -376,7 +384,8 @@ String? _firstText(Map<String, dynamic> source, List<String> keys) {
 String? _cleanText(dynamic raw) {
   if (raw == null) return null;
   final value = raw.toString().trim();
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+    return null;
   return value;
 }
 
@@ -390,7 +399,8 @@ String _cleanExtension(String? raw, {required String fallback}) {
 
 String? _resolveDirect(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+    return null;
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
@@ -407,7 +417,8 @@ String _liveUrl(
   String streamId,
   String extension,
 ) {
-  final prefix = base.pathSegments.where((segment) => segment.trim().isNotEmpty);
+  final prefix =
+      base.pathSegments.where((segment) => segment.trim().isNotEmpty);
   return base.replace(
     pathSegments: <String>[
       ...prefix,

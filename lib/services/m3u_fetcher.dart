@@ -86,7 +86,8 @@ class M3uFetcher {
         // cero automáticamente. Es la diferencia clave respecto de V3.7/V3.8.
         throw Exception(e.message);
       } on TimeoutException {
-        lastError = Exception('El servidor tardó demasiado en iniciar la respuesta');
+        lastError =
+            Exception('El servidor tardó demasiado en iniciar la respuesta');
         if (attempt < maxRetries) {
           await _backoff(attempt);
           continue;
@@ -105,7 +106,8 @@ class M3uFetcher {
           continue;
         }
       } on http.ClientException {
-        lastError = Exception('Error HTTP al conectar con el servidor de la lista');
+        lastError =
+            Exception('Error HTTP al conectar con el servidor de la lista');
         if (attempt < maxRetries) {
           await _backoff(attempt);
           continue;

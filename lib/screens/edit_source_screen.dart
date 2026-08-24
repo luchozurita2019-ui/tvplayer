@@ -119,7 +119,8 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
                         child: Text(
                           provider.error!,
                           style: TextStyle(
-                            color: Theme.of(context).colorScheme.onErrorContainer,
+                            color:
+                                Theme.of(context).colorScheme.onErrorContainer,
                           ),
                         ),
                       ),
@@ -139,7 +140,8 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.save_outlined),
-                  label: Text(provider.loading ? 'Guardando…' : 'Guardar cambios'),
+                  label:
+                      Text(provider.loading ? 'Guardando…' : 'Guardar cambios'),
                 ),
               ),
             ],

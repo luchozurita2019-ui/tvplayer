@@ -163,7 +163,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
           SwitchListTile(
             secondary: const Icon(Icons.shield_rounded),
             title: const Text('Activar control parental'),
-            subtitle: const Text('Bloquea categorías y contenido detectado como adulto.'),
+            subtitle: const Text(
+                'Bloquea categorías y contenido detectado como adulto.'),
             value: _parental.enabled,
             onChanged: (value) => unawaited(_parental.setEnabled(value)),
           ),
@@ -181,7 +182,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
           ListTile(
             leading: const Icon(Icons.timer_outlined),
             title: const Text('Tiempo de desbloqueo'),
-            subtitle: const Text('Después de ese tiempo, TV FULL vuelve a pedir el PIN.'),
+            subtitle: const Text(
+                'Después de ese tiempo, TV FULL vuelve a pedir el PIN.'),
             trailing: DropdownButton<int>(
               value: _parental.unlockMinutes,
               items: const [
@@ -304,7 +306,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
     final first = await _askPin('Crear PIN', 'Ingresá 4 números');
     if (!mounted || first == null) return;
     if (!_validPin(first)) return;
-    final second = await _askPin('Confirmar PIN', 'Repetí los mismos 4 números');
+    final second =
+        await _askPin('Confirmar PIN', 'Repetí los mismos 4 números');
     if (!mounted || second == null) return;
     if (first != second) {
       _message('Los PIN no coinciden.');
@@ -324,7 +327,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
     final next = await _askPin('Nuevo PIN', 'Ingresá 4 números');
     if (!mounted || next == null) return;
     if (!_validPin(next)) return;
-    final confirmation = await _askPin('Confirmar nuevo PIN', 'Repetí el nuevo PIN');
+    final confirmation =
+        await _askPin('Confirmar nuevo PIN', 'Repetí el nuevo PIN');
     if (!mounted || confirmation == null) return;
     if (next != confirmation) {
       _message('Los PIN no coinciden.');
@@ -335,7 +339,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
   }
 
   Future<void> _unlockTemporarily() async {
-    final pin = await _askPin('Desbloquear contenido', 'Ingresá tu PIN parental');
+    final pin =
+        await _askPin('Desbloquear contenido', 'Ingresá tu PIN parental');
     if (!mounted || pin == null) return;
     final ok = await _parental.unlock(pin);
     if (!mounted) return;
@@ -374,7 +379,8 @@ class _ParentalControlScreenState extends State<ParentalControlScreen> {
             child: const Text('Cancelar'),
           ),
           FilledButton(
-            onPressed: () => Navigator.pop(dialogContext, controller.text.trim()),
+            onPressed: () =>
+                Navigator.pop(dialogContext, controller.text.trim()),
             child: const Text('Aceptar'),
           ),
         ],
