@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/iptv_provider.dart';
+import '../services/remote_access_guard.dart';
 import 'source_content_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -13,13 +14,14 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> {
+class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Timer? _syncTimer;
   int _tick = 0;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<IptvProvider>();
       unawaited(provider.init());
@@ -28,7 +30,8 @@ class _HomeScreenState extends State<HomeScreen> {
         final current = context.read<IptvProvider>();
         if (current.remoteSyncing) return;
         _tick++;
-        // Sin listas: respuesta rápida del panel. Con listas: polling liviano.
+        // Sin listas: respuesta rápida del panel. Con listas: validación cada
+        // ~30 s sin volver a descargar catálogos que ya están guardados.
         if (current.playlists.isEmpty || _tick % 10 == 0) {
           unawaited(current.syncRemoteServices());
         }
@@ -37,7 +40,15 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !mounted) return;
+    final provider = context.read<IptvProvider>();
+    if (!provider.remoteSyncing) unawaited(provider.syncRemoteServices());
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _syncTimer?.cancel();
     super.dispose();
   }
@@ -47,6 +58,16 @@ class _HomeScreenState extends State<HomeScreen> {
     final provider = context.watch<IptvProvider>();
     if (!provider.initialized) {
       return const _StartupView(message: 'Iniciando TV FULL PRO…');
+    }
+
+    final blocked = remoteAccessBlockMessage(provider);
+    if (blocked != null) {
+      return _StartupView(
+        message: blocked,
+        deviceCode: provider.remoteDeviceCode,
+        busy: false,
+        blocked: true,
+      );
     }
 
     final selected = provider.selectedPlaylist;
@@ -67,11 +88,13 @@ class _StartupView extends StatelessWidget {
   final String message;
   final String? deviceCode;
   final bool busy;
+  final bool blocked;
 
   const _StartupView({
     required this.message,
     this.deviceCode,
     this.busy = true,
+    this.blocked = false,
   });
 
   @override
@@ -87,6 +110,12 @@ class _StartupView extends StatelessWidget {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  Icon(
+                    blocked ? Icons.lock_outline_rounded : Icons.live_tv_rounded,
+                    size: blocked ? 48 : 42,
+                    color: blocked ? Colors.white70 : const Color(0xFF58B9FF),
+                  ),
+                  const SizedBox(height: 14),
                   const Text(
                     'TV FULL PRO',
                     style: TextStyle(
@@ -101,6 +130,14 @@ class _StartupView extends StatelessWidget {
                     textAlign: TextAlign.center,
                     style: const TextStyle(color: Colors.white70, fontSize: 18),
                   ),
+                  if (blocked) ...[
+                    const SizedBox(height: 10),
+                    const Text(
+                      'El contenido guardado se conserva y se habilitará de nuevo al reactivar el servicio.',
+                      textAlign: TextAlign.center,
+                      style: TextStyle(color: Colors.white38, fontSize: 13),
+                    ),
+                  ],
                   if (deviceCode != null && deviceCode!.trim().isNotEmpty) ...[
                     const SizedBox(height: 26),
                     const Text(
