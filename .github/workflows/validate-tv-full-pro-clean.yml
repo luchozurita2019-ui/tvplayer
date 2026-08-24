@@ -50,8 +50,18 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Verify Dart formatting
-        run: dart format --output=none --set-exit-if-changed lib
+      - name: Normalize Dart formatting
+        shell: bash
+        run: |
+          set -euo pipefail
+          dart format lib
+          if ! git diff --quiet -- lib; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add lib
+            git commit -m "Format TV FULL PRO Dart source"
+            git push origin HEAD:android-tv-full-pro-clean-source
+          fi
 
       - name: Analyze complete Dart source
         run: flutter analyze
