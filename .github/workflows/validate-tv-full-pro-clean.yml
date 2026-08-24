@@ -46,6 +46,10 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
+      - name: Fix compact movie metadata color
+        shell: bash
+        run: sed -i 's/Colors\.white46/Color(0x75FFFFFF)/g' lib/screens/xtream_movies_screen.dart
+
       - name: Format complete Dart source
         run: dart format lib
 
