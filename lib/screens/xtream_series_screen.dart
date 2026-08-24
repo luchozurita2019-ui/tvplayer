@@ -170,7 +170,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: ListTile(
-                    autofocus: index == 0,
+                    autofocus: false,
                     selected: selected,
                     minTileHeight: 50,
                     shape: RoundedRectangleBorder(
@@ -449,8 +449,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                                   vertical: 3,
                                 ),
                                 child: ListTile(
-                                  autofocus:
-                                      season == widget.model.seasons.keys.first,
+                                  autofocus: false,
                                   selected: selected,
                                   selectedTileColor: const Color(0xFF1677FF)
                                       .withValues(alpha: .18),
@@ -874,9 +873,8 @@ _M3uEpisode _parseM3uEpisode(Channel channel) {
   );
 }
 
-String _trimSeriesSeparators(String value) => value
-    .replaceAll(RegExp(r'^[\s\-_:|.]+|[\s\-_:|.]+$'), '')
-    .trim();
+String _trimSeriesSeparators(String value) =>
+    value.replaceAll(RegExp(r'^[\s\-_:|.]+|[\s\-_:|.]+$'), '').trim();
 
 String _normalizeSeriesKey(String value) => value
     .trim()

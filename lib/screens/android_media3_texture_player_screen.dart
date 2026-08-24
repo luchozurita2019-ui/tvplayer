@@ -314,9 +314,8 @@ class _AndroidMedia3TexturePlayerScreenState
       }
       const rowExtent = 58.0;
       final max = _channelScrollController.position.maxScrollExtent;
-      final target = (_index * rowExtent - rowExtent * 2)
-          .clamp(0.0, max)
-          .toDouble();
+      final target =
+          (_index * rowExtent - rowExtent * 2).clamp(0.0, max).toDouble();
       _channelScrollController.jumpTo(target);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
@@ -357,8 +356,8 @@ class _AndroidMedia3TexturePlayerScreenState
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    final isBack = key == LogicalKeyboardKey.goBack ||
-        key == LogicalKeyboardKey.escape;
+    final isBack =
+        key == LogicalKeyboardKey.goBack || key == LogicalKeyboardKey.escape;
 
     if (_channelListVisible) {
       if (isBack) {

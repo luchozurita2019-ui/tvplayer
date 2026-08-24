@@ -211,8 +211,7 @@ class XtreamVodService {
       String? pick(List<String> keys) =>
           _firstText(info, keys) ?? _firstText(movieData, keys);
       String? pickMetadata(List<String> keys) =>
-          _firstMetadataText(info, keys) ??
-          _firstMetadataText(movieData, keys);
+          _firstMetadataText(info, keys) ?? _firstMetadataText(movieData, keys);
 
       final extension = _cleanExtension(
         _firstText(movieData, const ['container_extension', 'extension']) ??
@@ -263,7 +262,12 @@ class XtreamVodService {
           const ['audio_language', 'audio_languages', 'audio_info', 'audio'],
         ),
         translation: pickMetadata(
-          const ['translation', 'translation_type', 'audio_translation', 'dubbing'],
+          const [
+            'translation',
+            'translation_type',
+            'audio_translation',
+            'dubbing'
+          ],
         ),
         backdrop: backdrop,
         trailerUrl: _playableTrailer(

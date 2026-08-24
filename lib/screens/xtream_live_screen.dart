@@ -222,7 +222,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: ListTile(
-                    autofocus: index == 0,
+                    autofocus: false,
                     selected: selected,
                     minTileHeight: 50,
                     shape: RoundedRectangleBorder(

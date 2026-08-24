@@ -173,7 +173,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                 return Padding(
                   padding: const EdgeInsets.symmetric(vertical: 3),
                   child: ListTile(
-                    autofocus: index == 0,
+                    autofocus: false,
                     selected: selected,
                     minTileHeight: 50,
                     shape: RoundedRectangleBorder(
@@ -419,7 +419,7 @@ class _MovieDetailScreen extends StatelessWidget {
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Colors.white46,
+                        color: Color(0x75FFFFFF),
                         fontSize: 13,
                         fontWeight: FontWeight.w600,
                       ),

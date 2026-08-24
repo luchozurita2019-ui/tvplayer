@@ -215,6 +215,14 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    final isBack =
+        key == LogicalKeyboardKey.goBack || key == LogicalKeyboardKey.escape;
+    if (isBack && _overlayVisible && _error == null) {
+      _overlayTimer?.cancel();
+      setState(() => _overlayVisible = false);
+      _rootFocus.requestFocus();
+      return KeyEventResult.handled;
+    }
     if (!_overlayVisible) {
       if (key == LogicalKeyboardKey.select ||
           key == LogicalKeyboardKey.enter ||
