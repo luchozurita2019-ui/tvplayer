@@ -107,7 +107,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                     prepare(url, headers, userAgent, position)
                     result.success(null)
                 }
-                "play" -> { player?.play(); result.success(null) }
+                "play" -> { player?.play(); applyKeepScreenOn(); result.success(null) }
                 "pause" -> { player?.pause(); result.success(null) }
                 "seekTo" -> {
                     val raw = call.argument<Number>("position")?.toLong() ?: 0L
@@ -155,6 +155,21 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         }
     }
 
+    private fun applyKeepScreenOn() {
+        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        window.decorView.keepScreenOn = true
+    }
+
+    private fun clearKeepScreenOn() {
+        window.decorView.keepScreenOn = false
+        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        if (player != null) applyKeepScreenOn()
+    }
+
     private fun initializePlayer(
         flutterEngine: FlutterEngine,
         minBuffer: Int,
@@ -163,7 +178,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         rebuffer: Int,
     ): Long {
         disposePlayer()
-        window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        applyKeepScreenOn()
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(minBuffer, maxBuffer, playBuffer, rebuffer)
             .build()
@@ -198,6 +213,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         positionMs: Long,
     ) {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
+        applyKeepScreenOn()
         currentUrl = url
         endedRecoveries = 0
         exo.stop()
@@ -279,8 +295,12 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         when (playbackState) {
-            Player.STATE_BUFFERING -> eventSink?.success(mapOf("eventType" to "bufferingStart"))
+            Player.STATE_BUFFERING -> {
+                applyKeepScreenOn()
+                eventSink?.success(mapOf("eventType" to "bufferingStart"))
+            }
             Player.STATE_READY -> {
+                applyKeepScreenOn()
                 endedRecoveries = 0
                 eventSink?.success(mapOf("eventType" to "prepared"))
                 eventSink?.success(mapOf("eventType" to "bufferingEnd"))
@@ -365,7 +385,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         textureEntry = null
         currentUrl = null
         endedRecoveries = 0
-        window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+        clearKeepScreenOn()
     }
 
     override fun onDestroy() {
