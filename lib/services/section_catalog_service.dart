@@ -1,5 +1,3 @@
-import 'dart:async';
-
 import 'package:flutter/foundation.dart';
 
 import '../models/channel.dart';
@@ -140,7 +138,7 @@ class SectionCatalogService {
     }
 
     final result = <TvSectionKind, SectionCatalogSnapshot>{};
-    _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
+    final writes = <Future<void>>[];
 
     for (final kind in TvSectionKind.values) {
       final channels = List<Channel>.unmodifiable(buckets[kind]!);
@@ -151,13 +149,18 @@ class SectionCatalogService {
         fromCache: false,
       );
       result[kind] = snapshot;
-      unawaited(
+      writes.add(
         _store.saveSnapshot(playlist.id, 'm3u_${kind.name}', {
           'categories': categories,
           'items': channels.map((e) => e.toJson()).toList(growable: false),
         }),
       );
     }
+
+    // La primera carga sólo se considera terminada cuando LIVE/Películas/Series
+    // quedaron persistidos. Así, salir y volver nunca depende de otra descarga.
+    await Future.wait(writes);
+    _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
     return result;
   }
 
@@ -165,36 +168,13 @@ class SectionCatalogService {
     final url = channel.url.toLowerCase();
     final uri = Uri.tryParse(channel.url);
     final path = (uri?.path ?? url).toLowerCase();
-    final group = _normalize(channel.group ?? '');
 
+    // No reclasificamos por palabras del group-title. El proveedor puede llamar
+    // "Series 24/7", "Novelas" o "Cine" a canales lineales reales.
     if (path.contains('/series/')) return TvSectionKind.series;
     if (path.contains('/movie/')) return TvSectionKind.movies;
 
-    // En M3U el group-title es estructura explícita del proveedor. Hot Player
-    // conserva esa estructura; TV FULL PRO la respeta en vez de forzar .ts=LIVE.
-    if (_containsAny(group, const [
-      'series',
-      'serie',
-      'temporada',
-      'episodios',
-      'episodio',
-      'novelas',
-    ])) {
-      return TvSectionKind.series;
-    }
-    if (_containsAny(group, const [
-      'peliculas',
-      'pelicula',
-      'movies',
-      'movie',
-      'vod',
-      'cine',
-      'films',
-      'film',
-    ])) {
-      return TvSectionKind.movies;
-    }
-
+    // Sólo una URL de archivo VOD inequívoca mueve una entrada M3U a Películas.
     if (_hasVideoFile(path)) return TvSectionKind.movies;
     return TvSectionKind.live;
   }
@@ -220,22 +200,4 @@ class SectionCatalogService {
         '.wmv',
         '.flv',
       ].any(path.endsWith);
-
-  bool _containsAny(String value, List<String> terms) {
-    for (final term in terms) {
-      if (value.contains(term)) return true;
-    }
-    return false;
-  }
-
-  String _normalize(String value) => value
-      .trim()
-      .toLowerCase()
-      .replaceAll('á', 'a')
-      .replaceAll('é', 'e')
-      .replaceAll('í', 'i')
-      .replaceAll('ó', 'o')
-      .replaceAll('ú', 'u')
-      .replaceAll('ü', 'u')
-      .replaceAll('ñ', 'n');
 }
