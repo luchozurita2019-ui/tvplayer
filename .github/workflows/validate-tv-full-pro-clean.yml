@@ -1,3 +1,4 @@
+# validate direct clean source
 name: Validate TV FULL PRO Clean
 
 on:
@@ -48,8 +49,8 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Parse Dart formatting
-        run: dart format --output=none lib
+      - name: Verify Dart formatting
+        run: dart format --output=none --set-exit-if-changed lib
 
       - name: Analyze complete Dart source
         run: flutter analyze
