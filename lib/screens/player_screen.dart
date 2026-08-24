@@ -37,10 +37,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    // Al comenzar reproducción, cualquier petición Xtream de navegación que
-    // siga activa cede inmediatamente la red. Media3 LIVE y MediaKit VOD usan
-    // sus propios clientes, por lo que este reinicio no corta el stream.
+    // Al comenzar reproducción, toda navegación de catálogo cede la red.
+    // Media3 LIVE y MediaKit VOD usan sus propios clientes, por lo que cancelar
+    // Xtream/M3U/artwork no corta el stream que se está abriendo.
     XtreamHttpClient.cancelBrowsingRequests();
+    M3uFetcher.cancelBrowsingRequests();
     ArtworkCacheService.instance.pauseForPlayback();
   }
 
