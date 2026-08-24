@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 
 import '../models/channel.dart';
@@ -259,7 +260,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(18, 0, 24, 24),
-                  cacheExtent: 80,
+                  scrollCacheExtent: const ScrollCacheExtent.pixels(80),
                   itemCount: visible.length,
                   itemBuilder: (context, index) {
                     final channel = visible[index];

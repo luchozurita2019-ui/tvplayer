@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
@@ -449,7 +450,7 @@ class _AndroidMedia3TexturePlayerScreenState
                   Expanded(
                     child: ListView.builder(
                       padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
-                      cacheExtent: 70,
+                      scrollCacheExtent: const ScrollCacheExtent.pixels(70),
                       itemCount: widget.playlist.length,
                       itemBuilder: (context, index) {
                         final item = widget.playlist[index];

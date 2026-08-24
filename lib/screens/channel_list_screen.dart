@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -1103,7 +1104,7 @@ class _CatalogGrid extends StatelessWidget {
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(28, 8, 28, 34),
-          cacheExtent: 80,
+          scrollCacheExtent: const ScrollCacheExtent.pixels(80),
           gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
             crossAxisCount: columns,
             crossAxisSpacing: 18,
