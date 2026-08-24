@@ -1,0 +1,138 @@
+name: Cleanup TV FULL PRO Source
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/workflows/cleanup-tv-full-pro-source.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  cleanup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout clean source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply source cleanup
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          def replace(path, old, new, expected=None):
+              p = Path(path)
+              text = p.read_text()
+              count = text.count(old)
+              if expected is not None and count != expected:
+                  raise SystemExit(f'{path}: expected {expected} x {old!r}, got {count}')
+              if count:
+                  p.write_text(text.replace(old, new))
+
+          # Flutter opacity constants that do not exist as Colors getters.
+          replace('lib/screens/xtream_series_screen.dart', 'Colors.white65', 'const Color(0xA6FFFFFF)', expected=1)
+          replace('lib/screens/xtream_series_screen.dart', 'Colors.white45', 'const Color(0x73FFFFFF)', expected=2)
+
+          # Flutter 3.47 renamed the scroll cache parameter.
+          for path in [
+              'lib/screens/android_media3_texture_player_screen.dart',
+              'lib/screens/channel_list_screen.dart',
+              'lib/screens/xtream_live_screen.dart',
+              'lib/screens/xtream_movies_screen.dart',
+              'lib/screens/xtream_series_screen.dart',
+          ]:
+              replace(path, 'cacheExtent:', 'scrollCacheExtent:')
+
+          # LIVE player: keep only state that is actually rendered/used.
+          p = Path('lib/screens/android_media3_texture_player_screen.dart')
+          text = p.read_text()
+          text = text.replace("import 'package:flutter/foundation.dart';\n", '')
+          for line in [
+              '  bool _ready = false;\n',
+              '  String? _technicalError;\n',
+              '        _ready = false;\n',
+              '          _ready = true;\n',
+              '        _technicalError = null;\n',
+              '          _technicalError = null;\n',
+              '      _ready = false;\n',
+              '      _technicalError = technical;\n',
+          ]:
+              text = text.replace(line, '')
+          p.write_text(text)
+
+          # VOD player: remove an unused startup marker; playback state comes
+          # from position/playing/buffering streams.
+          p = Path('lib/screens/tv_full_vod_player_screen.dart')
+          text = p.read_text()
+          for line in [
+              '  bool _started = false;\n',
+              '      if (value > Duration.zero) _started = true;\n',
+              '        _started = false;\n',
+          ]:
+              text = text.replace(line, '')
+          p.write_text(text)
+
+          # Fast Xtream catalog: preserve provider order and remove legacy dead
+          # helpers from the pre-clean architecture.
+          p = Path('lib/services/xtream_fast_catalog_service.dart')
+          text = p.read_text()
+          text = text.replace(
+              'final categoryList = foundCategories.toList()..sort();',
+              'final categoryList = foundCategories.toList(growable: false);',
+          )
+          text = text.replace(
+              'final result = categories.toList()..sort();',
+              'final result = categories.toList(growable: false);',
+          )
+
+          def remove_block(text, start_marker, end_marker):
+              start = text.find(start_marker)
+              if start < 0:
+                  raise SystemExit(f'missing block start: {start_marker}')
+              end = text.find(end_marker, start)
+              if end < 0:
+                  raise SystemExit(f'missing block end: {end_marker}')
+              return text[:start] + text[end:]
+
+          text = remove_block(
+              text,
+              '  Future<void> _writeSeriesCache(',
+              '  Future<void> _writeCache(',
+          )
+          text = remove_block(
+              text,
+              'Map<String, dynamic> _seriesToMap(',
+              'XtreamConnectionResult? _provisionalConnectionFromPlaylistUrl(',
+          )
+          text = remove_block(
+              text,
+              'List<String> _stringListDynamic(',
+              'String? _firstText(',
+          )
+          p.write_text(text)
+          PY
+
+      - name: Format final source
+        run: dart format lib
+
+      - name: Commit cleaned source
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib
+          git diff --cached --check
+          git commit -m "Clean and format TV FULL PRO source"
+          git push origin HEAD:android-tv-full-pro-clean-source
