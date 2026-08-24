@@ -180,9 +180,8 @@ class IptvProvider extends ChangeNotifier {
     String id,
     Playlist? previous,
   ) {
-    final name = service.name.trim().isEmpty
-        ? 'TV FULL PRO'
-        : service.name.trim();
+    final name =
+        service.name.trim().isEmpty ? 'TV FULL PRO' : service.name.trim();
     if (service.type == 'm3u') {
       final url = service.url?.trim() ?? '';
       if (url.isEmpty) throw Exception('$name no tiene URL M3U.');

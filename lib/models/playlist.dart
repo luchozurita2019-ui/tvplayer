@@ -38,14 +38,14 @@ class Playlist {
   }
 
   Map<String, dynamic> toJson() => {
-    'id': id,
-    'name': name,
-    'source': source,
-    'isRemote': isRemote,
-    'channels': channels.map((c) => c.toJson()).toList(),
-    'lastUpdated': lastUpdated.toIso8601String(),
-    'sourceType': sourceType.name,
-  };
+        'id': id,
+        'name': name,
+        'source': source,
+        'isRemote': isRemote,
+        'channels': channels.map((c) => c.toJson()).toList(),
+        'lastUpdated': lastUpdated.toIso8601String(),
+        'sourceType': sourceType.name,
+      };
 
   factory Playlist.fromJson(Map<String, dynamic> json) {
     final rawSourceType = json['sourceType'] as String?;
@@ -74,13 +74,14 @@ class Playlist {
     List<Channel>? channels,
     DateTime? lastUpdated,
     PlaylistSourceType? sourceType,
-  }) => Playlist(
-    id: id,
-    name: name ?? this.name,
-    source: source ?? this.source,
-    isRemote: isRemote ?? this.isRemote,
-    channels: channels ?? this.channels,
-    lastUpdated: lastUpdated ?? this.lastUpdated,
-    sourceType: sourceType ?? this.sourceType,
-  );
+  }) =>
+      Playlist(
+        id: id,
+        name: name ?? this.name,
+        source: source ?? this.source,
+        isRemote: isRemote ?? this.isRemote,
+        channels: channels ?? this.channels,
+        lastUpdated: lastUpdated ?? this.lastUpdated,
+        sourceType: sourceType ?? this.sourceType,
+      );
 }

@@ -74,13 +74,17 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
             children: [
               Text(
                 'Conectá tu proveedor',
-                style: Theme.of(context).textTheme.headlineMedium
+                style: Theme.of(context)
+                    .textTheme
+                    .headlineMedium
                     ?.copyWith(fontWeight: FontWeight.w900),
               ),
               const SizedBox(height: 6),
               Text(
                 'Pegá el enlace que te dio tu proveedor. En M3U/M3U8, TV FULL detecta automáticamente si el enlace pertenece a Xtream. También podés elegir el tipo manualmente.',
-                style: Theme.of(context).textTheme.bodyLarge
+                style: Theme.of(context)
+                    .textTheme
+                    .bodyLarge
                     ?.copyWith(color: Colors.white70),
               ),
               const SizedBox(height: 24),
@@ -138,9 +142,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         TextField(
           controller: _nameController,
           focusNode: _nameFocus,
-          textInputAction: _androidTvBuild
-              ? TextInputAction.next
-              : TextInputAction.done,
+          textInputAction:
+              _androidTvBuild ? TextInputAction.next : TextInputAction.done,
           onSubmitted: (_) {
             if (_androidTvBuild) _focusFirstProviderField();
           },
@@ -179,7 +182,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         ),
         const SizedBox(height: 14),
         const _InfoBox(
-          text: 'Detección automática: si el enlace get.php contiene usuario y contraseña y player_api.php valida, TV FULL lo guarda como Xtream nativo. Si no, lo carga como M3U/M3U8 normal.',
+          text:
+              'Detección automática: si el enlace get.php contiene usuario y contraseña y player_api.php valida, TV FULL lo guarda como Xtream nativo. Si no, lo carga como M3U/M3U8 normal.',
         ),
       ],
     );
@@ -192,9 +196,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
           controller: _serverController,
           focusNode: _serverFocus,
           keyboardType: TextInputType.url,
-          textInputAction: _androidTvBuild
-              ? TextInputAction.next
-              : TextInputAction.done,
+          textInputAction:
+              _androidTvBuild ? TextInputAction.next : TextInputAction.done,
           onSubmitted: (_) {
             if (_androidTvBuild) _usernameFocus.requestFocus();
           },
@@ -253,7 +256,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         ),
         const SizedBox(height: 14),
         const _InfoBox(
-          text: 'TV FULL valida primero las credenciales con player_api.php y después carga el catálogo del proveedor.',
+          text:
+              'TV FULL valida primero las credenciales con player_api.php y después carga el catálogo del proveedor.',
         ),
       ],
     );
@@ -266,9 +270,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
           controller: _portalController,
           focusNode: _portalFocus,
           keyboardType: TextInputType.url,
-          textInputAction: _androidTvBuild
-              ? TextInputAction.next
-              : TextInputAction.done,
+          textInputAction:
+              _androidTvBuild ? TextInputAction.next : TextInputAction.done,
           onSubmitted: (_) {
             if (_androidTvBuild) _macFocus.requestFocus();
           },
@@ -295,7 +298,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         ),
         const SizedBox(height: 14),
         const _InfoBox(
-          text: 'La interfaz para Portal Stalker ya queda preparada. La conexión Stalker real se incorporará en la siguiente etapa para poder probar handshake, token y variantes de portal sin afectar M3U/Xtream.',
+          text:
+              'La interfaz para Portal Stalker ya queda preparada. La conexión Stalker real se incorporará en la siguiente etapa para poder probar handshake, token y variantes de portal sin afectar M3U/Xtream.',
         ),
       ],
     );
@@ -415,9 +419,8 @@ class _SourceSelector extends StatelessWidget {
                         style: TextStyle(
                           color: active ? Colors.white : Colors.white70,
                           fontSize: 16,
-                          fontWeight: active
-                              ? FontWeight.w800
-                              : FontWeight.w600,
+                          fontWeight:
+                              active ? FontWeight.w800 : FontWeight.w600,
                         ),
                       ),
                     ),
@@ -451,7 +454,9 @@ class _TitleRow extends StatelessWidget {
         const SizedBox(width: 12),
         Text(
           type.label,
-          style: Theme.of(context).textTheme.titleLarge
+          style: Theme.of(context)
+              .textTheme
+              .titleLarge
               ?.copyWith(fontWeight: FontWeight.w900),
         ),
       ],

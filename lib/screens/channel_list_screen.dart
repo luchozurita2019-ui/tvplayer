@@ -20,25 +20,25 @@ enum _CatalogMode { live, movies, series, radios }
 
 extension on _CatalogMode {
   String get title => switch (this) {
-    _CatalogMode.live => 'TV en vivo',
-    _CatalogMode.movies => 'Películas',
-    _CatalogMode.series => 'Series',
-    _CatalogMode.radios => 'Radios',
-  };
+        _CatalogMode.live => 'TV en vivo',
+        _CatalogMode.movies => 'Películas',
+        _CatalogMode.series => 'Series',
+        _CatalogMode.radios => 'Radios',
+      };
 
   String get itemLabel => switch (this) {
-    _CatalogMode.live => 'canales',
-    _CatalogMode.movies => 'películas',
-    _CatalogMode.series => 'series',
-    _CatalogMode.radios => 'radios',
-  };
+        _CatalogMode.live => 'canales',
+        _CatalogMode.movies => 'películas',
+        _CatalogMode.series => 'series',
+        _CatalogMode.radios => 'radios',
+      };
 
   IconData get icon => switch (this) {
-    _CatalogMode.live => Icons.live_tv_rounded,
-    _CatalogMode.movies => Icons.movie_creation_rounded,
-    _CatalogMode.series => Icons.video_library_rounded,
-    _CatalogMode.radios => Icons.radio_rounded,
-  };
+        _CatalogMode.live => Icons.live_tv_rounded,
+        _CatalogMode.movies => Icons.movie_creation_rounded,
+        _CatalogMode.series => Icons.video_library_rounded,
+        _CatalogMode.radios => Icons.radio_rounded,
+      };
 
   bool get usesPoster =>
       this == _CatalogMode.movies || this == _CatalogMode.series;
@@ -98,9 +98,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     final width =
         prefs.getDouble(_sidebarWidthKey) ?? (_androidTvBuild ? 260 : 320);
     setState(() {
-      _sidebarWidth = width
-          .clamp(_sidebarMinWidth, _sidebarMaxWidth)
-          .toDouble();
+      _sidebarWidth =
+          width.clamp(_sidebarMinWidth, _sidebarMaxWidth).toDouble();
       _sidebarCollapsed = prefs.getBool(_sidebarCollapsedKey) ?? false;
     });
   }
@@ -167,9 +166,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     final channels = _filteredChannels(playlist);
     final mode = _mode;
     final visibleGroups = _parental.visibleGroups(_groups);
-    final visibleTotal = playlist.channels
-        .where(_parental.canShowChannel)
-        .length;
+    final visibleTotal =
+        playlist.channels.where(_parental.canShowChannel).length;
 
     return Scaffold(
       appBar: AppBar(
@@ -180,7 +178,9 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               width: 42,
               height: 42,
               decoration: BoxDecoration(
-                color: Theme.of(context).colorScheme.primary
+                color: Theme.of(context)
+                    .colorScheme
+                    .primary
                     .withValues(alpha: 0.14),
                 borderRadius: BorderRadius.circular(12),
               ),
@@ -226,8 +226,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               onPressed: provider.loading
                   ? null
                   : () => context.read<IptvProvider>().refreshPlaylist(
-                      playlist.id,
-                    ),
+                        playlist.id,
+                      ),
             ),
           const SizedBox(width: 8),
         ],
@@ -360,20 +360,17 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
       return playlist.channels;
     }
 
-    return playlist.channels
-        .where((channel) {
-          if (!_parental.canShowChannel(channel)) return false;
-          if (_selectedGroup != null &&
-              channel.group?.trim() != _selectedGroup) {
-            return false;
-          }
-          if (normalized.isEmpty) return true;
+    return playlist.channels.where((channel) {
+      if (!_parental.canShowChannel(channel)) return false;
+      if (_selectedGroup != null && channel.group?.trim() != _selectedGroup) {
+        return false;
+      }
+      if (normalized.isEmpty) return true;
 
-          final name = channel.name.toLowerCase();
-          final group = channel.group?.toLowerCase() ?? '';
-          return name.contains(normalized) || group.contains(normalized);
-        })
-        .toList(growable: false);
+      final name = channel.name.toLowerCase();
+      final group = channel.group?.toLowerCase() ?? '';
+      return name.contains(normalized) || group.contains(normalized);
+    }).toList(growable: false);
   }
 
   Future<void> _openChannel(
@@ -454,8 +451,10 @@ class _TvCatalogLayout extends StatelessWidget {
                 padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 2),
                 child: Material(
                   color: selected
-                      ? Theme.of(context).colorScheme.primary
-                            .withValues(alpha: .22)
+                      ? Theme.of(context)
+                          .colorScheme
+                          .primary
+                          .withValues(alpha: .22)
                       : Colors.transparent,
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
@@ -473,9 +472,8 @@ class _TvCatalogLayout extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
                           fontSize: 14,
-                          fontWeight: selected
-                              ? FontWeight.w900
-                              : FontWeight.w600,
+                          fontWeight:
+                              selected ? FontWeight.w900 : FontWeight.w600,
                         ),
                       ),
                     ),
@@ -556,7 +554,9 @@ class _TvCatalogLayout extends StatelessWidget {
                                   width: 46,
                                   height: 46,
                                   decoration: BoxDecoration(
-                                    color: Theme.of(context).colorScheme.primary
+                                    color: Theme.of(context)
+                                        .colorScheme
+                                        .primary
                                         .withValues(alpha: .14),
                                     borderRadius: BorderRadius.circular(10),
                                   ),
@@ -668,9 +668,8 @@ class _DesktopCatalogLayout extends StatelessWidget {
             onHorizontalDragUpdate: sidebarCollapsed
                 ? null
                 : (details) => onSidebarResize(details.delta.dx),
-            onHorizontalDragEnd: sidebarCollapsed
-                ? null
-                : (_) => onSidebarResizeEnd(),
+            onHorizontalDragEnd:
+                sidebarCollapsed ? null : (_) => onSidebarResizeEnd(),
             child: Container(
               width: 9,
               alignment: Alignment.center,
@@ -737,14 +736,16 @@ class _CatalogToolbar extends StatelessWidget {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.headlineSmall?.copyWith(
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: 0.5,
-                  ),
+                        fontWeight: FontWeight.w900,
+                        letterSpacing: 0.5,
+                      ),
                 ),
                 const SizedBox(height: 4),
                 Text(
                   '$visibleCount ${mode.itemLabel}',
-                  style: Theme.of(context).textTheme.bodyMedium
+                  style: Theme.of(context)
+                      .textTheme
+                      .bodyMedium
                       ?.copyWith(color: Colors.white60),
                 ),
               ],
@@ -758,9 +759,8 @@ class _CatalogToolbar extends StatelessWidget {
                 hintText: 'Buscar en ${mode.title.toLowerCase()}…',
                 prefixIcon: const Icon(Icons.search_rounded),
                 filled: true,
-                fillColor: Theme.of(context)
-                    .colorScheme
-                    .surfaceContainerHighest,
+                fillColor:
+                    Theme.of(context).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
                   borderRadius: BorderRadius.circular(16),
                   borderSide: BorderSide.none,
@@ -819,9 +819,8 @@ class _CategorySidebar extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Column(
-          crossAxisAlignment: collapsed
-              ? CrossAxisAlignment.center
-              : CrossAxisAlignment.start,
+          crossAxisAlignment:
+              collapsed ? CrossAxisAlignment.center : CrossAxisAlignment.start,
           children: [
             Padding(
               padding: EdgeInsets.fromLTRB(
@@ -847,7 +846,9 @@ class _CategorySidebar extends StatelessWidget {
                         mode.title,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.titleMedium
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
                             ?.copyWith(fontWeight: FontWeight.w900),
                       ),
                     ),
@@ -878,10 +879,10 @@ class _CategorySidebar extends StatelessWidget {
                       child: Text(
                         'CATEGORÍAS',
                         style: Theme.of(context).textTheme.labelLarge?.copyWith(
-                          color: Colors.white54,
-                          fontWeight: FontWeight.w800,
-                          letterSpacing: 1.1,
-                        ),
+                              color: Colors.white54,
+                              fontWeight: FontWeight.w800,
+                              letterSpacing: 1.1,
+                            ),
                       ),
                     ),
                     const Tooltip(
@@ -909,11 +910,9 @@ class _CategorySidebar extends StatelessWidget {
                   final group = index == 0 ? null : groups[index - 1];
                   final label = group ?? 'Todos';
                   final selected = group == selectedGroup;
-                  final count = group == null
-                      ? totalCount
-                      : (groupCounts[group] ?? 0);
-                  final locked =
-                      group != null &&
+                  final count =
+                      group == null ? totalCount : (groupCounts[group] ?? 0);
+                  final locked = group != null &&
                       parentalLocked &&
                       isProtectedGroup(group);
 
@@ -926,8 +925,10 @@ class _CategorySidebar extends StatelessWidget {
                             : '$label · $count',
                         child: Material(
                           color: selected
-                              ? Theme.of(context).colorScheme.primary
-                                    .withValues(alpha: 0.20)
+                              ? Theme.of(context)
+                                  .colorScheme
+                                  .primary
+                                  .withValues(alpha: 0.20)
                               : Colors.transparent,
                           borderRadius: BorderRadius.circular(14),
                           child: InkWell(
@@ -977,7 +978,9 @@ class _CategorySidebar extends StatelessWidget {
                         shape: RoundedRectangleBorder(
                           borderRadius: BorderRadius.circular(14),
                         ),
-                        selectedTileColor: Theme.of(context).colorScheme.primary
+                        selectedTileColor: Theme.of(context)
+                            .colorScheme
+                            .primary
                             .withValues(alpha: 0.20),
                         leading: Icon(
                           group == null
@@ -993,9 +996,8 @@ class _CategorySidebar extends StatelessWidget {
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
-                            fontWeight: selected
-                                ? FontWeight.w800
-                                : FontWeight.w600,
+                            fontWeight:
+                                selected ? FontWeight.w800 : FontWeight.w600,
                           ),
                         ),
                         trailing: Row(
@@ -1077,27 +1079,27 @@ class _CatalogGrid extends StatelessWidget {
         final width = constraints.maxWidth;
         final columns = _androidTvBuild
             ? (width >= 1450
-                  ? 6
-                  : width >= 1120
-                  ? 5
-                  : width >= 880
-                  ? 4
-                  : 3)
+                ? 6
+                : width >= 1120
+                    ? 5
+                    : width >= 880
+                        ? 4
+                        : 3)
             : mode.usesPoster
-            ? (width >= 1500
-                  ? 7
-                  : width >= 1250
-                  ? 6
-                  : width >= 1000
-                  ? 5
-                  : 4)
-            : (width >= 1500
-                  ? 6
-                  : width >= 1250
-                  ? 5
-                  : width >= 1000
-                  ? 4
-                  : 3);
+                ? (width >= 1500
+                    ? 7
+                    : width >= 1250
+                        ? 6
+                        : width >= 1000
+                            ? 5
+                            : 4)
+                : (width >= 1500
+                    ? 6
+                    : width >= 1250
+                        ? 5
+                        : width >= 1000
+                            ? 4
+                            : 3);
 
         return GridView.builder(
           padding: const EdgeInsets.fromLTRB(28, 8, 28, 34),
@@ -1199,7 +1201,9 @@ class _CompactCatalogLayout extends StatelessWidget {
           padding: const EdgeInsets.fromLTRB(18, 8, 18, 12),
           child: Text(
             selectedGroup ?? mode.title.toUpperCase(),
-            style: Theme.of(context).textTheme.titleLarge
+            style: Theme.of(context)
+                .textTheme
+                .titleLarge
                 ?.copyWith(fontWeight: FontWeight.w900),
           ),
         ),
@@ -1387,9 +1391,8 @@ class _LiveCardBody extends StatelessWidget {
               ),
               IconButton(
                 visualDensity: VisualDensity.compact,
-                tooltip: isFavorite
-                    ? 'Quitar de favoritos'
-                    : 'Agregar a favoritos',
+                tooltip:
+                    isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos',
                 onPressed: onFavoriteToggle,
                 icon: Icon(
                   isFavorite ? Icons.favorite : Icons.favorite_border,
@@ -1440,9 +1443,8 @@ class _PosterCardBody extends StatelessWidget {
             color: const Color(0xB0000000),
             shape: const CircleBorder(),
             child: IconButton(
-              tooltip: isFavorite
-                  ? 'Quitar de favoritos'
-                  : 'Agregar a favoritos',
+              tooltip:
+                  isFavorite ? 'Quitar de favoritos' : 'Agregar a favoritos',
               onPressed: onFavoriteToggle,
               icon: Icon(
                 isFavorite ? Icons.favorite : Icons.favorite_border,

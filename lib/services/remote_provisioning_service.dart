@@ -173,16 +173,14 @@ class RemoteProvisioningService {
   Future<RemoteProvisioningConfiguration> fetchConfiguration(
     RemoteDeviceCredentials credentials,
   ) async {
-    final response = await http
-        .get(
-          Uri.parse('$_functionsBase/tvf-device-config'),
-          headers: {
-            'Accept': 'application/json',
-            'x-tvfull-device-code': credentials.code,
-            'x-tvfull-device-secret': credentials.secret,
-          },
-        )
-        .timeout(const Duration(seconds: 10));
+    final response = await http.get(
+      Uri.parse('$_functionsBase/tvf-device-config'),
+      headers: {
+        'Accept': 'application/json',
+        'x-tvfull-device-code': credentials.code,
+        'x-tvfull-device-secret': credentials.secret,
+      },
+    ).timeout(const Duration(seconds: 10));
 
     if (response.statusCode == 401) {
       throw const RemoteDeviceCredentialsInvalidException();

@@ -95,8 +95,7 @@ class XtreamService {
 
     final userInfo = Map<String, dynamic>.from(userInfoRaw);
     final authValue = userInfo['auth'];
-    final authenticated =
-        authValue == 1 ||
+    final authenticated = authValue == 1 ||
         authValue == '1' ||
         authValue == true ||
         userInfo['status']?.toString().toLowerCase() == 'active';
@@ -358,8 +357,7 @@ class XtreamService {
         connection.streamServer,
         item['direct_source']?.toString(),
       );
-      final url =
-          directSource ??
+      final url = directSource ??
           _streamUrl(
             connection.streamServer,
             section: 'live',
@@ -408,8 +406,7 @@ class XtreamService {
         connection.streamServer,
         item['direct_source']?.toString(),
       );
-      final url =
-          directSource ??
+      final url = directSource ??
           _streamUrl(
             connection.streamServer,
             section: 'movie',

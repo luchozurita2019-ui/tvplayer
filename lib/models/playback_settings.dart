@@ -101,14 +101,14 @@ class PlaybackSettings {
   }
 
   Map<String, dynamic> toJson() => {
-    'profile': profile.name,
-    'bufferMb': bufferMb,
-    'readaheadSeconds': readaheadSeconds,
-    'recoveryBufferSeconds': recoveryBufferSeconds,
-    'connectTimeoutSeconds': connectTimeoutSeconds,
-    'maxRetries': maxRetries,
-    'stallThresholdSeconds': stallThresholdSeconds,
-  };
+        'profile': profile.name,
+        'bufferMb': bufferMb,
+        'readaheadSeconds': readaheadSeconds,
+        'recoveryBufferSeconds': recoveryBufferSeconds,
+        'connectTimeoutSeconds': connectTimeoutSeconds,
+        'maxRetries': maxRetries,
+        'stallThresholdSeconds': stallThresholdSeconds,
+      };
 
   factory PlaybackSettings.fromJson(Map<String, dynamic> json) {
     final profileName = json['profile'] as String?;
@@ -128,18 +128,15 @@ class PlaybackSettings {
     return PlaybackSettings(
       profile: profile,
       bufferMb: (json['bufferMb'] as num?)?.toInt() ?? defaults.bufferMb,
-      readaheadSeconds:
-          (json['readaheadSeconds'] as num?)?.toDouble() ??
+      readaheadSeconds: (json['readaheadSeconds'] as num?)?.toDouble() ??
           defaults.readaheadSeconds,
       recoveryBufferSeconds:
           (json['recoveryBufferSeconds'] as num?)?.toDouble() ??
-          defaults.recoveryBufferSeconds,
-      connectTimeoutSeconds:
-          (json['connectTimeoutSeconds'] as num?)?.toInt() ??
+              defaults.recoveryBufferSeconds,
+      connectTimeoutSeconds: (json['connectTimeoutSeconds'] as num?)?.toInt() ??
           defaults.connectTimeoutSeconds,
       maxRetries: (json['maxRetries'] as num?)?.toInt() ?? defaults.maxRetries,
-      stallThresholdSeconds:
-          (json['stallThresholdSeconds'] as num?)?.toInt() ??
+      stallThresholdSeconds: (json['stallThresholdSeconds'] as num?)?.toInt() ??
           defaults.stallThresholdSeconds,
     );
   }
