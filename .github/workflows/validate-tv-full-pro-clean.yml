@@ -1,4 +1,4 @@
-# validate direct clean source
+# validate persisted clean source
 name: Validate TV FULL PRO Clean
 
 on:
