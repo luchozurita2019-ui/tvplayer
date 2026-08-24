@@ -165,9 +165,8 @@ class SourceContentScreen extends StatelessWidget {
                             item.sourceType.name.toUpperCase(),
                             style: const TextStyle(color: Colors.white38),
                           ),
-                          trailing: selected
-                              ? const Icon(Icons.check_rounded)
-                              : null,
+                          trailing:
+                              selected ? const Icon(Icons.check_rounded) : null,
                           onTap: () => Navigator.of(dialogContext).pop(item.id),
                         ),
                       );
@@ -229,7 +228,7 @@ class _SectionButtonState extends State<_SectionButton> {
                 Text(
                   widget.eyebrow,
                   style: const TextStyle(
-                    color: Colors.white45,
+                    color: Color(0x73FFFFFF),
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.2,
