@@ -13,10 +13,10 @@ import 'package:http/http.dart' as http;
 ///   total de 15 segundos: sólo fallamos si deja de enviar datos durante
 ///   [idleTimeout].
 /// - Nunca reintentamos automáticamente una descarga que ya había comenzado.
-///   Esto evita volver a bajar decenas de MB desde cero y gastar varias veces el
-///   ancho de banda con catálogos IPTV grandes.
-/// - Los reintentos quedan reservados para fallos ANTES de recibir el cuerpo
-///   (timeout de conexión, socket caído o HTTP 5xx).
+/// - Si comienza una reproducción, [cancelBrowsingRequests] invalida la
+///   navegación actual y ninguna excepción derivada de ese cierre puede iniciar
+///   otro intento.
+/// - Los reintentos quedan reservados para fallos ANTES de recibir el cuerpo.
 class M3uFetcher {
   static const String _browserUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -43,9 +43,7 @@ class M3uFetcher {
     Object? lastError;
 
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
-      if (generation != _generation) {
-        throw const _BrowsingCancelledException();
-      }
+      _ensureCurrent(generation);
       try {
         final request = http.Request('GET', Uri.parse(url))
           ..headers.addAll(const {
@@ -54,34 +52,29 @@ class M3uFetcher {
                 'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
           });
 
-        // IMPORTANTE: send() completa cuando llegan los headers. El viejo
-        // Client.get().timeout(15 s) esperaba el cuerpo ENTERO y abortaba listas
-        // grandes aunque el servidor estuviera transfiriendo datos normalmente.
+        // send() completa cuando llegan los headers. No limitamos con un timeout
+        // corto la duración total de listas grandes que siguen enviando bytes.
         final response = await _client.send(request).timeout(timeout);
+        _ensureCurrent(generation);
 
         if (response.statusCode >= 200 && response.statusCode < 300) {
           try {
-            // Timeout de inactividad, no de duración total. Una lista puede
-            // tardar más de 30 s si es enorme, siempre que sigan llegando bytes.
             return await response.stream
                 .timeout(idleTimeout)
                 .transform(utf8.decoder)
                 .join();
           } on TimeoutException {
-            if (generation != _generation)
-              throw const _BrowsingCancelledException();
+            _ensureCurrent(generation);
             throw const _BodyDownloadException(
               'La descarga de la lista se interrumpió porque el servidor dejó de enviar datos.',
             );
           } on SocketException {
-            if (generation != _generation)
-              throw const _BrowsingCancelledException();
+            _ensureCurrent(generation);
             throw const _BodyDownloadException(
               'La conexión se cortó mientras se estaba descargando la lista.',
             );
           } on http.ClientException {
-            if (generation != _generation)
-              throw const _BrowsingCancelledException();
+            _ensureCurrent(generation);
             throw const _BodyDownloadException(
               'La conexión HTTP se interrumpió mientras se descargaba la lista.',
             );
@@ -93,58 +86,71 @@ class M3uFetcher {
             'El servidor respondió con código ${response.statusCode}',
           );
           await _backoff(attempt);
+          _ensureCurrent(generation);
           continue;
         }
 
         throw Exception(
           'El servidor respondió con código ${response.statusCode}',
         );
-      } on _BodyDownloadException catch (e) {
-        if (generation != _generation)
-          throw const _BrowsingCancelledException();
-        // Ya empezamos a recibir el catálogo: NO lo volvemos a descargar desde
-        // cero automáticamente. Es la diferencia clave respecto de V3.7/V3.8.
-        throw Exception(e.message);
+      } on _BrowsingCancelledException {
+        rethrow;
+      } on _BodyDownloadException catch (error) {
+        _ensureCurrent(generation);
+        // Si el catálogo ya empezó a llegar, no se vuelve a bajar desde cero.
+        throw Exception(error.message);
       } on TimeoutException {
+        _ensureCurrent(generation);
         lastError = Exception(
           'El servidor tardó demasiado en iniciar la respuesta',
         );
         if (attempt < maxRetries) {
           await _backoff(attempt);
+          _ensureCurrent(generation);
           continue;
         }
       } on SocketException {
+        _ensureCurrent(generation);
         lastError = Exception(
           'No hay conexión a internet o el servidor no responde',
         );
         if (attempt < maxRetries) {
           await _backoff(attempt);
+          _ensureCurrent(generation);
           continue;
         }
       } on HttpException {
-        if (generation != _generation)
-          throw const _BrowsingCancelledException();
+        _ensureCurrent(generation);
         lastError = Exception('Error al conectar con el servidor de la lista');
         if (attempt < maxRetries) {
           await _backoff(attempt);
+          _ensureCurrent(generation);
           continue;
         }
       } on http.ClientException {
+        _ensureCurrent(generation);
         lastError = Exception(
           'Error HTTP al conectar con el servidor de la lista',
         );
         if (attempt < maxRetries) {
           await _backoff(attempt);
+          _ensureCurrent(generation);
           continue;
         }
       }
     }
 
+    _ensureCurrent(generation);
     throw lastError ?? Exception('No se pudo descargar la lista');
   }
 
+  static void _ensureCurrent(int generation) {
+    if (generation != _generation) {
+      throw const _BrowsingCancelledException();
+    }
+  }
+
   static Future<void> _backoff(int attempt) {
-    // 1 s, 2 s... Sólo antes de que una descarga haya comenzado.
     final seconds = 1 << attempt;
     return Future.delayed(Duration(seconds: seconds));
   }
@@ -158,6 +164,7 @@ class _BodyDownloadException implements Exception {
 
 class _BrowsingCancelledException implements Exception {
   const _BrowsingCancelledException();
+
   @override
   String toString() =>
       'La actualización M3U fue pausada para priorizar la reproducción.';
