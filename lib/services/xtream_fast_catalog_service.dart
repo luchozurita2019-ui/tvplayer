@@ -248,7 +248,7 @@ class XtreamFastCatalogService {
           savedAt: DateTime.now(),
           fromCache: false,
         );
-        unawaited(_writeMovieCache(playlistUrl, snapshot));
+        await _writeMovieCache(playlistUrl, snapshot);
         return snapshot;
       } catch (_) {
         throw error;
@@ -315,13 +315,15 @@ class XtreamFastCatalogService {
         _lastSeriesDiagnostics = diagnostic;
         debugPrint(diagnostic);
         unawaited(_writeSeriesDiagnostic(diagnostic));
-        return XtreamSeriesCatalogSnapshot(
+        final snapshot = XtreamSeriesCatalogSnapshot(
           connection: connection,
           series: series,
           categories: categories,
           savedAt: DateTime.now(),
           fromCache: false,
         );
+        await _writeSeriesCache(playlistUrl, snapshot);
+        return snapshot;
       } catch (_) {
         throw error;
       }
@@ -411,8 +413,11 @@ class XtreamFastCatalogService {
         connection.expiration != null) {
       rememberConnection(connection);
     }
-    unawaited(
-      _writePreparedCache(playlistUrl, 'movies', prepared, snapshot.savedAt),
+    await _writePreparedCache(
+      playlistUrl,
+      'movies',
+      prepared,
+      snapshot.savedAt,
     );
     return snapshot;
   }
@@ -536,8 +541,11 @@ class XtreamFastCatalogService {
     debugPrint(diagnostic);
     unawaited(_writeSeriesDiagnostic(diagnostic));
 
-    unawaited(
-      _writePreparedCache(playlistUrl, 'series', prepared, snapshot.savedAt),
+    await _writePreparedCache(
+      playlistUrl,
+      'series',
+      prepared,
+      snapshot.savedAt,
     );
     return snapshot;
   }
@@ -671,21 +679,31 @@ class XtreamFastCatalogService {
     await _writeCache(playlistUrl, 'movies', payload);
   }
 
+  Future<void> _writeSeriesCache(
+    String playlistUrl,
+    XtreamSeriesCatalogSnapshot snapshot,
+  ) async {
+    final payload = <String, dynamic>{
+      'version': _cacheVersion,
+      'kind': 'series',
+      'savedAt': snapshot.savedAt.millisecondsSinceEpoch,
+      'categories': snapshot.categories,
+      'items': snapshot.series.map(_seriesToMap).toList(growable: false),
+    };
+    await _writeCache(playlistUrl, 'series', payload);
+  }
+
   Future<void> _writeCache(
     String playlistUrl,
     String kind,
     Map<String, dynamic> payload,
   ) async {
-    try {
-      final encoded = await compute(_encodeCachePayload, payload);
-      final file = await _cacheFile(playlistUrl, kind);
-      final temp = File('${file.path}.tmp');
-      await temp.writeAsString(encoded, flush: false);
-      if (await file.exists()) await file.delete();
-      await temp.rename(file.path);
-    } catch (_) {
-      // Un fallo de caché nunca debe impedir usar el catálogo descargado.
-    }
+    final encoded = await compute(_encodeCachePayload, payload);
+    final file = await _cacheFile(playlistUrl, kind);
+    final temp = File('${file.path}.tmp');
+    await temp.writeAsString(encoded, flush: true);
+    if (await file.exists()) await file.delete();
+    await temp.rename(file.path);
   }
 
   Future<void> _writeSeriesDiagnostic(String content) async {
@@ -993,6 +1011,21 @@ Map<String, dynamic> _movieToMap(XtreamVodSummary movie) => <String, dynamic>{
       'releaseDate': movie.releaseDate,
       'genre': movie.genre,
       'directSource': movie.directSource,
+    };
+
+Map<String, dynamic> _seriesToMap(XtreamSeriesSummary series) =>
+    <String, dynamic>{
+      'id': series.id,
+      'name': series.name,
+      'cover': series.cover,
+      'category': series.category,
+      'plot': series.plot,
+      'cast': series.cast,
+      'director': series.director,
+      'genre': series.genre,
+      'releaseDate': series.releaseDate,
+      'rating': series.rating,
+      'backdrops': series.backdrops,
     };
 
 XtreamConnectionResult? _provisionalConnectionFromPlaylistUrl(String raw) {
