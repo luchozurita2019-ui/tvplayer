@@ -1,7 +1,7 @@
 name: iptv_player
-description: Reproductor de listas IPTV M3U rápido, fluido y multiplataforma.
+description: TV FULL PRO para Android TV, rápido, liviano y orientado a control remoto.
 publish_to: 'none'
-version: 1.0.0+1
+version: 1.1.0+2
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -9,24 +9,13 @@ environment:
 dependencies:
   flutter:
     sdk: flutter
-
-  # --- Reproducción de video/audio ---
-  # Baseline Android inspirado en mpv-android: Media Kit actualizado para usar
-  # la ruta Surface/GPU/MediaCodec moderna de Android.
   media_kit: ^1.2.6
   media_kit_video: ^2.0.1
   media_kit_libs_video: ^1.0.7
-
-  # --- Estado de la app ---
   provider: ^6.1.2
-
-  # --- Red / descarga de listas M3U ---
   http: ^1.2.2
-
-  # --- Persistencia local (listas, favoritos, última posición) ---
   shared_preferences: ^2.3.2
-
-  # --- Utilidades ---
+  sqflite: ^2.4.2
   crypto: ^3.0.6
   path_provider: ^2.1.4
   cupertino_icons: ^1.0.8

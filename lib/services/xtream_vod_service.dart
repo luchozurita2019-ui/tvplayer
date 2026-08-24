@@ -4,8 +4,8 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
-import 'xtream_service.dart';
 import 'xtream_http_client.dart';
+import 'xtream_service.dart';
 
 const String _vodUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
@@ -34,15 +34,13 @@ class XtreamVodSummary {
     this.directSource,
   });
 
-  Channel toChannel(XtreamConnectionResult connection) {
-    final url = _movieUrl(connection, id, extension);
-    return Channel(
-      name: name,
-      url: url,
-      logoUrl: cover,
-      group: category,
-    );
-  }
+  Channel toChannel(XtreamConnectionResult connection) => Channel(
+        name: name,
+        url: _resolveDirect(connection.streamServer, directSource) ??
+            _movieUrl(connection, id, extension),
+        logoUrl: _resolveArtwork(connection.streamServer, cover),
+        group: category,
+      );
 }
 
 class XtreamVodDetails {
@@ -76,28 +74,21 @@ class XtreamVodDetails {
     this.directSource,
   });
 
-  bool get hasPresentationMedia {
-    final hasArtwork = (backdrop?.trim().isNotEmpty ?? false) ||
-        (movie.cover?.trim().isNotEmpty ?? false);
-    return hasArtwork || trailerChannel() != null;
-  }
-
-  Channel toChannel(XtreamConnectionResult connection) {
-    final url = _movieUrl(connection, movie.id, extension);
-    return Channel(
-      name: movie.name,
-      url: url,
-      logoUrl: movie.cover,
-      group: movie.category,
-    );
-  }
+  Channel toChannel(XtreamConnectionResult connection) => Channel(
+        name: movie.name,
+        url: _resolveDirect(connection.streamServer, directSource) ??
+            _resolveDirect(connection.streamServer, movie.directSource) ??
+            _movieUrl(connection, movie.id, extension),
+        logoUrl: _resolveArtwork(connection.streamServer, movie.cover),
+        group: movie.category,
+      );
 
   Channel? trailerChannel() {
-    final url = trailerUrl?.trim() ?? '';
-    if (url.isEmpty) return null;
+    final value = trailerUrl?.trim() ?? '';
+    if (value.isEmpty) return null;
     return Channel(
       name: 'Tráiler · ${movie.name}',
-      url: url,
+      url: value,
       logoUrl: backdrop ?? movie.cover,
       group: 'Tráiler',
     );
@@ -126,6 +117,8 @@ class XtreamVodService {
     final streams = await _actionList(connection, 'get_vod_streams', timeout);
     final categories = _categoryMap(await categoriesFuture);
     final movies = <XtreamVodSummary>[];
+
+    // Se conserva exactamente el orden entregado por el proveedor.
     for (final raw in streams) {
       if (raw is! Map) continue;
       final item = Map<String, dynamic>.from(raw);
@@ -141,8 +134,10 @@ class XtreamVodService {
             _firstText(item, const ['container_extension', 'extension']),
             fallback: 'mp4',
           ),
-          cover:
-              _firstText(item, const ['stream_icon', 'movie_image', 'cover']),
+          cover: _resolveArtwork(
+            connection.streamServer,
+            _firstText(item, const ['stream_icon', 'movie_image', 'cover']),
+          ),
           category: categoryId == null
               ? _firstText(item, const ['category_name', 'category'])
               : categories[categoryId] ??
@@ -151,11 +146,13 @@ class XtreamVodService {
           releaseDate:
               _firstText(item, const ['releasedate', 'releaseDate', 'year']),
           genre: _firstText(item, const ['genre']),
-          directSource: _firstText(item, const ['direct_source']),
+          directSource: _resolveDirect(
+            connection.streamServer,
+            _firstText(item, const ['direct_source']),
+          ),
         ),
       );
     }
-    movies.sort((a, b) => a.name.toLowerCase().compareTo(b.name.toLowerCase()));
     return List.unmodifiable(movies);
   }
 
@@ -164,46 +161,33 @@ class XtreamVodService {
     XtreamVodSummary summary, {
     Duration timeout = const Duration(seconds: 16),
   }) async {
-    // Si entramos al catálogo desde la copia local puede haber todavía un
-    // get_vod_streams de actualización detrás. Cortarlo antes de PLAY evita que
-    // varios MB de JSON compitan con el arranque de mpv/FFmpeg.
     XtreamHttpClient.cancelBrowsingRequests();
 
-    // No confiamos ciegamente en streamServer guardado en el catálogo local.
-    // player_api.php puede devolver otro host/protocolo/puerto en una sesión
-    // posterior. Validamos una conexión pequeña justo antes de abrir la ficha.
-    var activeConnection = connection;
+    var active = connection;
     try {
-      activeConnection = await XtreamService.reconnectFromPlaylistUrl(
+      active = await XtreamService.reconnectFromPlaylistUrl(
         connection.playlistUrl,
         timeout: const Duration(seconds: 8),
       );
-    } catch (_) {
-      // Si la validación puntual falla, todavía podemos intentar con la sesión
-      // que ya permitió cargar el catálogo.
-    }
+    } catch (_) {}
 
-    final catalogPlayableUrl =
-        _movieUrl(activeConnection, summary.id, summary.extension);
+    final catalogPlayable =
+        _resolveDirect(active.streamServer, summary.directSource) ??
+            _movieUrl(active, summary.id, summary.extension);
 
     try {
-      final uri = _endpoint(activeConnection.apiServer, <String, String>{
-        'username': activeConnection.username,
-        'password': activeConnection.password,
+      final uri = _endpoint(active.apiServer, {
+        'username': active.username,
+        'password': active.password,
         'action': 'get_vod_info',
         'vod_id': summary.id,
       });
-      final response =
-          await _client.get(uri, headers: _headers).timeout(timeout);
+      final response = await _client.get(uri, headers: _headers).timeout(timeout);
       if (response.statusCode != 200) {
-        throw Exception(
-          'Xtream get_vod_info respondió HTTP ${response.statusCode}.',
-        );
+        throw Exception('get_vod_info HTTP ${response.statusCode}');
       }
       final decoded = jsonDecode(response.body);
-      if (decoded is! Map) {
-        throw const FormatException('Ficha VOD no válida.');
-      }
+      if (decoded is! Map) throw const FormatException('Ficha VOD no válida.');
       final root = Map<String, dynamic>.from(decoded);
       final info = root['info'] is Map
           ? Map<String, dynamic>.from(root['info'] as Map)
@@ -214,24 +198,26 @@ class XtreamVodService {
 
       String? pick(List<String> keys) =>
           _firstText(info, keys) ?? _firstText(movieData, keys);
-      final backdrop = _firstImage(
-            info['backdrop_path'] ?? info['backdrop'] ?? info['backdrops'],
-          ) ??
-          pick(const ['backdrop_path', 'backdrop', 'cover_big']);
-      final trailer = _playableTrailer(
-        _firstText(info, const ['trailer_url', 'trailer', 'youtube_trailer']) ??
-            _firstText(
-              movieData,
-              const ['trailer_url', 'trailer', 'youtube_trailer'],
-            ),
-      );
       final extension = _cleanExtension(
         _firstText(movieData, const ['container_extension', 'extension']) ??
             _firstText(info, const ['container_extension', 'extension']) ??
             summary.extension,
         fallback: summary.extension,
       );
-      final playableUrl = _movieUrl(activeConnection, summary.id, extension);
+      final direct = _resolveDirect(
+            active.streamServer,
+            _firstText(movieData, const ['direct_source']) ??
+                _firstText(info, const ['direct_source']),
+          ) ??
+          _resolveDirect(active.streamServer, summary.directSource) ??
+          _movieUrl(active, summary.id, extension);
+      final backdrop = _resolveArtwork(
+        active.streamServer,
+        _firstImage(
+              info['backdrop_path'] ?? info['backdrop'] ?? info['backdrops'],
+            ) ??
+            pick(const ['backdrop_path', 'backdrop', 'cover_big']),
+      );
 
       return XtreamVodDetails(
         movie: summary,
@@ -240,29 +226,30 @@ class XtreamVodService {
         cast: pick(const ['cast', 'actors']),
         director: pick(const ['director']),
         genre: pick(const ['genre']) ?? summary.genre,
-        releaseDate: pick(
-                const ['releasedate', 'releaseDate', 'release_date', 'year']) ??
-            summary.releaseDate,
+        releaseDate:
+            pick(const ['releasedate', 'releaseDate', 'release_date', 'year']) ??
+                summary.releaseDate,
         rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
         duration: pick(const ['duration', 'duration_secs']),
         country: pick(const ['country']),
         backdrop: backdrop,
-        trailerUrl: trailer,
-        // Guardamos una URL absoluta validada. Así, aunque la pantalla haya
-        // nacido desde un snapshot local con streamServer viejo, PLAY usa el
-        // host recién resuelto.
-        directSource: playableUrl,
+        trailerUrl: _playableTrailer(
+          _firstText(info, const ['trailer_url', 'trailer', 'youtube_trailer']) ??
+              _firstText(
+                movieData,
+                const ['trailer_url', 'trailer', 'youtube_trailer'],
+              ),
+        ),
+        directSource: direct,
       );
     } catch (_) {
-      // get_vod_info es metadata opcional. Si el panel lo implementa mal, una
-      // película válida no debe dejar de reproducirse por eso.
       return XtreamVodDetails(
         movie: summary,
         extension: summary.extension,
         genre: summary.genre,
         releaseDate: summary.releaseDate,
         rating: summary.rating,
-        directSource: catalogPlayableUrl,
+        directSource: catalogPlayable,
       );
     }
   }
@@ -274,12 +261,8 @@ class XtreamVodService {
   ) async {
     try {
       return await _actionList(connection, action, timeout);
-    } on TimeoutException {
-      return const <dynamic>[];
-    } on FormatException {
-      return const <dynamic>[];
     } catch (_) {
-      return const <dynamic>[];
+      return const [];
     }
   }
 
@@ -288,7 +271,7 @@ class XtreamVodService {
     String action,
     Duration timeout,
   ) async {
-    final uri = _endpoint(connection.apiServer, <String, String>{
+    final uri = _endpoint(connection.apiServer, {
       'username': connection.username,
       'password': connection.password,
       'action': action,
@@ -298,14 +281,10 @@ class XtreamVodService {
     if (response.statusCode != 200) {
       throw Exception('Xtream $action respondió HTTP ${response.statusCode}.');
     }
-
-    // El timeout se reinicia cada vez que llega un fragmento del cuerpo.
-    // Así un catálogo grande puede tardar más que [timeout] en total siempre
-    // que el servidor continúe enviando datos. Sólo falla si queda inactivo.
     final body =
         await response.stream.transform(utf8.decoder).timeout(timeout).join();
     final decoded = jsonDecode(body);
-    return decoded is List ? decoded : const <dynamic>[];
+    return decoded is List ? decoded : const [];
   }
 
   static Map<String, String> _categoryMap(List<dynamic> raw) {
@@ -331,7 +310,9 @@ class XtreamVodService {
   static String? _text(dynamic raw) {
     if (raw == null) return null;
     final value = raw.toString().trim();
-    if (value.isEmpty || value.toLowerCase() == 'null') return null;
+    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
+      return null;
+    }
     return value;
   }
 
@@ -361,13 +342,9 @@ class XtreamVodService {
     final uri = Uri.tryParse(value);
     if (uri == null ||
         !(uri.scheme == 'http' || uri.scheme == 'https') ||
-        uri.host.isEmpty) {
-      return null;
-    }
+        uri.host.isEmpty) return null;
     final host = uri.host.toLowerCase();
-    if (host.contains('youtube.com') ||
-        host == 'youtu.be' ||
-        host.contains('vimeo.com')) {
+    if (host.contains('youtube.com') || host == 'youtu.be' || host.contains('vimeo.com')) {
       return null;
     }
     return uri.toString();
@@ -376,14 +353,24 @@ class XtreamVodService {
 
 String? _resolveDirect(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null') return null;
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+  if (value.startsWith('//')) return '${base.scheme}:$value';
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) {
-    return parsed.toString();
-  }
+      parsed.host.isNotEmpty) return parsed.toString();
   return value.startsWith('/') ? base.resolve(value).toString() : null;
+}
+
+String? _resolveArtwork(Uri base, String? raw) {
+  final value = raw?.trim() ?? '';
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+  if (value.startsWith('//')) return '${base.scheme}:$value';
+  final parsed = Uri.tryParse(value);
+  if (parsed != null &&
+      (parsed.scheme == 'http' || parsed.scheme == 'https') &&
+      parsed.host.isNotEmpty) return parsed.toString();
+  return base.resolve(value).toString();
 }
 
 String _movieUrl(
@@ -392,9 +379,9 @@ String _movieUrl(
   String extension,
 ) {
   final base = connection.streamServer;
-  final prefix = base.pathSegments.where((e) => e.trim().isNotEmpty).toList();
+  final prefix = base.pathSegments.where((e) => e.trim().isNotEmpty);
   return base.replace(
-    pathSegments: <String>[
+    pathSegments: [
       ...prefix,
       'movie',
       connection.username,

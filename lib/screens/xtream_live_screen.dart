@@ -1,16 +1,20 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
-import '../services/content_classifier.dart';
-import '../services/xtream_fast_catalog_service.dart';
+import '../providers/iptv_provider.dart';
+import '../services/artwork_cache_service.dart';
+import '../services/section_catalog_service.dart';
 import '../services/xtream_live_fast_service.dart';
-import 'channel_list_screen.dart';
+import '../widgets/cached_artwork_image.dart';
+import 'player_screen.dart';
 
 class XtreamLiveScreen extends StatefulWidget {
   final Playlist playlist;
-
   const XtreamLiveScreen({super.key, required this.playlist});
 
   @override
@@ -18,239 +22,339 @@ class XtreamLiveScreen extends StatefulWidget {
 }
 
 class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
-  late Future<Playlist> _future;
-  String _progressLabel = 'Cargando información del servidor…';
-  DateTime _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
-  int _lastProgressBytes = 0;
+  late Future<_LiveData> _future;
+  String? _category;
+  String _status = 'Cargando TV en vivo…';
 
   @override
   void initState() {
     super.initState();
-    _future = _load();
+    unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
+    _future = _loadInitial();
   }
 
-  Future<Playlist> _load({bool forceNetwork = false}) async {
-    final service = XtreamLiveFastService.instance;
+  @override
+  void dispose() {
+    unawaited(ArtworkCacheService.instance.clearBrowsingSession());
+    super.dispose();
+  }
 
-    // Flujo normal: terminar LIVE 1/2 + 2/2 antes de entregar la pantalla.
-    // Así no dejamos get_live_streams consumiendo ancho de banda mientras el
-    // usuario ya intenta reproducir un canal.
-    try {
-      final fresh = await service.refresh(
-        widget.playlist.source,
-        forceSessionRefresh: forceNetwork,
-        onProgress: _onProgress,
-      );
-      return _playlistFromChannels(_mergePlaybackChannels(fresh.channels));
-    } catch (error) {
-      // El catálogo local funciona como respaldo/offline, no como disparador de
-      // una actualización pesada escondida detrás de la reproducción.
+  Future<_LiveData> _loadInitial() async {
+    if (widget.playlist.sourceType == PlaylistSourceType.xtream) {
+      final service = XtreamLiveFastService.instance;
       final cached = await service.loadCached(widget.playlist.source);
       if (cached != null && cached.channels.isNotEmpty) {
-        return _playlistFromChannels(_mergePlaybackChannels(cached.channels));
+        unawaited(_refreshXtream());
+        return _LiveData(cached.channels, cached.categories);
       }
-
-      // Último fallback: los canales que ya estaban dentro de la M3U original.
-      // Son especialmente valiosos porque conservan URL exacta y headers que
-      // algunos proveedores necesitan para autorizar determinados canales.
-      final fallback = _originalLiveChannels();
-      if (fallback.isNotEmpty) return _playlistFromChannels(fallback);
-      rethrow;
-    }
-  }
-
-  List<Channel> _originalLiveChannels() =>
-      ContentClassifier.partition(widget.playlist.channels)
-          .forKind(IptvContentKind.live);
-
-  /// El API rápido nos da nombres/categorías/logos actuales, pero para PLAY
-  /// preferimos la URL exacta de la lista original cuando podemos identificar
-  /// el mismo stream. Esto recupera headers, CDN, puerto y variantes de URL que
-  /// se perderían al reconstruir /live/user/pass/id.ext manualmente.
-  List<Channel> _mergePlaybackChannels(List<Channel> fastChannels) {
-    final original = _originalLiveChannels();
-    if (original.isEmpty) return List<Channel>.unmodifiable(fastChannels);
-
-    final byStreamId = <String, Channel>{};
-    final byName = <String, List<Channel>>{};
-
-    for (final channel in original) {
-      final streamId = _numericStreamId(channel.url);
-      if (streamId != null) byStreamId.putIfAbsent(streamId, () => channel);
-      final key = _normalizeName(channel.name);
-      byName.putIfAbsent(key, () => <Channel>[]).add(channel);
-    }
-
-    final merged = <Channel>[];
-    for (final fast in fastChannels) {
-      Channel? compatible;
-      final streamId = _numericStreamId(fast.url);
-      if (streamId != null) compatible = byStreamId[streamId];
-
-      compatible ??= _bestNameMatch(fast, byName[_normalizeName(fast.name)]);
-      if (compatible == null) {
-        merged.add(fast);
-        continue;
-      }
-
-      merged.add(
-        Channel(
-          name: fast.name,
-          url: compatible.url,
-          logoUrl: fast.logoUrl ?? compatible.logoUrl,
-          group: fast.group ?? compatible.group,
-          tvgId: fast.tvgId ?? compatible.tvgId,
-          httpUserAgent: compatible.httpUserAgent,
-          httpReferrer: compatible.httpReferrer,
-          httpHeaders: compatible.httpHeaders,
-        ),
+      final fresh = await service.refresh(
+        widget.playlist.source,
+        onProgress: (p) => _setStatus(p.label),
       );
+      return _LiveData(fresh.channels, fresh.categories);
     }
-    return List<Channel>.unmodifiable(merged);
-  }
 
-  Channel? _bestNameMatch(Channel fast, List<Channel>? candidates) {
-    if (candidates == null || candidates.isEmpty) return null;
-    if (candidates.length == 1) return candidates.first;
-    final fastGroup = fast.group?.trim().toLowerCase();
-    if (fastGroup != null && fastGroup.isNotEmpty) {
-      for (final candidate in candidates) {
-        if (candidate.group?.trim().toLowerCase() == fastGroup)
-          return candidate;
-      }
+    final service = SectionCatalogService.instance;
+    final cached = await service.loadCached(widget.playlist, TvSectionKind.live);
+    if (cached != null && cached.channels.isNotEmpty) {
+      unawaited(_refreshM3u());
+      return _LiveData(cached.channels, cached.categories);
     }
-    return candidates.first;
-  }
-
-  String _normalizeName(String value) =>
-      value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
-
-  String? _numericStreamId(String rawUrl) {
-    final uri = Uri.tryParse(rawUrl.trim());
-    final path = uri?.path ?? rawUrl;
-    if (path.isEmpty) return null;
-    final segments =
-        path.split('/').where((value) => value.isNotEmpty).toList();
-    if (segments.isEmpty) return null;
-    var file = segments.last;
-    final dot = file.lastIndexOf('.');
-    if (dot > 0) file = file.substring(0, dot);
-    return RegExp(r'^\d+$').hasMatch(file) ? file : null;
-  }
-
-  Playlist _playlistFromChannels(List<Channel> channels) {
-    return Playlist(
-      id: '${widget.playlist.id}::live',
-      name: '${widget.playlist.name} · TV en vivo',
-      source: widget.playlist.source,
-      isRemote: false,
-      channels: List<Channel>.unmodifiable(channels),
-      lastUpdated: DateTime.now(),
-      sourceType: PlaylistSourceType.xtream,
+    final fresh = await service.loadOrRefresh(
+      widget.playlist,
+      TvSectionKind.live,
     );
+    return _LiveData(fresh.channels, fresh.categories);
   }
 
-  void _onProgress(XtreamCatalogProgress progress) {
-    if (!mounted) return;
-    final now = DateTime.now();
-    final bytesDelta = progress.receivedBytes - _lastProgressBytes;
-    final elapsed = now.difference(_lastProgressUpdate);
-    if (progress.receivedBytes > 0 &&
-        bytesDelta < 128 * 1024 &&
-        elapsed < const Duration(milliseconds: 180)) {
-      return;
-    }
-    _lastProgressUpdate = now;
-    _lastProgressBytes = progress.receivedBytes;
-    setState(() => _progressLabel = progress.label);
+  Future<void> _refreshXtream() async {
+    try {
+      final fresh = await XtreamLiveFastService.instance.refresh(
+        widget.playlist.source,
+        onProgress: (p) => _setStatus(p.label),
+      );
+      if (!mounted) return;
+      setState(() => _future = Future.value(_LiveData(fresh.channels, fresh.categories)));
+    } catch (_) {}
   }
 
-  void _retry() {
-    XtreamFastCatalogService.instance.invalidateSession(widget.playlist.source);
-    setState(() {
-      _progressLabel = 'Cargando información del servidor…';
-      _lastProgressBytes = 0;
-      _lastProgressUpdate = DateTime.fromMillisecondsSinceEpoch(0);
-      _future = _load(forceNetwork: true);
-    });
+  Future<void> _refreshM3u() async {
+    try {
+      final all = await SectionCatalogService.instance.refreshAll(widget.playlist);
+      final fresh = all[TvSectionKind.live];
+      if (!mounted || fresh == null || fresh.channels.isEmpty) return;
+      setState(() => _future = Future.value(_LiveData(fresh.channels, fresh.categories)));
+    } catch (_) {}
+  }
+
+  void _setStatus(String value) {
+    if (!mounted || value == _status) return;
+    setState(() => _status = value);
   }
 
   @override
   Widget build(BuildContext context) {
-    return FutureBuilder<Playlist>(
-      future: _future,
-      builder: (context, snapshot) {
-        if (snapshot.connectionState != ConnectionState.done) {
-          return Scaffold(
-            appBar: AppBar(
-              title: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'TV en vivo',
-                    style: TextStyle(fontWeight: FontWeight.w900),
-                  ),
-                  Text(
-                    widget.playlist.name,
-                    style: Theme.of(context).textTheme.bodySmall,
-                  ),
-                ],
-              ),
+    return Scaffold(
+      backgroundColor: const Color(0xFF05090F),
+      appBar: AppBar(
+        titleSpacing: 24,
+        title: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('TV EN VIVO', style: TextStyle(fontWeight: FontWeight.w900)),
+            Text(
+              widget.playlist.name,
+              style: const TextStyle(color: Colors.white54, fontSize: 12),
             ),
-            body: Center(
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  const CircularProgressIndicator(),
-                  const SizedBox(height: 16),
-                  Text(
-                    _progressLabel,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(fontWeight: FontWeight.w700),
-                  ),
-                ],
-              ),
-            ),
-          );
-        }
+          ],
+        ),
+      ),
+      body: FutureBuilder<_LiveData>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState != ConnectionState.done) {
+            return _Loading(message: _status);
+          }
+          if (snapshot.hasError) {
+            return _ErrorView(
+              message: 'No se pudo cargar la TV en vivo.',
+              onRetry: () => setState(() => _future = _loadInitial()),
+            );
+          }
+          final data = snapshot.data!;
+          if (data.channels.isEmpty) {
+            return _ErrorView(
+              message: 'Esta lista no contiene canales de TV en vivo.',
+              onRetry: () => setState(() => _future = _loadInitial()),
+            );
+          }
+          return _buildCatalog(data);
+        },
+      ),
+    );
+  }
 
-        if (snapshot.hasError) {
-          final raw = snapshot.error.toString();
-          final message = raw.contains('TimeoutException')
-              ? 'El servidor Xtream dejó de enviar datos durante demasiado tiempo. Reintentá la carga de TV en vivo.'
-              : raw.replaceFirst('Exception: ', '');
-          return Scaffold(
-            appBar: AppBar(title: const Text('TV en vivo')),
-            body: Center(
-              child: ConstrainedBox(
-                constraints: const BoxConstraints(maxWidth: 520),
-                child: Card(
-                  margin: const EdgeInsets.all(24),
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        const Icon(Icons.error_outline_rounded, size: 50),
-                        const SizedBox(height: 14),
-                        Text(message, textAlign: TextAlign.center),
-                        const SizedBox(height: 18),
-                        FilledButton.icon(
-                          onPressed: _retry,
-                          icon: const Icon(Icons.refresh_rounded),
-                          label: const Text('Reintentar'),
-                        ),
-                      ],
+  Widget _buildCatalog(_LiveData data) {
+    final categories = data.categories;
+    final visible = _category == null
+        ? data.channels
+        : data.channels.where((item) => item.group == _category).toList(growable: false);
+
+    return Row(
+      children: [
+        SizedBox(
+          width: 260,
+          child: ColoredBox(
+            color: const Color(0xFF08111B),
+            child: ListView.builder(
+              padding: const EdgeInsets.fromLTRB(12, 16, 12, 20),
+              itemCount: categories.length + 1,
+              itemBuilder: (context, index) {
+                final category = index == 0 ? null : categories[index - 1];
+                final selected = category == _category;
+                return Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 3),
+                  child: ListTile(
+                    autofocus: index == 0,
+                    selected: selected,
+                    minTileHeight: 50,
+                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+                    selectedTileColor: const Color(0xFF1677FF).withValues(alpha: .18),
+                    title: Text(
+                      category ?? 'Todos',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                      ),
                     ),
+                    onTap: () => setState(() => _category = category),
+                  ),
+                );
+              },
+            ),
+          ),
+        ),
+        Container(width: 1, color: Colors.white10),
+        Expanded(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(24, 18, 24, 12),
+                child: Text(
+                  '${_category ?? 'Todos'}  ·  ${visible.length} canales',
+                  style: const TextStyle(
+                    color: Colors.white60,
+                    fontSize: 14,
+                    fontWeight: FontWeight.w700,
                   ),
                 ),
               ),
-            ),
-          );
-        }
-
-        return ChannelListScreen(playlist: snapshot.data!);
-      },
+              Expanded(
+                child: ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(18, 0, 24, 24),
+                  cacheExtent: 80,
+                  itemCount: visible.length,
+                  itemBuilder: (context, index) {
+                    final channel = visible[index];
+                    return _ChannelRow(
+                      channel: channel,
+                      autofocus: index == 0,
+                      onTap: () => _openPlayer(visible, index),
+                    );
+                  },
+                ),
+              ),
+            ],
+          ),
+        ),
+      ],
     );
   }
+
+  Future<void> _openPlayer(List<Channel> channels, int index) async {
+    ArtworkCacheService.instance.pauseForPlayback();
+    final provider = context.read<IptvProvider>();
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => PlayerScreen(
+          channel: channels[index],
+          playlist: channels,
+          initialIndex: index,
+          settings: provider.playbackSettings,
+          isLiveContent: true,
+        ),
+      ),
+    );
+    if (!mounted) return;
+    ArtworkCacheService.instance.resumeBrowsing();
+  }
+}
+
+class _ChannelRow extends StatefulWidget {
+  final Channel channel;
+  final bool autofocus;
+  final VoidCallback onTap;
+  const _ChannelRow({required this.channel, required this.onTap, this.autofocus = false});
+
+  @override
+  State<_ChannelRow> createState() => _ChannelRowState();
+}
+
+class _ChannelRowState extends State<_ChannelRow> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Material(
+        color: _focused ? const Color(0xFF10283B) : const Color(0xFF0A141E),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          autofocus: widget.autofocus,
+          borderRadius: BorderRadius.circular(10),
+          onFocusChange: (value) => setState(() => _focused = value),
+          onTap: widget.onTap,
+          child: SizedBox(
+            height: 62,
+            child: Row(
+              children: [
+                const SizedBox(width: 12),
+                SizedBox(
+                  width: 42,
+                  height: 42,
+                  child: ClipRRect(
+                    borderRadius: BorderRadius.circular(8),
+                    child: CachedArtworkImage(
+                      url: widget.channel.logoUrl,
+                      fit: BoxFit.contain,
+                      cacheWidth: 84,
+                      cacheHeight: 84,
+                      prefetchExtent: 0,
+                      fallback: Container(
+                        alignment: Alignment.center,
+                        color: Colors.white.withValues(alpha: .04),
+                        child: Text(
+                          _initials(widget.channel.name),
+                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900),
+                        ),
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    widget.channel.name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                  ),
+                ),
+                if ((widget.channel.group ?? '').trim().isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.only(right: 18),
+                    child: Text(
+                      widget.channel.group!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: const TextStyle(color: Colors.white38, fontSize: 12),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  String _initials(String value) {
+    final words = value.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).take(2);
+    final text = words.map((e) => e.substring(0, 1).toUpperCase()).join();
+    return text.isEmpty ? 'TV' : text;
+  }
+}
+
+class _LiveData {
+  final List<Channel> channels;
+  final List<String> categories;
+  const _LiveData(this.channels, this.categories);
+}
+
+class _Loading extends StatelessWidget {
+  final String message;
+  const _Loading({required this.message});
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const SizedBox(width: 34, height: 34, child: CircularProgressIndicator(strokeWidth: 3)),
+            const SizedBox(height: 14),
+            Text(message, style: const TextStyle(color: Colors.white60)),
+          ],
+        ),
+      );
+}
+
+class _ErrorView extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorView({required this.message, required this.onRetry});
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.tv_off_outlined, size: 44, color: Colors.white38),
+            const SizedBox(height: 12),
+            Text(message, style: const TextStyle(fontSize: 17)),
+            const SizedBox(height: 16),
+            FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
+          ],
+        ),
+      );
 }

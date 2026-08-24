@@ -1,6 +1,7 @@
 package com.example.iptv_player
 
 import android.net.Uri
+import android.provider.Settings
 import android.view.Surface
 import android.view.WindowManager
 import androidx.media3.common.AudioAttributes
@@ -31,6 +32,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     companion object {
         private const val METHOD_CHANNEL = "tvfull/media3_texture"
         private const val EVENT_CHANNEL = "tvfull/media3_texture_events"
+        private const val DEVICE_CHANNEL = "tvfull/device_identity"
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
     }
 
@@ -40,18 +42,30 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var eventSink: EventChannel.EventSink? = null
     private var currentUrl: String? = null
     private var isLive = false
-    private var playbackGeneration = 0L
     private var endedRecoveries = 0
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEVICE_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                if (call.method == "getAndroidId") {
+                    result.success(
+                        Settings.Secure.getString(
+                            contentResolver,
+                            Settings.Secure.ANDROID_ID,
+                        )
+                    )
+                } else {
+                    result.notImplemented()
+                }
+            }
 
         EventChannel(flutterEngine.dartExecutor.binaryMessenger, EVENT_CHANNEL)
             .setStreamHandler(object : EventChannel.StreamHandler {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
                 }
-
                 override fun onCancel(arguments: Any?) {
                     eventSink = null
                 }
@@ -70,22 +84,15 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     ) {
         try {
             when (call.method) {
-                "initialize" -> {
-                    val minBuffer = call.argument<Int>("minBuffer") ?: 5000
-                    val maxBuffer = call.argument<Int>("maxBuffer") ?: 15000
-                    val playBuffer = call.argument<Int>("bufferForPlayback") ?: 2500
-                    val rebuffer = call.argument<Int>("bufferForPlaybackAfterRebuffer") ?: 1000
-                    result.success(
-                        initializePlayer(
-                            flutterEngine,
-                            minBuffer,
-                            maxBuffer,
-                            playBuffer,
-                            rebuffer,
-                        )
+                "initialize" -> result.success(
+                    initializePlayer(
+                        flutterEngine,
+                        call.argument<Int>("minBuffer") ?: 5000,
+                        call.argument<Int>("maxBuffer") ?: 15000,
+                        call.argument<Int>("bufferForPlayback") ?: 2500,
+                        call.argument<Int>("bufferForPlaybackAfterRebuffer") ?: 1000,
                     )
-                }
-
+                )
                 "prepare" -> {
                     val url = call.argument<String>("url")
                     if (url.isNullOrBlank()) {
@@ -93,89 +100,58 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                         return
                     }
                     @Suppress("UNCHECKED_CAST")
-                    val headers = (
-                        call.argument<Map<String, String>>("headers") ?: emptyMap()
-                    ).toMutableMap()
+                    val headers = (call.argument<Map<String, String>>("headers") ?: emptyMap()).toMutableMap()
                     val userAgent = call.argument<String>("userAgent") ?: DEFAULT_UA
                     val position = call.argument<Number>("position")?.toLong() ?: 0L
                     isLive = call.argument<Boolean>("isLive") ?: true
                     prepare(url, headers, userAgent, position)
                     result.success(null)
                 }
-
-                "play" -> {
-                    player?.play()
-                    result.success(null)
-                }
-
-                "pause" -> {
-                    player?.pause()
-                    result.success(null)
-                }
-
+                "play" -> { player?.play(); result.success(null) }
+                "pause" -> { player?.pause(); result.success(null) }
                 "seekTo" -> {
                     val raw = call.argument<Number>("position")?.toLong() ?: 0L
                     val duration = player?.duration ?: 0L
-                    val target = if (duration > 0 && duration != C.TIME_UNSET) {
-                        raw.coerceIn(0L, duration)
-                    } else {
-                        raw.coerceAtLeast(0L)
-                    }
+                    val target = if (duration > 0 && duration != C.TIME_UNSET) raw.coerceIn(0L, duration) else raw.coerceAtLeast(0L)
                     player?.seekTo(target)
                     result.success(null)
                 }
-
-                "getCurrentPosition" ->
-                    result.success((player?.currentPosition ?: 0L).coerceAtLeast(0L))
-
-                "getBufferedPosition" ->
-                    result.success((player?.bufferedPosition ?: 0L).coerceAtLeast(0L))
-
+                "getCurrentPosition" -> result.success((player?.currentPosition ?: 0L).coerceAtLeast(0L))
+                "getBufferedPosition" -> result.success((player?.bufferedPosition ?: 0L).coerceAtLeast(0L))
                 "getDuration" -> {
                     val value = player?.duration ?: 0L
                     result.success(if (value < 0L || value == C.TIME_UNSET) 0L else value)
                 }
-
-                "setAudioTrack" -> {
-                    result.success(
-                        selectTrack(
-                            C.TRACK_TYPE_AUDIO,
-                            call.argument<Number>("groupIndex")?.toInt(),
-                            call.argument<Number>("trackIndex")?.toInt(),
-                            call.argument<Boolean>("auto") ?: false,
-                            false,
-                        )
+                "setAudioTrack" -> result.success(
+                    selectTrack(
+                        C.TRACK_TYPE_AUDIO,
+                        call.argument<Number>("groupIndex")?.toInt(),
+                        call.argument<Number>("trackIndex")?.toInt(),
+                        call.argument<Boolean>("auto") ?: false,
+                        false,
                     )
-                }
-
-                "setSubtitleTrack" -> {
-                    result.success(
-                        selectTrack(
-                            C.TRACK_TYPE_TEXT,
-                            call.argument<Number>("groupIndex")?.toInt(),
-                            call.argument<Number>("trackIndex")?.toInt(),
-                            call.argument<Boolean>("auto") ?: false,
-                            call.argument<Boolean>("off") ?: false,
-                        )
+                )
+                "setSubtitleTrack" -> result.success(
+                    selectTrack(
+                        C.TRACK_TYPE_TEXT,
+                        call.argument<Number>("groupIndex")?.toInt(),
+                        call.argument<Number>("trackIndex")?.toInt(),
+                        call.argument<Boolean>("auto") ?: false,
+                        call.argument<Boolean>("off") ?: false,
                     )
-                }
-
-                "dispose" -> {
-                    disposePlayer()
-                    result.success(null)
-                }
-
+                )
+                "dispose" -> { disposePlayer(); result.success(null) }
                 else -> result.notImplemented()
             }
         } catch (t: Throwable) {
-            val message = t.message ?: t.javaClass.simpleName
             eventSink?.success(
                 mapOf(
                     "eventType" to "videoError",
-                    "error" to "PLAYER_EXCEPTION · $message",
+                    "errorCode" to "PLAYER_EXCEPTION",
+                    "error" to (t.message ?: t.javaClass.simpleName),
                 )
             )
-            result.error("PLAYER_EXCEPTION", message, null)
+            result.error("PLAYER_EXCEPTION", t.message ?: t.javaClass.simpleName, null)
         }
     }
 
@@ -188,15 +164,12 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     ): Long {
         disposePlayer()
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(minBuffer, maxBuffer, playBuffer, rebuffer)
             .build()
-
         val renderersFactory = NextRenderersFactory(this)
             .setEnableDecoderFallback(true)
             .setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_ON)
-
         player = ExoPlayer.Builder(this)
             .setLoadControl(loadControl)
             .setRenderersFactory(renderersFactory)
@@ -212,7 +185,6 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 exo.addListener(this)
                 exo.addAnalyticsListener(this)
             }
-
         textureEntry = flutterEngine.renderer.createSurfaceTexture()
         surface = Surface(textureEntry!!.surfaceTexture())
         player!!.setVideoSurface(surface)
@@ -228,20 +200,15 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
         currentUrl = url
         endedRecoveries = 0
-        playbackGeneration++
-
         exo.stop()
         exo.clearMediaItems()
-
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(userAgent)
             .setAllowCrossProtocolRedirects(true)
-        if (headers.isNotEmpty()) {
-            httpFactory.setDefaultRequestProperties(headers)
-        }
-
-        val item = MediaItem.Builder().setUri(Uri.parse(url)).build()
-        val source = DefaultMediaSourceFactory(httpFactory).createMediaSource(item)
+        if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
+        val source = DefaultMediaSourceFactory(httpFactory).createMediaSource(
+            MediaItem.Builder().setUri(Uri.parse(url)).build()
+        )
         exo.setMediaSource(source)
         if (positionMs > 0L) exo.seekTo(positionMs)
         exo.prepare()
@@ -256,15 +223,12 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         off: Boolean,
     ): Boolean {
         val exo = player ?: return false
-        val builder = exo.trackSelectionParameters.buildUpon()
-            .clearOverridesOfType(trackType)
-
+        val builder = exo.trackSelectionParameters.buildUpon().clearOverridesOfType(trackType)
         if (off) {
             builder.setTrackTypeDisabled(trackType, true)
             exo.trackSelectionParameters = builder.build()
             return true
         }
-
         builder.setTrackTypeDisabled(trackType, false)
         if (!auto) {
             if (groupIndex == null || trackIndex == null) return false
@@ -272,9 +236,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
             if (groupIndex !in groups.indices) return false
             val group = groups[groupIndex]
             if (group.type != trackType || trackIndex !in 0 until group.length) return false
-            builder.addOverride(
-                TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex))
-            )
+            builder.addOverride(TrackSelectionOverride(group.mediaTrackGroup, listOf(trackIndex)))
         }
         exo.trackSelectionParameters = builder.build()
         return true
@@ -313,30 +275,20 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         )
     }
 
-    override fun onTracksChanged(tracks: Tracks) {
-        sendTracks()
-    }
+    override fun onTracksChanged(tracks: Tracks) = sendTracks()
 
     override fun onPlaybackStateChanged(playbackState: Int) {
         when (playbackState) {
-            Player.STATE_BUFFERING ->
-                eventSink?.success(mapOf("eventType" to "bufferingStart"))
-
+            Player.STATE_BUFFERING -> eventSink?.success(mapOf("eventType" to "bufferingStart"))
             Player.STATE_READY -> {
                 endedRecoveries = 0
                 eventSink?.success(mapOf("eventType" to "prepared"))
                 eventSink?.success(mapOf("eventType" to "bufferingEnd"))
                 sendTracks()
             }
-
             Player.STATE_ENDED -> {
                 val exo = player
-                if (
-                    isLive &&
-                    currentUrl != null &&
-                    exo != null &&
-                    endedRecoveries < 5
-                ) {
+                if (isLive && currentUrl != null && exo != null && endedRecoveries < 5) {
                     endedRecoveries++
                     exo.seekToDefaultPosition()
                     exo.prepare()
@@ -350,13 +302,8 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
 
     override fun onVideoSizeChanged(videoSize: VideoSize) {
         if (videoSize.width <= 0 || videoSize.height <= 0) return
-        // LIVE conserva exactamente la estrategia estable de V9. En VOD evitamos
-        // forzar el tamaño del SurfaceTexture mientras el decoder está arrancando.
         if (isLive) {
-            textureEntry?.surfaceTexture()?.setDefaultBufferSize(
-                videoSize.width,
-                videoSize.height,
-            )
+            textureEntry?.surfaceTexture()?.setDefaultBufferSize(videoSize.width, videoSize.height)
         }
         eventSink?.success(
             mapOf(
@@ -372,7 +319,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         eventSink?.success(
             mapOf(
                 "eventType" to "videoError",
-                "error" to (error.errorCodeName + " · " + (error.message ?: "error de reproducción")),
+                "errorCode" to error.errorCode,
+                "errorCodeName" to error.errorCodeName,
+                "error" to (error.message ?: "error de reproducción"),
             )
         )
     }
@@ -404,7 +353,6 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     }
 
     private fun disposePlayer() {
-        playbackGeneration++
         player?.removeListener(this)
         player?.removeAnalyticsListener(this)
         player?.stop()

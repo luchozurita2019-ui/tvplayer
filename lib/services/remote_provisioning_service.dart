@@ -5,16 +5,16 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:shared_preferences/shared_preferences.dart';
 
+import 'device_identity_service.dart';
+
 class RemoteDeviceCredentials {
   final String code;
   final String secret;
-
   const RemoteDeviceCredentials({required this.code, required this.secret});
 }
 
 class RemoteDeviceCredentialsInvalidException implements Exception {
   const RemoteDeviceCredentialsInvalidException();
-
   @override
   String toString() => 'La vinculación de este dispositivo ya no es válida.';
 }
@@ -44,8 +44,10 @@ class RemoteProvisionedService {
     final rawExpires = json['expires_at']?.toString();
     return RemoteProvisionedService(
       id: json['id']?.toString() ?? '',
-      name: json['name']?.toString() ?? 'TV FULL',
-      type: json['type']?.toString().toLowerCase() ?? '',
+      name: json['name']?.toString().trim().isNotEmpty == true
+          ? json['name'].toString().trim()
+          : 'TV FULL PRO',
+      type: json['type']?.toString().trim().toLowerCase() ?? '',
       url: json['url']?.toString(),
       server: json['server']?.toString(),
       username: json['username']?.toString(),
@@ -57,7 +59,7 @@ class RemoteProvisionedService {
   }
 
   String get fingerprint {
-    final payload = jsonEncode(<String, dynamic>{
+    final payload = jsonEncode({
       'id': id,
       'name': name,
       'type': type,
@@ -75,7 +77,6 @@ class RemoteProvisioningConfiguration {
   final String deviceCode;
   final List<RemoteProvisionedService> services;
   final DateTime? syncedAt;
-
   const RemoteProvisioningConfiguration({
     required this.deviceCode,
     required this.services,
@@ -88,6 +89,7 @@ class RemoteProvisioningService {
       'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1';
   static const _deviceCodeKey = 'tv_full_remote_device_code_v1';
   static const _deviceSecretKey = 'tv_full_remote_device_secret_v1';
+  static const _identityBoundKey = 'tv_full_remote_identity_bound_v1';
   static const _fingerprintsKey = 'tv_full_remote_service_fingerprints_v1';
 
   bool get isSupported =>
@@ -107,57 +109,63 @@ class RemoteProvisioningService {
     final prefs = await SharedPreferences.getInstance();
     await prefs.remove(_deviceCodeKey);
     await prefs.remove(_deviceSecretKey);
+    await prefs.remove(_identityBoundKey);
   }
 
   Future<RemoteDeviceCredentials> ensureRegistered() async {
-    final existing = await loadCredentials();
-    if (existing != null) return existing;
     if (!isSupported) {
-      throw StateError(
-        'La vinculación remota está disponible en esta compilación para Android TV.',
-      );
+      throw StateError('La vinculación remota requiere Android TV.');
     }
-
-    final response = await http
-        .post(
-          Uri.parse('$_functionsBase/tvf-device-register'),
-          headers: const {
-            'Content-Type': 'application/json',
-            'Accept': 'application/json',
-          },
-          body: jsonEncode(const {
-            'platform': 'android_tv',
-            'device_name': 'TV FULL Android TV',
-            'app_version': '1.0.0+1-android-tv-v10-vod-safe',
-          }),
-        )
-        .timeout(const Duration(seconds: 15));
-
-    if (response.statusCode != 200 && response.statusCode != 201) {
-      throw Exception(
-        'El servidor de TV FULL no pudo registrar este dispositivo (HTTP ${response.statusCode}).',
-      );
-    }
-
-    final decoded = jsonDecode(response.body);
-    if (decoded is! Map) {
-      throw Exception(
-        'El servidor de TV FULL devolvió una respuesta inválida.',
-      );
-    }
-    final data = Map<String, dynamic>.from(decoded);
-    final code = data['device_code']?.toString().trim() ?? '';
-    final secret = data['device_secret']?.toString().trim() ?? '';
-    if (code.isEmpty || secret.isEmpty) {
-      throw Exception(
-        'El servidor no devolvió las credenciales del dispositivo.',
-      );
-    }
-
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_deviceCodeKey, code);
-    await prefs.setString(_deviceSecretKey, secret);
-    return RemoteDeviceCredentials(code: code, secret: secret);
+    final existing = await loadCredentials();
+    final hardwareHash = await DeviceIdentityService.instance.hardwareHash();
+
+    if (existing != null && prefs.getBool(_identityBoundKey) == true) {
+      return existing;
+    }
+
+    final body = <String, dynamic>{
+      'platform': 'android_tv',
+      'device_name': 'TV FULL PRO Android TV',
+      'app_version': '1.1.0+2-tv-full-pro-clean',
+      if (hardwareHash != null) 'hardware_hash': hardwareHash,
+      if (existing != null) 'device_code': existing.code,
+      if (existing != null) 'device_secret': existing.secret,
+    };
+
+    try {
+      final response = await http
+          .post(
+            Uri.parse('$_functionsBase/tvf-device-register'),
+            headers: const {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+            },
+            body: jsonEncode(body),
+          )
+          .timeout(const Duration(seconds: 10));
+
+      if (response.statusCode != 200 && response.statusCode != 201) {
+        if (existing != null) return existing;
+        throw Exception('No se pudo registrar la TV (HTTP ${response.statusCode}).');
+      }
+      final decoded = jsonDecode(response.body);
+      if (decoded is! Map) throw const FormatException('Registro inválido.');
+      final data = Map<String, dynamic>.from(decoded);
+      final code = data['device_code']?.toString().trim() ?? '';
+      final secret = data['device_secret']?.toString().trim() ?? '';
+      if (code.isEmpty || secret.isEmpty) {
+        if (existing != null) return existing;
+        throw const FormatException('Registro sin credenciales.');
+      }
+      await prefs.setString(_deviceCodeKey, code);
+      await prefs.setString(_deviceSecretKey, secret);
+      if (hardwareHash != null) await prefs.setBool(_identityBoundKey, true);
+      return RemoteDeviceCredentials(code: code, secret: secret);
+    } catch (_) {
+      if (existing != null) return existing;
+      rethrow;
+    }
   }
 
   Future<RemoteProvisioningConfiguration> fetchConfiguration(
@@ -170,50 +178,49 @@ class RemoteProvisioningService {
         'x-tvfull-device-code': credentials.code,
         'x-tvfull-device-secret': credentials.secret,
       },
-    ).timeout(const Duration(seconds: 15));
+    ).timeout(const Duration(seconds: 10));
 
-    if (response.statusCode == 403) {
-      throw Exception(
-        'Este dispositivo fue desactivado desde el panel TV FULL.',
-      );
-    }
     if (response.statusCode == 401) {
       throw const RemoteDeviceCredentialsInvalidException();
     }
+    if (response.statusCode == 403) {
+      try {
+        final body = jsonDecode(response.body);
+        if (body is Map && body['message'] != null) {
+          throw Exception(body['message'].toString());
+        }
+      } catch (error) {
+        if (error is Exception) rethrow;
+      }
+      throw Exception('Este dispositivo fue desactivado desde TV FULL PRO.');
+    }
     if (response.statusCode != 200) {
-      throw Exception(
-        'No se pudo sincronizar con TV FULL (HTTP ${response.statusCode}).',
-      );
+      throw Exception('No se pudo sincronizar TV FULL PRO (HTTP ${response.statusCode}).');
     }
 
     final decoded = jsonDecode(response.body);
-    if (decoded is! Map) {
-      throw Exception(
-        'El servidor de TV FULL devolvió una configuración inválida.',
-      );
-    }
+    if (decoded is! Map) throw const FormatException('Configuración inválida.');
     final data = Map<String, dynamic>.from(decoded);
     final rawDevice = data['device'];
     final device = rawDevice is Map
         ? Map<String, dynamic>.from(rawDevice)
         : const <String, dynamic>{};
-    final rawServices = data['services'];
     final services = <RemoteProvisionedService>[];
+    final rawServices = data['services'];
     if (rawServices is List) {
-      for (final item in rawServices) {
-        if (item is! Map) continue;
+      for (final raw in rawServices) {
+        if (raw is! Map) continue;
         final service = RemoteProvisionedService.fromJson(
-          Map<String, dynamic>.from(item),
+          Map<String, dynamic>.from(raw),
         );
         if (service.id.isEmpty) continue;
         if (service.type != 'm3u' && service.type != 'xtream') continue;
         services.add(service);
       }
     }
-
     return RemoteProvisioningConfiguration(
       deviceCode: device['code']?.toString() ?? credentials.code,
-      services: services,
+      services: List.unmodifiable(services),
       syncedAt: DateTime.tryParse(data['synced_at']?.toString() ?? ''),
     );
   }
@@ -221,20 +228,18 @@ class RemoteProvisioningService {
   Future<Map<String, String>> loadFingerprints() async {
     final prefs = await SharedPreferences.getInstance();
     final raw = prefs.getString(_fingerprintsKey);
-    if (raw == null || raw.isEmpty) return <String, String>{};
+    if (raw == null || raw.isEmpty) return {};
     try {
       final decoded = jsonDecode(raw);
-      if (decoded is! Map) return <String, String>{};
-      return decoded.map(
-        (key, value) => MapEntry(key.toString(), value.toString()),
-      );
+      if (decoded is! Map) return {};
+      return decoded.map((key, value) => MapEntry(key.toString(), value.toString()));
     } catch (_) {
-      return <String, String>{};
+      return {};
     }
   }
 
-  Future<void> saveFingerprints(Map<String, String> fingerprints) async {
+  Future<void> saveFingerprints(Map<String, String> values) async {
     final prefs = await SharedPreferences.getInstance();
-    await prefs.setString(_fingerprintsKey, jsonEncode(fingerprints));
+    await prefs.setString(_fingerprintsKey, jsonEncode(values));
   }
 }
