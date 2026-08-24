@@ -25,16 +25,16 @@ class Playlist {
     this.sourceType = PlaylistSourceType.m3u,
   });
 
-  /// Todas las categorías presentes en la lista, ordenadas.
+  /// Todas las categorías presentes en la lista, en el orden del proveedor.
   List<String> get groups {
-    final set = <String>{};
-    for (final c in channels) {
-      if (c.group != null && c.group!.trim().isNotEmpty) {
-        set.add(c.group!.trim());
-      }
+    final seen = <String>{};
+    final groups = <String>[];
+    for (final channel in channels) {
+      final group = channel.group?.trim();
+      if (group == null || group.isEmpty) continue;
+      if (seen.add(group)) groups.add(group);
     }
-    final list = set.toList()..sort();
-    return list;
+    return groups;
   }
 
   Map<String, dynamic> toJson() => {
