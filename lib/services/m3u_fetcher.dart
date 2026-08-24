@@ -38,8 +38,7 @@ class M3uFetcher {
         final request = http.Request('GET', Uri.parse(url))
           ..headers.addAll(const {
             'User-Agent': _browserUserAgent,
-            'Accept':
-                'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
+            'Accept': 'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
           });
 
         // IMPORTANTE: send() completa cuando llegan los headers. El viejo
@@ -86,15 +85,17 @@ class M3uFetcher {
         // cero automáticamente. Es la diferencia clave respecto de V3.7/V3.8.
         throw Exception(e.message);
       } on TimeoutException {
-        lastError =
-            Exception('El servidor tardó demasiado en iniciar la respuesta');
+        lastError = Exception(
+          'El servidor tardó demasiado en iniciar la respuesta',
+        );
         if (attempt < maxRetries) {
           await _backoff(attempt);
           continue;
         }
       } on SocketException {
-        lastError =
-            Exception('No hay conexión a internet o el servidor no responde');
+        lastError = Exception(
+          'No hay conexión a internet o el servidor no responde',
+        );
         if (attempt < maxRetries) {
           await _backoff(attempt);
           continue;
@@ -106,8 +107,9 @@ class M3uFetcher {
           continue;
         }
       } on http.ClientException {
-        lastError =
-            Exception('Error HTTP al conectar con el servidor de la lista');
+        lastError = Exception(
+          'Error HTTP al conectar con el servidor de la lista',
+        );
         if (attempt < maxRetries) {
           await _backoff(attempt);
           continue;

@@ -14,7 +14,8 @@ import 'xtream_service.dart';
 import 'xtream_vod_service.dart';
 
 typedef XtreamCatalogProgressCallback = void Function(
-    XtreamCatalogProgress progress);
+  XtreamCatalogProgress progress,
+);
 
 class XtreamCatalogProgress {
   final String section;
@@ -670,20 +671,6 @@ class XtreamFastCatalogService {
     await _writeCache(playlistUrl, 'movies', payload);
   }
 
-  Future<void> _writeSeriesCache(
-    String playlistUrl,
-    XtreamSeriesCatalogSnapshot snapshot,
-  ) async {
-    final payload = <String, dynamic>{
-      'version': _cacheVersion,
-      'kind': 'series',
-      'savedAt': snapshot.savedAt.millisecondsSinceEpoch,
-      'categories': snapshot.categories,
-      'items': snapshot.series.map(_seriesToMap).toList(growable: false),
-    };
-    await _writeCache(playlistUrl, 'series', payload);
-  }
-
   Future<void> _writeCache(
     String playlistUrl,
     String kind,
@@ -867,7 +854,7 @@ Map<String, dynamic> _prepareMovieCatalog(Map<String, String> input) {
     });
   }
 
-  final categoryList = foundCategories.toList()..sort();
+  final categoryList = foundCategories.toList(growable: false);
   return <String, dynamic>{'items': items, 'categories': categoryList};
 }
 
@@ -911,7 +898,7 @@ Map<String, dynamic> _prepareSeriesCatalog(Map<String, String> input) {
     });
   }
 
-  final categoryList = foundCategories.toList()..sort();
+  final categoryList = foundCategories.toList(growable: false);
   return <String, dynamic>{'items': items, 'categories': categoryList};
 }
 
@@ -997,31 +984,16 @@ List<XtreamSeriesSummary> _seriesListFromPrepared(dynamic raw) {
 }
 
 Map<String, dynamic> _movieToMap(XtreamVodSummary movie) => <String, dynamic>{
-      'id': movie.id,
-      'name': movie.name,
-      'extension': movie.extension,
-      'cover': movie.cover,
-      'category': movie.category,
-      'rating': movie.rating,
-      'releaseDate': movie.releaseDate,
-      'genre': movie.genre,
-      'directSource': movie.directSource,
-    };
-
-Map<String, dynamic> _seriesToMap(XtreamSeriesSummary series) =>
-    <String, dynamic>{
-      'id': series.id,
-      'name': series.name,
-      'cover': series.cover,
-      'category': series.category,
-      'plot': series.plot,
-      'cast': series.cast,
-      'director': series.director,
-      'genre': series.genre,
-      'releaseDate': series.releaseDate,
-      'rating': series.rating,
-      'backdrops': series.backdrops,
-    };
+  'id': movie.id,
+  'name': movie.name,
+  'extension': movie.extension,
+  'cover': movie.cover,
+  'category': movie.category,
+  'rating': movie.rating,
+  'releaseDate': movie.releaseDate,
+  'genre': movie.genre,
+  'directSource': movie.directSource,
+};
 
 XtreamConnectionResult? _provisionalConnectionFromPlaylistUrl(String raw) {
   final uri = Uri.tryParse(raw.trim());
@@ -1063,7 +1035,7 @@ List<String> _categoriesFromMovies(List<XtreamVodSummary> movies) {
     final value = movie.category?.trim();
     if (value != null && value.isNotEmpty) categories.add(value);
   }
-  final result = categories.toList()..sort();
+  final result = categories.toList(growable: false);
   return List<String>.unmodifiable(result);
 }
 
@@ -1073,7 +1045,7 @@ List<String> _categoriesFromSeries(List<XtreamSeriesSummary> series) {
     final value = item.category?.trim();
     if (value != null && value.isNotEmpty) categories.add(value);
   }
-  final result = categories.toList()..sort();
+  final result = categories.toList(growable: false);
   return List<String>.unmodifiable(result);
 }
 
@@ -1084,21 +1056,6 @@ List<String> _stringList(dynamic raw) {
       .whereType<String>()
       .where((value) => value.isNotEmpty)
       .toList(growable: false);
-}
-
-List<String> _stringListDynamic(dynamic raw) {
-  if (raw is List) return _stringList(raw);
-  if (raw is String) {
-    final value = raw.trim();
-    if (value.startsWith('[')) {
-      try {
-        return _stringList(jsonDecode(value));
-      } catch (_) {}
-    }
-    final clean = _cleanText(value);
-    return clean == null ? const <String>[] : <String>[clean];
-  }
-  return const <String>[];
 }
 
 String? _firstText(Map<String, dynamic> source, List<String> keys) {

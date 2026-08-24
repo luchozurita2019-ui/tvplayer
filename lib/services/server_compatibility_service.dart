@@ -15,15 +15,15 @@ enum ServerCompatibilityMode {
 
 extension ServerCompatibilityModeLabel on ServerCompatibilityMode {
   String get label => switch (this) {
-        ServerCompatibilityMode.direct => 'Directo',
-        ServerCompatibilityMode.nativeHttp => 'HTTP nativo',
-        ServerCompatibilityMode.mpvHttp => 'HTTP mpv',
-        ServerCompatibilityMode.tlsLegacy => 'TLS compatible',
-        ServerCompatibilityMode.compatible => 'Compatible',
-        ServerCompatibilityMode.liveRecovery => 'Live Recovery',
-        ServerCompatibilityMode.advanced => 'Compatibilidad avanzada',
-        ServerCompatibilityMode.xtreamHls => 'Xtream HLS',
-      };
+    ServerCompatibilityMode.direct => 'Directo',
+    ServerCompatibilityMode.nativeHttp => 'HTTP nativo',
+    ServerCompatibilityMode.mpvHttp => 'HTTP mpv',
+    ServerCompatibilityMode.tlsLegacy => 'TLS compatible',
+    ServerCompatibilityMode.compatible => 'Compatible',
+    ServerCompatibilityMode.liveRecovery => 'Live Recovery',
+    ServerCompatibilityMode.advanced => 'Compatibilidad avanzada',
+    ServerCompatibilityMode.xtreamHls => 'Xtream HLS',
+  };
 }
 
 class HostCompatibilityProfile {
@@ -64,23 +64,23 @@ class HostCompatibilityProfile {
   });
 
   Map<String, dynamic> toJson() => {
-        'host': host,
-        'preferredMode': preferredMode.name,
-        'directFailures': directFailures,
-        'nativeHttpFailures': nativeHttpFailures,
-        'mpvHttpFailures': mpvHttpFailures,
-        'tlsLegacyFailures': tlsLegacyFailures,
-        'compatibleFailures': compatibleFailures,
-        'liveRecoveryFailures': liveRecoveryFailures,
-        'advancedFailures': advancedFailures,
-        'xtreamHlsFailures': xtreamHlsFailures,
-        'liveEofRecoveries': liveEofRecoveries,
-        'runtimeRecoveries': runtimeRecoveries,
-        'normalProbeFallbacks': normalProbeFallbacks,
-        'preferNormalProbe': preferNormalProbe,
-        'successes': successes,
-        'lastUpdatedEpochMs': lastUpdatedEpochMs,
-      };
+    'host': host,
+    'preferredMode': preferredMode.name,
+    'directFailures': directFailures,
+    'nativeHttpFailures': nativeHttpFailures,
+    'mpvHttpFailures': mpvHttpFailures,
+    'tlsLegacyFailures': tlsLegacyFailures,
+    'compatibleFailures': compatibleFailures,
+    'liveRecoveryFailures': liveRecoveryFailures,
+    'advancedFailures': advancedFailures,
+    'xtreamHlsFailures': xtreamHlsFailures,
+    'liveEofRecoveries': liveEofRecoveries,
+    'runtimeRecoveries': runtimeRecoveries,
+    'normalProbeFallbacks': normalProbeFallbacks,
+    'preferNormalProbe': preferNormalProbe,
+    'successes': successes,
+    'lastUpdatedEpochMs': lastUpdatedEpochMs,
+  };
 
   factory HostCompatibilityProfile.fromJson(Map<String, dynamic> json) {
     final rawMode = json['preferredMode'] as String?;
@@ -204,10 +204,7 @@ class ServerCompatibilityService {
     ];
   }
 
-  Future<void> recordSuccess(
-    String url,
-    ServerCompatibilityMode mode,
-  ) async {
+  Future<void> recordSuccess(String url, ServerCompatibilityMode mode) async {
     final profile = await profileForUrl(url);
     profile.successes++;
     profile.preferredMode = mode;
@@ -215,10 +212,7 @@ class ServerCompatibilityService {
     await _save();
   }
 
-  Future<void> recordFailure(
-    String url,
-    ServerCompatibilityMode mode,
-  ) async {
+  Future<void> recordFailure(String url, ServerCompatibilityMode mode) async {
     final profile = await profileForUrl(url);
     switch (mode) {
       case ServerCompatibilityMode.direct:

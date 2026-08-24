@@ -46,7 +46,6 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   Duration _duration = Duration.zero;
   bool _playing = false;
   bool _buffering = true;
-  bool _started = false;
   bool _overlayVisible = false;
   String? _error;
   Tracks _tracks = const Tracks();
@@ -56,7 +55,9 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   void initState() {
     super.initState();
     _player = Player(
-      configuration: PlayerConfiguration(bufferSize: widget.settings.bufferBytes),
+      configuration: PlayerConfiguration(
+        bufferSize: widget.settings.bufferBytes,
+      ),
     );
     _controller = VideoController(
       _player,
@@ -69,7 +70,6 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
     );
     _positionSub = _player.stream.position.listen((value) {
       if (!mounted) return;
-      if (value > Duration.zero) _started = true;
       setState(() => _position = value);
     });
     _durationSub = _player.stream.duration.listen((value) {
@@ -116,7 +116,6 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
       setState(() {
         _buffering = true;
         _error = null;
-        _started = false;
       });
     }
     try {
@@ -209,7 +208,9 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   }
 
   Future<void> _chooseAudio() async {
-    final items = _tracks.audio.where((item) => item.id != 'no').toList(growable: false);
+    final items = _tracks.audio
+        .where((item) => item.id != 'no')
+        .toList(growable: false);
     if (items.isEmpty) return;
     final chosen = await showDialog<AudioTrack>(
       context: context,
@@ -217,7 +218,8 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
         title: 'Audio',
         tracks: items,
         selectedId: _track.audio.id,
-        label: (item) => _trackLabel(item.id, item.title, item.language, auto: 'Automático'),
+        label: (item) =>
+            _trackLabel(item.id, item.title, item.language, auto: 'Automático'),
       ),
     );
     if (chosen != null) await _player.setAudioTrack(chosen);
@@ -254,8 +256,10 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
     final parts = <String>[];
     final cleanTitle = title?.trim() ?? '';
     final cleanLanguage = language?.trim() ?? '';
-    if (cleanLanguage.isNotEmpty && cleanLanguage != 'und') parts.add(cleanLanguage.toUpperCase());
-    if (cleanTitle.isNotEmpty && !parts.contains(cleanTitle)) parts.add(cleanTitle);
+    if (cleanLanguage.isNotEmpty && cleanLanguage != 'und')
+      parts.add(cleanLanguage.toUpperCase());
+    if (cleanTitle.isNotEmpty && !parts.contains(cleanTitle))
+      parts.add(cleanTitle);
     return parts.isEmpty ? 'Pista $id' : parts.join(' · ');
   }
 
@@ -353,11 +357,16 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
                       widget.channel.name,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w800),
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
                     ),
                   ),
-                  Text('${_clock(_position)} / ${_clock(_duration)}',
-                      style: const TextStyle(color: Colors.white70, fontSize: 13)),
+                  Text(
+                    '${_clock(_position)} / ${_clock(_duration)}',
+                    style: const TextStyle(color: Colors.white70, fontSize: 13),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
@@ -377,10 +386,13 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
                     autofocus: true,
                     icon: Icons.replay_10_rounded,
                     label: '-10 s',
-                    onPressed: () => unawaited(_seekBy(const Duration(seconds: -10))),
+                    onPressed: () =>
+                        unawaited(_seekBy(const Duration(seconds: -10))),
                   ),
                   _ControlButton(
-                    icon: _playing ? Icons.pause_rounded : Icons.play_arrow_rounded,
+                    icon: _playing
+                        ? Icons.pause_rounded
+                        : Icons.play_arrow_rounded,
                     label: _playing ? 'Pausa' : 'Play',
                     onPressed: () {
                       unawaited(_player.playOrPause());
@@ -390,7 +402,8 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
                   _ControlButton(
                     icon: Icons.forward_10_rounded,
                     label: '+10 s',
-                    onPressed: () => unawaited(_seekBy(const Duration(seconds: 10))),
+                    onPressed: () =>
+                        unawaited(_seekBy(const Duration(seconds: 10))),
                   ),
                   _ControlButton(
                     icon: Icons.volume_up_outlined,
@@ -417,43 +430,47 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   }
 
   Widget _errorView() => Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 520),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xEE10161D),
-            borderRadius: BorderRadius.circular(16),
+    child: Container(
+      constraints: const BoxConstraints(maxWidth: 520),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xEE10161D),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.movie_filter_outlined,
+            size: 44,
+            color: Colors.white54,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(Icons.movie_filter_outlined, size: 44, color: Colors.white54),
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+              FilledButton(
+                autofocus: true,
+                onPressed: () => unawaited(_open()),
+                child: const Text('Reintentar'),
               ),
-              const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  FilledButton(
-                    autofocus: true,
-                    onPressed: () => unawaited(_open()),
-                    child: const Text('Reintentar'),
-                  ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    child: const Text('Volver'),
-                  ),
-                ],
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('Volver'),
               ),
             ],
           ),
-        ),
-      );
+        ],
+      ),
+    ),
+  );
 }
 
 class _ControlButton extends StatelessWidget {
@@ -470,14 +487,14 @@ class _ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5),
-        child: OutlinedButton.icon(
-          autofocus: autofocus,
-          onPressed: onPressed,
-          icon: Icon(icon, size: 19),
-          label: Text(label),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 5),
+    child: OutlinedButton.icon(
+      autofocus: autofocus,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 19),
+      label: Text(label),
+    ),
+  );
 }
 
 class _TrackDialog<T> extends StatelessWidget {
@@ -501,39 +518,45 @@ class _TrackDialog<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Dialog(
-        backgroundColor: const Color(0xFF0D151E),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(title, style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900)),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: tracks.length,
-                    itemBuilder: (context, index) {
-                      final item = tracks[index];
-                      final selected = _id(item) == selectedId;
-                      return ListTile(
-                        autofocus: selected || (selectedId.isEmpty && index == 0),
-                        selected: selected,
-                        selectedTileColor: const Color(0xFF1677FF).withValues(alpha: .18),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-                        title: Text(label(item)),
-                        trailing: selected ? const Icon(Icons.check_rounded) : null,
-                        onTap: () => Navigator.of(context).pop(item),
-                      );
-                    },
-                  ),
-                ),
-              ],
+    backgroundColor: const Color(0xFF0D151E),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 520),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
             ),
-          ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: tracks.length,
+                itemBuilder: (context, index) {
+                  final item = tracks[index];
+                  final selected = _id(item) == selectedId;
+                  return ListTile(
+                    autofocus: selected || (selectedId.isEmpty && index == 0),
+                    selected: selected,
+                    selectedTileColor: const Color(0xFF1677FF)
+                        .withValues(alpha: .18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    title: Text(label(item)),
+                    trailing: selected ? const Icon(Icons.check_rounded) : null,
+                    onTap: () => Navigator.of(context).pop(item),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }

@@ -182,7 +182,9 @@ class ParentalControlService extends ChangeNotifier {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setStringList(_manualGroupsKey, _manualGroups.toList()..sort());
     await prefs.setStringList(
-        _allowedGroupsKey, _allowedGroups.toList()..sort());
+      _allowedGroupsKey,
+      _allowedGroups.toList()..sort(),
+    );
     notifyListeners();
   }
 

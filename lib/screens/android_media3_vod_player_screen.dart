@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
 
-const String _vodUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+const String _vodUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/96.0.4664.18 Safari/537.36';
 
@@ -88,13 +89,15 @@ class _AndroidMedia3VodPlayerScreenState
 
   Future<void> _initialize() async {
     try {
-      final id =
-          await _player.invokeMethod<int>('initialize', <String, Object?>{
-        'minBuffer': 5000,
-        'maxBuffer': 18000,
-        'bufferForPlayback': 2500,
-        'bufferForPlaybackAfterRebuffer': 1200,
-      });
+      final id = await _player.invokeMethod<int>(
+        'initialize',
+        <String, Object?>{
+          'minBuffer': 5000,
+          'maxBuffer': 18000,
+          'bufferForPlayback': 2500,
+          'bufferForPlaybackAfterRebuffer': 1200,
+        },
+      );
       if (!mounted) return;
       setState(() => _textureId = id);
       await _prepareCurrent();
@@ -271,8 +274,9 @@ class _AndroidMedia3VodPlayerScreenState
     if (!_ready) return;
     final max = _durationMs > 0 ? _durationMs : 1 << 31;
     final target = (_positionMs + deltaMs).clamp(0, max);
-    await _player
-        .invokeMethod<void>('seekTo', <String, Object?>{'position': target});
+    await _player.invokeMethod<void>('seekTo', <String, Object?>{
+      'position': target,
+    });
     if (mounted) setState(() => _positionMs = target);
     _showOverlay();
   }
@@ -294,27 +298,29 @@ class _AndroidMedia3VodPlayerScreenState
 
   Future<void> _selectAudio(_TrackOption? track) async {
     await _player.invokeMethod<void>(
-        'setAudioTrack',
-        track == null
-            ? <String, Object?>{'auto': true}
-            : <String, Object?>{
-                'groupIndex': track.groupIndex,
-                'trackIndex': track.trackIndex,
-              });
+      'setAudioTrack',
+      track == null
+          ? <String, Object?>{'auto': true}
+          : <String, Object?>{
+              'groupIndex': track.groupIndex,
+              'trackIndex': track.trackIndex,
+            },
+    );
     _showOverlay();
   }
 
   Future<void> _selectSubtitle(_TrackOption? track, {bool off = false}) async {
     await _player.invokeMethod<void>(
-        'setSubtitleTrack',
-        off
-            ? <String, Object?>{'off': true}
-            : track == null
-                ? <String, Object?>{'auto': true}
-                : <String, Object?>{
-                    'groupIndex': track.groupIndex,
-                    'trackIndex': track.trackIndex,
-                  });
+      'setSubtitleTrack',
+      off
+          ? <String, Object?>{'off': true}
+          : track == null
+          ? <String, Object?>{'auto': true}
+          : <String, Object?>{
+              'groupIndex': track.groupIndex,
+              'trackIndex': track.trackIndex,
+            },
+    );
     _showOverlay();
   }
 
@@ -329,8 +335,10 @@ class _AndroidMedia3VodPlayerScreenState
           child: ListView(
             shrinkWrap: true,
             children: [
-              const Text('AUDIO',
-                  style: TextStyle(fontWeight: FontWeight.w900)),
+              const Text(
+                'AUDIO',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
               ListTile(
                 leading: const Icon(Icons.auto_awesome_rounded),
                 title: const Text('Automático'),
@@ -343,8 +351,9 @@ class _AndroidMedia3VodPlayerScreenState
                 (track) => ListTile(
                   leading: const Icon(Icons.volume_up_rounded),
                   title: Text(track.displayName),
-                  trailing:
-                      track.selected ? const Icon(Icons.check_rounded) : null,
+                  trailing: track.selected
+                      ? const Icon(Icons.check_rounded)
+                      : null,
                   onTap: () {
                     Navigator.of(dialogContext).pop();
                     unawaited(_selectAudio(track));
@@ -352,8 +361,10 @@ class _AndroidMedia3VodPlayerScreenState
                 ),
               ),
               const Divider(),
-              const Text('SUBTÍTULOS',
-                  style: TextStyle(fontWeight: FontWeight.w900)),
+              const Text(
+                'SUBTÍTULOS',
+                style: TextStyle(fontWeight: FontWeight.w900),
+              ),
               ListTile(
                 leading: const Icon(Icons.subtitles_off_rounded),
                 title: const Text('Desactivados'),
@@ -374,8 +385,9 @@ class _AndroidMedia3VodPlayerScreenState
                 (track) => ListTile(
                   leading: const Icon(Icons.subtitles_rounded),
                   title: Text(track.displayName),
-                  trailing:
-                      track.selected ? const Icon(Icons.check_rounded) : null,
+                  trailing: track.selected
+                      ? const Icon(Icons.check_rounded)
+                      : null,
                   onTap: () {
                     Navigator.of(dialogContext).pop();
                     unawaited(_selectSubtitle(track));
@@ -505,7 +517,9 @@ class _AndroidMedia3VodPlayerScreenState
                         _channel.name,
                         textAlign: TextAlign.center,
                         style: const TextStyle(
-                            fontSize: 19, fontWeight: FontWeight.w900),
+                          fontSize: 19,
+                          fontWeight: FontWeight.w900,
+                        ),
                       ),
                       const SizedBox(height: 10),
                       Text(_error!, textAlign: TextAlign.center),
@@ -515,7 +529,8 @@ class _AndroidMedia3VodPlayerScreenState
                         children: [
                           FilledButton.icon(
                             onPressed: () => unawaited(
-                                _prepareCurrent(positionMs: _positionMs)),
+                              _prepareCurrent(positionMs: _positionMs),
+                            ),
                             icon: const Icon(Icons.refresh_rounded),
                             label: const Text('Reintentar'),
                           ),
@@ -554,7 +569,8 @@ class _AndroidMedia3VodPlayerScreenState
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
-                                    fontWeight: FontWeight.w800),
+                                  fontWeight: FontWeight.w800,
+                                ),
                               ),
                             ),
                             Text(_clock(_positionMs)),
@@ -578,9 +594,9 @@ class _AndroidMedia3VodPlayerScreenState
                               onPressed: () => unawaited(_seekBy(10000)),
                               icon: const Icon(Icons.forward_10_rounded),
                             ),
-                            Text(_durationMs > 0
-                                ? _clock(_durationMs)
-                                : '--:--'),
+                            Text(
+                              _durationMs > 0 ? _clock(_durationMs) : '--:--',
+                            ),
                             const SizedBox(width: 8),
                             IconButton(
                               tooltip: 'Audio y subtítulos',
@@ -591,8 +607,10 @@ class _AndroidMedia3VodPlayerScreenState
                             ),
                             TextButton.icon(
                               onPressed: () => Navigator.of(context).maybePop(),
-                              icon:
-                                  const Icon(Icons.grid_view_rounded, size: 20),
+                              icon: const Icon(
+                                Icons.grid_view_rounded,
+                                size: 20,
+                              ),
                               label: const Text('Catálogo'),
                             ),
                           ],

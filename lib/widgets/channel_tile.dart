@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+
 import '../models/channel.dart';
 import 'cached_artwork_image.dart';
 

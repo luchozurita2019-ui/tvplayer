@@ -24,8 +24,9 @@ class InternetSpeedTestService {
   static final InternetSpeedTestService instance = InternetSpeedTestService._();
 
   static const String _userAgent = 'TV FULL Internet Test/1.0';
-  static final Uri _downloadEndpoint =
-      Uri.parse('https://speed.cloudflare.com/__down');
+  static final Uri _downloadEndpoint = Uri.parse(
+    'https://speed.cloudflare.com/__down',
+  );
 
   final http.Client _client = http.Client();
 
@@ -45,11 +46,7 @@ class InternetSpeedTestService {
     final latencyMs = latencySamples[latencySamples.length ~/ 2];
 
     // Calentamiento corto para evitar que DNS/TLS domine la medición grande.
-    await _download(
-      256 * 1024,
-      timeout: requestTimeout,
-      sampleId: 'warmup',
-    );
+    await _download(256 * 1024, timeout: requestTimeout, sampleId: 'warmup');
 
     // Dos tamaños progresivos permiten que conexiones rápidas tengan tiempo de
     // alcanzar velocidad sostenida sin consumir una cantidad excesiva de datos.
@@ -67,7 +64,8 @@ class InternetSpeedTestService {
     final usable = samples.where((sample) => sample.bytes > 0).toList();
     if (usable.isEmpty) {
       throw Exception(
-          'No se recibieron datos suficientes para medir la velocidad.');
+        'No se recibieron datos suficientes para medir la velocidad.',
+      );
     }
 
     // Tomamos la mejor muestra sostenida. La muestra pequeña sirve para redes

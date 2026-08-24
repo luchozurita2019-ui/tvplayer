@@ -129,12 +129,16 @@ class IptvProvider extends ChangeNotifier {
       _remoteDeviceCode = credentials.code;
       RemoteProvisioningConfiguration configuration;
       try {
-        configuration = await _remoteProvisioning.fetchConfiguration(credentials);
+        configuration = await _remoteProvisioning.fetchConfiguration(
+          credentials,
+        );
       } on RemoteDeviceCredentialsInvalidException {
         await _remoteProvisioning.clearCredentials();
         credentials = await _remoteProvisioning.ensureRegistered();
         _remoteDeviceCode = credentials.code;
-        configuration = await _remoteProvisioning.fetchConfiguration(credentials);
+        configuration = await _remoteProvisioning.fetchConfiguration(
+          credentials,
+        );
       }
 
       _remoteDeviceCode = configuration.deviceCode;
@@ -176,7 +180,9 @@ class IptvProvider extends ChangeNotifier {
     String id,
     Playlist? previous,
   ) {
-    final name = service.name.trim().isEmpty ? 'TV FULL PRO' : service.name.trim();
+    final name = service.name.trim().isEmpty
+        ? 'TV FULL PRO'
+        : service.name.trim();
     if (service.type == 'm3u') {
       final url = service.url?.trim() ?? '';
       if (url.isEmpty) throw Exception('$name no tiene URL M3U.');
@@ -228,16 +234,18 @@ class IptvProvider extends ChangeNotifier {
       }
     }
     if (path.endsWith('/')) path = path.substring(0, path.length - 1);
-    return parsed.replace(
-      path: '$path/get.php',
-      queryParameters: {
-        'username': username,
-        'password': password,
-        'type': 'm3u_plus',
-        'output': 'ts',
-      },
-      fragment: '',
-    ).toString();
+    return parsed
+        .replace(
+          path: '$path/get.php',
+          queryParameters: {
+            'username': username,
+            'password': password,
+            'type': 'm3u_plus',
+            'output': 'ts',
+          },
+          fragment: '',
+        )
+        .toString();
   }
 
   void _normalizeSelection() {
@@ -428,9 +436,11 @@ class IptvProvider extends ChangeNotifier {
     final query = _searchQuery.trim().toLowerCase();
     if (query.isEmpty) return channels;
     return channels
-        .where((item) =>
-            item.name.toLowerCase().contains(query) ||
-            (item.group?.toLowerCase().contains(query) ?? false))
+        .where(
+          (item) =>
+              item.name.toLowerCase().contains(query) ||
+              (item.group?.toLowerCase().contains(query) ?? false),
+        )
         .toList(growable: false);
   }
 

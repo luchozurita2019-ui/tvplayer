@@ -65,24 +65,26 @@ class TvLocalStore {
   Future<List<Playlist>> loadServices() async {
     final db = await database;
     final rows = await db.query('services', orderBy: 'display_order ASC');
-    return rows.map((row) {
-      final rawType = row['source_type']?.toString() ?? 'm3u';
-      final type = PlaylistSourceType.values.firstWhere(
-        (item) => item.name == rawType,
-        orElse: () => PlaylistSourceType.m3u,
-      );
-      return Playlist(
-        id: row['id']!.toString(),
-        name: row['name']!.toString(),
-        source: row['source']!.toString(),
-        isRemote: (row['is_remote'] as int? ?? 1) == 1,
-        channels: const [],
-        lastUpdated: DateTime.fromMillisecondsSinceEpoch(
-          row['updated_at'] as int? ?? 0,
-        ),
-        sourceType: type,
-      );
-    }).toList(growable: false);
+    return rows
+        .map((row) {
+          final rawType = row['source_type']?.toString() ?? 'm3u';
+          final type = PlaylistSourceType.values.firstWhere(
+            (item) => item.name == rawType,
+            orElse: () => PlaylistSourceType.m3u,
+          );
+          return Playlist(
+            id: row['id']!.toString(),
+            name: row['name']!.toString(),
+            source: row['source']!.toString(),
+            isRemote: (row['is_remote'] as int? ?? 1) == 1,
+            channels: const [],
+            lastUpdated: DateTime.fromMillisecondsSinceEpoch(
+              row['updated_at'] as int? ?? 0,
+            ),
+            sourceType: type,
+          );
+        })
+        .toList(growable: false);
   }
 
   Future<void> saveServices(List<Playlist> playlists) async {
@@ -128,11 +130,10 @@ class TvLocalStore {
       );
       return;
     }
-    await db.insert(
-      'app_state',
-      {'key': 'selected_service_id', 'value': id.trim()},
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('app_state', {
+      'key': 'selected_service_id',
+      'value': id.trim(),
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<void> saveSnapshot(
@@ -141,16 +142,12 @@ class TvLocalStore {
     Object payload,
   ) async {
     final db = await database;
-    await db.insert(
-      'catalog_snapshots',
-      {
-        'service_id': serviceId,
-        'kind': kind,
-        'payload': jsonEncode(payload),
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('catalog_snapshots', {
+      'service_id': serviceId,
+      'kind': kind,
+      'payload': jsonEncode(payload),
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<dynamic> loadSnapshot(String serviceId, String kind) async {

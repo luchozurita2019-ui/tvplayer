@@ -27,7 +27,8 @@ class SectionCatalogService {
   static final SectionCatalogService instance = SectionCatalogService._();
 
   final TvLocalStore _store = TvLocalStore.instance;
-  final Map<String, Future<Map<TvSectionKind, SectionCatalogSnapshot>>> _pending = {};
+  final Map<String, Future<Map<TvSectionKind, SectionCatalogSnapshot>>>
+  _pending = {};
 
   Future<SectionCatalogSnapshot?> loadCached(
     Playlist playlist,
@@ -66,11 +67,12 @@ class SectionCatalogService {
       if (cached != null) return cached;
     }
     final all = await _refreshAll(playlist);
-    return all[kind] ?? const SectionCatalogSnapshot(
-      channels: [],
-      categories: [],
-      fromCache: false,
-    );
+    return all[kind] ??
+        const SectionCatalogSnapshot(
+          channels: [],
+          categories: [],
+          fromCache: false,
+        );
   }
 
   Future<Map<TvSectionKind, SectionCatalogSnapshot>> refreshAll(
@@ -120,14 +122,10 @@ class SectionCatalogService {
       );
       result[kind] = snapshot;
       unawaited(
-        _store.saveSnapshot(
-          playlist.id,
-          'm3u_${kind.name}',
-          {
-            'categories': categories,
-            'items': channels.map((e) => e.toJson()).toList(growable: false),
-          },
-        ),
+        _store.saveSnapshot(playlist.id, 'm3u_${kind.name}', {
+          'categories': categories,
+          'items': channels.map((e) => e.toJson()).toList(growable: false),
+        }),
       );
     }
     return result;
@@ -145,12 +143,24 @@ class SectionCatalogService {
     // En M3U el group-title es estructura explícita del proveedor. Hot Player
     // conserva esa estructura; TV FULL PRO la respeta en vez de forzar .ts=LIVE.
     if (_containsAny(group, const [
-      'series', 'serie', 'temporada', 'episodios', 'episodio', 'novelas',
+      'series',
+      'serie',
+      'temporada',
+      'episodios',
+      'episodio',
+      'novelas',
     ])) {
       return TvSectionKind.series;
     }
     if (_containsAny(group, const [
-      'peliculas', 'pelicula', 'movies', 'movie', 'vod', 'cine', 'films', 'film',
+      'peliculas',
+      'pelicula',
+      'movies',
+      'movie',
+      'vod',
+      'cine',
+      'films',
+      'film',
     ])) {
       return TvSectionKind.movies;
     }
@@ -171,8 +181,15 @@ class SectionCatalogService {
   }
 
   bool _hasVideoFile(String path) => const [
-        '.mp4', '.mkv', '.avi', '.mov', '.m4v', '.webm', '.wmv', '.flv',
-      ].any(path.endsWith);
+    '.mp4',
+    '.mkv',
+    '.avi',
+    '.mov',
+    '.m4v',
+    '.webm',
+    '.wmv',
+    '.flv',
+  ].any(path.endsWith);
 
   bool _containsAny(String value, List<String> terms) {
     for (final term in terms) {

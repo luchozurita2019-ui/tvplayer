@@ -60,8 +60,9 @@ class XtreamLiveFastService {
       if (channels.isEmpty) return null;
       return XtreamLiveCatalogSnapshot(
         channels: List<Channel>.unmodifiable(channels),
-        categories:
-            List<String>.unmodifiable(_stringList(payload['categories'])),
+        categories: List<String>.unmodifiable(
+          _stringList(payload['categories']),
+        ),
         savedAt: _dateFromMillis(payload['savedAt']) ?? DateTime.now(),
         fromCache: true,
       );
@@ -75,22 +76,16 @@ class XtreamLiveFastService {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
-    var connection =
-        await XtreamFastCatalogService.instance.connectionForPlaylist(
-      playlistUrl,
-      forceRefresh: forceSessionRefresh,
-    );
+    var connection = await XtreamFastCatalogService.instance
+        .connectionForPlaylist(playlistUrl, forceRefresh: forceSessionRefresh);
 
     try {
       return await _fetch(connection, playlistUrl, onProgress);
     } on _XtreamLiveHttpException catch (error) {
       if (error.statusCode != 401 && error.statusCode != 403) rethrow;
       XtreamFastCatalogService.instance.invalidateSession(playlistUrl);
-      connection =
-          await XtreamFastCatalogService.instance.connectionForPlaylist(
-        playlistUrl,
-        forceRefresh: true,
-      );
+      connection = await XtreamFastCatalogService.instance
+          .connectionForPlaylist(playlistUrl, forceRefresh: true);
       return _fetch(connection, playlistUrl, onProgress);
     }
   }
@@ -100,12 +95,14 @@ class XtreamLiveFastService {
     String playlistUrl,
     XtreamCatalogProgressCallback? onProgress,
   ) async {
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'LIVE',
-      phase: 'Cargando categoría',
-      step: 1,
-      totalSteps: 2,
-    ));
+    onProgress?.call(
+      const XtreamCatalogProgress(
+        section: 'LIVE',
+        phase: 'Cargando categoría',
+        step: 1,
+        totalSteps: 2,
+      ),
+    );
 
     String categoriesBody = '[]';
     try {
@@ -113,13 +110,15 @@ class XtreamLiveFastService {
         connection,
         'get_live_categories',
         _categoryTimeout,
-        onBytes: (bytes) => onProgress?.call(XtreamCatalogProgress(
-          section: 'LIVE',
-          phase: 'Cargando categoría',
-          step: 1,
-          totalSteps: 2,
-          receivedBytes: bytes,
-        )),
+        onBytes: (bytes) => onProgress?.call(
+          XtreamCatalogProgress(
+            section: 'LIVE',
+            phase: 'Cargando categoría',
+            step: 1,
+            totalSteps: 2,
+            receivedBytes: bytes,
+          ),
+        ),
       );
     } catch (_) {
       // Algunos clones no implementan categorías o responden demasiado lento.
@@ -127,24 +126,28 @@ class XtreamLiveFastService {
       categoriesBody = '[]';
     }
 
-    onProgress?.call(const XtreamCatalogProgress(
-      section: 'LIVE',
-      phase: 'Cargando lista',
-      step: 2,
-      totalSteps: 2,
-    ));
+    onProgress?.call(
+      const XtreamCatalogProgress(
+        section: 'LIVE',
+        phase: 'Cargando lista',
+        step: 2,
+        totalSteps: 2,
+      ),
+    );
 
     final streamsBody = await _downloadActionBody(
       connection,
       'get_live_streams',
       _liveTimeout,
-      onBytes: (bytes) => onProgress?.call(XtreamCatalogProgress(
-        section: 'LIVE',
-        phase: 'Cargando lista',
-        step: 2,
-        totalSteps: 2,
-        receivedBytes: bytes,
-      )),
+      onBytes: (bytes) => onProgress?.call(
+        XtreamCatalogProgress(
+          section: 'LIVE',
+          phase: 'Cargando lista',
+          step: 2,
+          totalSteps: 2,
+          receivedBytes: bytes,
+        ),
+      ),
     );
 
     final prepared = await compute(_prepareLiveCatalog, <String, String>{
@@ -162,8 +165,9 @@ class XtreamLiveFastService {
 
     final snapshot = XtreamLiveCatalogSnapshot(
       channels: List<Channel>.unmodifiable(channels),
-      categories:
-          List<String>.unmodifiable(_stringList(prepared['categories'])),
+      categories: List<String>.unmodifiable(
+        _stringList(prepared['categories']),
+      ),
       savedAt: DateTime.now(),
       fromCache: false,
     );
@@ -284,8 +288,10 @@ Map<String, dynamic> _prepareLiveCatalog(Map<String, String> input) {
     if (id == null || name == null) continue;
 
     final categoryId = _cleanText(item['category_id']);
-    final categoryFallback =
-        _firstText(item, const ['category_name', 'category']);
+    final categoryFallback = _firstText(item, const [
+      'category_name',
+      'category',
+    ]);
     final category = categoryId == null
         ? categoryFallback
         : categoryNames[categoryId] ?? categoryFallback;
@@ -297,16 +303,12 @@ Map<String, dynamic> _prepareLiveCatalog(Map<String, String> input) {
       _firstText(item, const ['container_extension', 'extension']),
       fallback: 'ts',
     );
-    final direct =
-        _resolveDirect(streamServer, _cleanText(item['direct_source']));
-    final url = direct ??
-        _liveUrl(
-          streamServer,
-          username,
-          password,
-          id,
-          extension,
-        );
+    final direct = _resolveDirect(
+      streamServer,
+      _cleanText(item['direct_source']),
+    );
+    final url =
+        direct ?? _liveUrl(streamServer, username, password, id, extension);
 
     prepared.add(<String, dynamic>{
       'name': name,
@@ -317,10 +319,7 @@ Map<String, dynamic> _prepareLiveCatalog(Map<String, String> input) {
     });
   }
 
-  return <String, dynamic>{
-    'items': prepared,
-    'categories': orderedCategories,
-  };
+  return <String, dynamic>{'items': prepared, 'categories': orderedCategories};
 }
 
 List<dynamic> _decodeList(String? raw) {
@@ -347,13 +346,15 @@ List<Channel> _channelsFromPrepared(dynamic raw) {
     final name = _cleanText(item['name']);
     final url = _cleanText(item['url']);
     if (name == null || url == null) continue;
-    channels.add(Channel(
-      name: name,
-      url: url,
-      logoUrl: _cleanText(item['logoUrl']),
-      group: _cleanText(item['group']),
-      tvgId: _cleanText(item['tvgId']),
-    ));
+    channels.add(
+      Channel(
+        name: name,
+        url: url,
+        logoUrl: _cleanText(item['logoUrl']),
+        group: _cleanText(item['group']),
+        tvgId: _cleanText(item['tvgId']),
+      ),
+    );
   }
   return channels;
 }
@@ -417,26 +418,25 @@ String _liveUrl(
   String streamId,
   String extension,
 ) {
-  final prefix =
-      base.pathSegments.where((segment) => segment.trim().isNotEmpty);
-  return base.replace(
-    pathSegments: <String>[
-      ...prefix,
-      'live',
-      username,
-      password,
-      '$streamId.$extension',
-    ],
-    query: '',
-    fragment: '',
-  ).toString();
+  final prefix = base.pathSegments.where(
+    (segment) => segment.trim().isNotEmpty,
+  );
+  return base
+      .replace(
+        pathSegments: <String>[
+          ...prefix,
+          'live',
+          username,
+          password,
+          '$streamId.$extension',
+        ],
+        query: '',
+        fragment: '',
+      )
+      .toString();
 }
 
-Uri _endpoint(
-  Uri base,
-  String action,
-  XtreamConnectionResult connection,
-) {
+Uri _endpoint(Uri base, String action, XtreamConnectionResult connection) {
   var path = base.path;
   if (path.isEmpty || path == '/') {
     path = '/player_api.php';

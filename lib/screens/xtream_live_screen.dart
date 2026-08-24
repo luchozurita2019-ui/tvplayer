@@ -56,12 +56,18 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     }
 
     final service = SectionCatalogService.instance;
-    final cached = await service.loadCached(widget.playlist, TvSectionKind.live);
+    final cached = await service.loadCached(
+      widget.playlist,
+      TvSectionKind.live,
+    );
     if (cached != null && cached.channels.isNotEmpty) {
       unawaited(_refreshM3u());
       return _LiveData(cached.channels);
     }
-    final fresh = await service.loadOrRefresh(widget.playlist, TvSectionKind.live);
+    final fresh = await service.loadOrRefresh(
+      widget.playlist,
+      TvSectionKind.live,
+    );
     return _LiveData(fresh.channels);
   }
 
@@ -72,15 +78,19 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         onProgress: (p) => _setStatus(p.label),
       );
       if (!mounted) return;
-      setState(() => _future = Future.value(
-            _LiveData(_normalizeXtreamChannels(fresh.channels)),
-          ));
+      setState(
+        () => _future = Future.value(
+          _LiveData(_normalizeXtreamChannels(fresh.channels)),
+        ),
+      );
     } catch (_) {}
   }
 
   Future<void> _refreshM3u() async {
     try {
-      final all = await SectionCatalogService.instance.refreshAll(widget.playlist);
+      final all = await SectionCatalogService.instance.refreshAll(
+        widget.playlist,
+      );
       final fresh = all[TvSectionKind.live];
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
       setState(() => _future = Future.value(_LiveData(fresh.channels)));
@@ -91,16 +101,18 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     final base = _xtreamBaseUri(widget.playlist.source);
     if (base == null) return channels;
     return channels
-        .map((channel) => Channel(
-              name: channel.name,
-              url: channel.url,
-              logoUrl: _resolveArtwork(base, channel.logoUrl),
-              group: channel.group,
-              tvgId: channel.tvgId,
-              httpUserAgent: channel.httpUserAgent,
-              httpReferrer: channel.httpReferrer,
-              httpHeaders: channel.httpHeaders,
-            ))
+        .map(
+          (channel) => Channel(
+            name: channel.name,
+            url: channel.url,
+            logoUrl: _resolveArtwork(base, channel.logoUrl),
+            group: channel.group,
+            tvgId: channel.tvgId,
+            httpUserAgent: channel.httpUserAgent,
+            httpReferrer: channel.httpReferrer,
+            httpHeaders: channel.httpHeaders,
+          ),
+        )
         .toList(growable: false);
   }
 
@@ -121,12 +133,14 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   String? _resolveArtwork(Uri base, String? raw) {
     final value = raw?.trim() ?? '';
-    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+      return null;
     if (value.startsWith('//')) return '${base.scheme}:$value';
     final parsed = Uri.tryParse(value);
     if (parsed != null &&
         (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-        parsed.host.isNotEmpty) return parsed.toString();
+        parsed.host.isNotEmpty)
+      return parsed.toString();
     return base.resolve(value).toString();
   }
 
@@ -144,7 +158,10 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         title: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const Text('TV EN VIVO', style: TextStyle(fontWeight: FontWeight.w900)),
+            const Text(
+              'TV EN VIVO',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
             Text(
               widget.playlist.name,
               style: const TextStyle(color: Colors.white54, fontSize: 12),
@@ -181,7 +198,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     final categories = data.categories;
     final visible = _category == null
         ? data.channels
-        : data.channels.where((item) => item.group == _category).toList(growable: false);
+        : data.channels
+              .where((item) => item.group == _category)
+              .toList(growable: false);
 
     return Row(
       children: [
@@ -201,14 +220,19 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                     autofocus: index == 0,
                     selected: selected,
                     minTileHeight: 50,
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
-                    selectedTileColor: const Color(0xFF1677FF).withValues(alpha: .18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(11),
+                    ),
+                    selectedTileColor: const Color(0xFF1677FF)
+                        .withValues(alpha: .18),
                     title: Text(
                       category ?? 'Todos',
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: TextStyle(
-                        fontWeight: selected ? FontWeight.w800 : FontWeight.w600,
+                        fontWeight: selected
+                            ? FontWeight.w800
+                            : FontWeight.w600,
                       ),
                     ),
                     onTap: () => setState(() => _category = category),
@@ -237,7 +261,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               Expanded(
                 child: ListView.builder(
                   padding: const EdgeInsets.fromLTRB(18, 0, 24, 24),
-                  cacheExtent: 80,
+                  scrollCacheExtent: 80,
                   itemCount: visible.length,
                   itemBuilder: (context, index) {
                     final channel = visible[index];
@@ -276,7 +300,11 @@ class _ChannelRow extends StatefulWidget {
   final Channel channel;
   final bool autofocus;
   final VoidCallback onTap;
-  const _ChannelRow({required this.channel, required this.onTap, this.autofocus = false});
+  const _ChannelRow({
+    required this.channel,
+    required this.onTap,
+    this.autofocus = false,
+  });
 
   @override
   State<_ChannelRow> createState() => _ChannelRowState();
@@ -318,7 +346,10 @@ class _ChannelRowState extends State<_ChannelRow> {
                         color: Colors.white.withValues(alpha: .04),
                         child: Text(
                           _initials(widget.channel.name),
-                          style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w900),
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w900,
+                          ),
                         ),
                       ),
                     ),
@@ -330,7 +361,10 @@ class _ChannelRowState extends State<_ChannelRow> {
                     widget.channel.name,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
                 if ((widget.channel.group ?? '').trim().isNotEmpty)
@@ -340,7 +374,10 @@ class _ChannelRowState extends State<_ChannelRow> {
                       widget.channel.group!,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(color: Colors.white38, fontSize: 12),
+                      style: const TextStyle(
+                        color: Colors.white38,
+                        fontSize: 12,
+                      ),
                     ),
                   ),
               ],
@@ -352,7 +389,11 @@ class _ChannelRowState extends State<_ChannelRow> {
   }
 
   String _initials(String value) {
-    final words = value.trim().split(RegExp(r'\s+')).where((e) => e.isNotEmpty).take(2);
+    final words = value
+        .trim()
+        .split(RegExp(r'\s+'))
+        .where((e) => e.isNotEmpty)
+        .take(2);
     final text = words.map((e) => e.substring(0, 1).toUpperCase()).join();
     return text.isEmpty ? 'TV' : text;
   }
@@ -379,15 +420,19 @@ class _Loading extends StatelessWidget {
   const _Loading({required this.message});
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const SizedBox(width: 34, height: 34, child: CircularProgressIndicator(strokeWidth: 3)),
-            const SizedBox(height: 14),
-            Text(message, style: const TextStyle(color: Colors.white60)),
-          ],
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const SizedBox(
+          width: 34,
+          height: 34,
+          child: CircularProgressIndicator(strokeWidth: 3),
         ),
-      );
+        const SizedBox(height: 14),
+        Text(message, style: const TextStyle(color: Colors.white60)),
+      ],
+    ),
+  );
 }
 
 class _ErrorView extends StatelessWidget {
@@ -396,15 +441,15 @@ class _ErrorView extends StatelessWidget {
   const _ErrorView({required this.message, required this.onRetry});
   @override
   Widget build(BuildContext context) => Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.tv_off_outlined, size: 44, color: Colors.white38),
-            const SizedBox(height: 12),
-            Text(message, style: const TextStyle(fontSize: 17)),
-            const SizedBox(height: 16),
-            FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
-          ],
-        ),
-      );
+    child: Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        const Icon(Icons.tv_off_outlined, size: 44, color: Colors.white38),
+        const SizedBox(height: 12),
+        Text(message, style: const TextStyle(fontSize: 17)),
+        const SizedBox(height: 16),
+        FilledButton(onPressed: onRetry, child: const Text('Reintentar')),
+      ],
+    ),
+  );
 }

@@ -147,7 +147,9 @@ class RemoteProvisioningService {
 
       if (response.statusCode != 200 && response.statusCode != 201) {
         if (existing != null) return existing;
-        throw Exception('No se pudo registrar la TV (HTTP ${response.statusCode}).');
+        throw Exception(
+          'No se pudo registrar la TV (HTTP ${response.statusCode}).',
+        );
       }
       final decoded = jsonDecode(response.body);
       if (decoded is! Map) throw const FormatException('Registro inválido.');
@@ -171,14 +173,16 @@ class RemoteProvisioningService {
   Future<RemoteProvisioningConfiguration> fetchConfiguration(
     RemoteDeviceCredentials credentials,
   ) async {
-    final response = await http.get(
-      Uri.parse('$_functionsBase/tvf-device-config'),
-      headers: {
-        'Accept': 'application/json',
-        'x-tvfull-device-code': credentials.code,
-        'x-tvfull-device-secret': credentials.secret,
-      },
-    ).timeout(const Duration(seconds: 10));
+    final response = await http
+        .get(
+          Uri.parse('$_functionsBase/tvf-device-config'),
+          headers: {
+            'Accept': 'application/json',
+            'x-tvfull-device-code': credentials.code,
+            'x-tvfull-device-secret': credentials.secret,
+          },
+        )
+        .timeout(const Duration(seconds: 10));
 
     if (response.statusCode == 401) {
       throw const RemoteDeviceCredentialsInvalidException();
@@ -195,7 +199,9 @@ class RemoteProvisioningService {
       throw Exception('Este dispositivo fue desactivado desde TV FULL PRO.');
     }
     if (response.statusCode != 200) {
-      throw Exception('No se pudo sincronizar TV FULL PRO (HTTP ${response.statusCode}).');
+      throw Exception(
+        'No se pudo sincronizar TV FULL PRO (HTTP ${response.statusCode}).',
+      );
     }
 
     final decoded = jsonDecode(response.body);
@@ -232,7 +238,9 @@ class RemoteProvisioningService {
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) return {};
-      return decoded.map((key, value) => MapEntry(key.toString(), value.toString()));
+      return decoded.map(
+        (key, value) => MapEntry(key.toString(), value.toString()),
+      );
     } catch (_) {
       return {};
     }

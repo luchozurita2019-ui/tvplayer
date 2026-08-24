@@ -190,10 +190,10 @@ class _LiveVideoViewState extends State<LiveVideoView> {
   }
 
   String get _fitLabel => switch (_fitIndex) {
-        1 => 'Zoom',
-        2 => 'Estirar',
-        _ => 'Original',
-      };
+    1 => 'Zoom',
+    2 => 'Estirar',
+    _ => 'Original',
+  };
 
   void _showOverlay({bool scheduleHide = true}) {
     _overlayTimer?.cancel();
@@ -227,7 +227,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
       return KeyEventResult.ignored;
     }
     final key = event.logicalKey;
-    final isCenter = key == LogicalKeyboardKey.select ||
+    final isCenter =
+        key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter;
     if (isCenter && !_overlayVisible) {
@@ -331,7 +332,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     final track = _selectedAudioTrack;
     if (track.id == 'auto') return 'Audio: Auto';
     if (track.id == 'no') return 'Audio: Off';
-    final label = _languageName(track.language) ??
+    final label =
+        _languageName(track.language) ??
         (track.title?.trim().isNotEmpty == true
             ? track.title!.trim()
             : 'Pista');
@@ -342,7 +344,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     final track = _selectedSubtitleTrack;
     if (track.id == 'no') return 'Subtítulos: Off';
     if (track.id == 'auto') return 'Subtítulos: Auto';
-    final label = _languageName(track.language) ??
+    final label =
+        _languageName(track.language) ??
         (track.title?.trim().isNotEmpty == true
             ? track.title!.trim()
             : 'Pista');
@@ -724,7 +727,7 @@ class _LiveVideoViewState extends State<LiveVideoView> {
         final compact = _androidTvBuild
             ? constraints.maxWidth < 720
             : constraints.maxWidth < 980 ||
-                MediaQuery.sizeOf(context).height < 520;
+                  MediaQuery.sizeOf(context).height < 520;
         final compactControls =
             compact || (_androidTvBuild && constraints.maxWidth < 1180);
         return Column(
@@ -840,8 +843,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
     final color = _isActuallyLive
         ? const Color(0xFFFF2D2D)
         : _buffering
-            ? const Color(0xFFFFC857)
-            : Colors.white38;
+        ? const Color(0xFFFFC857)
+        : Colors.white38;
     return Row(
       children: [
         Container(
@@ -1233,8 +1236,8 @@ class _LiveVideoViewState extends State<LiveVideoView> {
             _volume <= 0
                 ? Icons.volume_off_rounded
                 : _volume < 50
-                    ? Icons.volume_down_rounded
-                    : Icons.volume_up_rounded,
+                ? Icons.volume_down_rounded
+                : Icons.volume_up_rounded,
             color: Colors.white,
             size: 20,
           ),

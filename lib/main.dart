@@ -49,9 +49,12 @@ class TvFullProApp extends StatelessWidget {
         ),
         shortcuts: <ShortcutActivator, Intent>{
           ...WidgetsApp.defaultShortcuts,
-          const SingleActivator(LogicalKeyboardKey.select): const ActivateIntent(),
-          const SingleActivator(LogicalKeyboardKey.enter): const ActivateIntent(),
-          const SingleActivator(LogicalKeyboardKey.numpadEnter): const ActivateIntent(),
+          const SingleActivator(LogicalKeyboardKey.select):
+              const ActivateIntent(),
+          const SingleActivator(LogicalKeyboardKey.enter):
+              const ActivateIntent(),
+          const SingleActivator(LogicalKeyboardKey.numpadEnter):
+              const ActivateIntent(),
         },
         home: const HomeScreen(),
       ),

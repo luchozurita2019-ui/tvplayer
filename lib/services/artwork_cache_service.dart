@@ -49,8 +49,15 @@ class ArtworkCacheService {
   }
 
   Future<void> warmProvider(dynamic playlist) async {}
-  Future<void> warmSection(dynamic channels, {required int limit, Duration maxWait = const Duration(seconds: 1)}) async {}
-  Future<void> warmUrls(Iterable<String> urls, {Duration maxWait = const Duration(seconds: 1)}) async {}
+  Future<void> warmSection(
+    dynamic channels, {
+    required int limit,
+    Duration maxWait = const Duration(seconds: 1),
+  }) async {}
+  Future<void> warmUrls(
+    Iterable<String> urls, {
+    Duration maxWait = const Duration(seconds: 1),
+  }) async {}
 
   Future<void> clearBrowsingSession() async {
     _cancelPendingNetwork();
@@ -148,7 +155,8 @@ class ArtworkCacheService {
 
   bool _wanted(_ArtworkRequest request) {
     if (request.generation != _generation || _pausedForPlayback) return false;
-    if (request.demandDriven && (_interest[request.url] ?? 0) <= 0) return false;
+    if (request.demandDriven && (_interest[request.url] ?? 0) <= 0)
+      return false;
     return true;
   }
 
@@ -161,10 +169,12 @@ class ArtworkCacheService {
         continue;
       }
       _active++;
-      unawaited(_download(request).whenComplete(() {
-        _active--;
-        _drain();
-      }));
+      unawaited(
+        _download(request).whenComplete(() {
+          _active--;
+          _drain();
+        }),
+      );
     }
   }
 
@@ -265,7 +275,8 @@ class ArtworkCacheService {
     final uri = Uri.tryParse(value);
     if (uri == null ||
         !(uri.scheme == 'http' || uri.scheme == 'https') ||
-        uri.host.isEmpty) return null;
+        uri.host.isEmpty)
+      return null;
     return uri.toString();
   }
 

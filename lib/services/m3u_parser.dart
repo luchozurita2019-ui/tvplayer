@@ -78,8 +78,9 @@ class M3uParser {
         }
       } else if (line.startsWith('#EXTHTTP:')) {
         _parseExtHttp(line.substring('#EXTHTTP:'.length), pendingHeaders);
-      } else if (line
-              .startsWith('#KODIPROP:inputstream.adaptive.stream_headers=') ||
+      } else if (line.startsWith(
+            '#KODIPROP:inputstream.adaptive.stream_headers=',
+          ) ||
           line.startsWith('#KODIPROP:inputstream.adaptive.manifest_headers=')) {
         final equals = line.indexOf('=');
         if (equals != -1) {
@@ -95,28 +96,32 @@ class M3uParser {
         pendingReferrer ??= _headerValue(pendingHeaders, 'Referer');
 
         if (pendingName != null) {
-          channels.add(Channel(
-            name: pendingName,
-            url: parsed.url,
-            logoUrl: pendingLogo,
-            group: pendingGroup,
-            tvgId: pendingTvgId,
-            httpUserAgent: pendingUserAgent,
-            httpReferrer: pendingReferrer,
-            httpHeaders: pendingHeaders.isEmpty
-                ? null
-                : Map<String, String>.from(pendingHeaders),
-          ));
+          channels.add(
+            Channel(
+              name: pendingName,
+              url: parsed.url,
+              logoUrl: pendingLogo,
+              group: pendingGroup,
+              tvgId: pendingTvgId,
+              httpUserAgent: pendingUserAgent,
+              httpReferrer: pendingReferrer,
+              httpHeaders: pendingHeaders.isEmpty
+                  ? null
+                  : Map<String, String>.from(pendingHeaders),
+            ),
+          );
         } else {
-          channels.add(Channel(
-            name: parsed.url,
-            url: parsed.url,
-            httpUserAgent: pendingUserAgent,
-            httpReferrer: pendingReferrer,
-            httpHeaders: pendingHeaders.isEmpty
-                ? null
-                : Map<String, String>.from(pendingHeaders),
-          ));
+          channels.add(
+            Channel(
+              name: parsed.url,
+              url: parsed.url,
+              httpUserAgent: pendingUserAgent,
+              httpReferrer: pendingReferrer,
+              httpHeaders: pendingHeaders.isEmpty
+                  ? null
+                  : Map<String, String>.from(pendingHeaders),
+            ),
+          );
         }
 
         pendingName = null;

@@ -126,12 +126,18 @@ class XtreamSeriesService {
       final name = _cleanText(item['name']);
       if (id == null || name == null) continue;
       final categoryId = _cleanText(item['category_id']);
-      final categoryName = _firstText(item, const ['category_name', 'category']);
+      final categoryName = _firstText(item, const [
+        'category_name',
+        'category',
+      ]);
       series.add(
         XtreamSeriesSummary(
           id: id,
           name: name,
-          cover: _resolveArtwork(connection.streamServer, _cleanText(item['cover'])),
+          cover: _resolveArtwork(
+            connection.streamServer,
+            _cleanText(item['cover']),
+          ),
           category: categoryId == null
               ? categoryName
               : categories[categoryId] ?? categoryName,
@@ -139,7 +145,11 @@ class XtreamSeriesService {
           cast: _cleanText(item['cast']),
           director: _cleanText(item['director']),
           genre: _cleanText(item['genre']),
-          releaseDate: _firstText(item, const ['releaseDate', 'release_date', 'year']),
+          releaseDate: _firstText(item, const [
+            'releaseDate',
+            'release_date',
+            'year',
+          ]),
           rating: _firstText(item, const ['rating', 'rating_5based']),
           backdrops: _stringList(item['backdrop_path'])
               .map((value) => _resolveArtwork(connection.streamServer, value))
@@ -186,20 +196,25 @@ class XtreamSeriesService {
     final enriched = XtreamSeriesSummary(
       id: summary.id,
       name: _cleanText(info['name']) ?? summary.name,
-      cover: _resolveArtwork(active.streamServer, _cleanText(info['cover'])) ?? summary.cover,
+      cover:
+          _resolveArtwork(active.streamServer, _cleanText(info['cover'])) ??
+          summary.cover,
       category: summary.category,
       plot: _cleanText(info['plot']) ?? summary.plot,
       cast: _cleanText(info['cast']) ?? summary.cast,
       director: _cleanText(info['director']) ?? summary.director,
       genre: _cleanText(info['genre']) ?? summary.genre,
-      releaseDate: _firstText(info, const ['releaseDate', 'release_date', 'year']) ?? summary.releaseDate,
-      rating: _firstText(info, const ['rating', 'rating_5based']) ?? summary.rating,
+      releaseDate:
+          _firstText(info, const ['releaseDate', 'release_date', 'year']) ??
+          summary.releaseDate,
+      rating:
+          _firstText(info, const ['rating', 'rating_5based']) ?? summary.rating,
       backdrops: _stringList(info['backdrop_path']).isEmpty
           ? summary.backdrops
           : _stringList(info['backdrop_path'])
-              .map((value) => _resolveArtwork(active.streamServer, value))
-              .whereType<String>()
-              .toList(growable: false),
+                .map((value) => _resolveArtwork(active.streamServer, value))
+                .whereType<String>()
+                .toList(growable: false),
     );
 
     final seasons = <int, List<XtreamSeriesEpisode>>{};
@@ -240,13 +255,25 @@ class XtreamSeriesService {
     final info = item['info'] is Map
         ? Map<String, dynamic>.from(item['info'] as Map)
         : <String, dynamic>{};
-    final season = int.tryParse(item['season']?.toString() ?? '') ??
+    final season =
+        int.tryParse(item['season']?.toString() ?? '') ??
         int.tryParse(info['season']?.toString() ?? '') ??
         fallbackSeason;
-    final number = int.tryParse(item['episode_num']?.toString() ?? '') ??
-        int.tryParse(info['episode_num']?.toString() ?? '') ?? 1;
-    final rawDirect = _firstText(item, const ['direct_source', 'directSource', 'stream_source']) ??
-        _firstText(info, const ['direct_source', 'directSource', 'stream_source']);
+    final number =
+        int.tryParse(item['episode_num']?.toString() ?? '') ??
+        int.tryParse(info['episode_num']?.toString() ?? '') ??
+        1;
+    final rawDirect =
+        _firstText(item, const [
+          'direct_source',
+          'directSource',
+          'stream_source',
+        ]) ??
+        _firstText(info, const [
+          'direct_source',
+          'directSource',
+          'stream_source',
+        ]);
     final extension = _firstValidExtension([
       item['container_extension'],
       item['containerExtension'],
@@ -260,11 +287,13 @@ class XtreamSeriesService {
       id: id,
       season: season <= 0 ? 1 : season,
       number: number <= 0 ? 1 : number,
-      title: _cleanText(item['title']) ??
+      title:
+          _cleanText(item['title']) ??
           _cleanText(info['name']) ??
           'Episodio ${number <= 0 ? id : number}',
       extension: extension,
-      directSource: _resolveDirect(connection.streamServer, rawDirect) ??
+      directSource:
+          _resolveDirect(connection.streamServer, rawDirect) ??
           _seriesUrl(connection, id, extension),
       plot: _cleanText(info['plot']),
       duration: _cleanText(info['duration']),
@@ -309,23 +338,27 @@ class XtreamSeriesService {
 
 String? _resolveDirect(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+    return null;
   if (value.startsWith('//')) return '${base.scheme}:$value';
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty)
+    return parsed.toString();
   return value.startsWith('/') ? base.resolve(value).toString() : null;
 }
 
 String? _resolveArtwork(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+    return null;
   if (value.startsWith('//')) return '${base.scheme}:$value';
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty)
+    return parsed.toString();
   return base.resolve(value).toString();
 }
 
@@ -334,19 +367,22 @@ String _seriesUrl(
   String episodeId,
   String extension,
 ) {
-  final prefix = connection.streamServer.pathSegments
-      .where((segment) => segment.trim().isNotEmpty);
-  return connection.streamServer.replace(
-    pathSegments: [
-      ...prefix,
-      'series',
-      connection.username,
-      connection.password,
-      '$episodeId.$extension',
-    ],
-    query: '',
-    fragment: '',
-  ).toString();
+  final prefix = connection.streamServer.pathSegments.where(
+    (segment) => segment.trim().isNotEmpty,
+  );
+  return connection.streamServer
+      .replace(
+        pathSegments: [
+          ...prefix,
+          'series',
+          connection.username,
+          connection.password,
+          '$episodeId.$extension',
+        ],
+        query: '',
+        fragment: '',
+      )
+      .toString();
 }
 
 Uri _endpoint(Uri base, Map<String, String> query) {
@@ -362,8 +398,10 @@ Uri _endpoint(Uri base, Map<String, String> query) {
 
 String _firstValidExtension(Iterable<dynamic> candidates) {
   for (final candidate in candidates) {
-    final value = candidate?.toString().trim().toLowerCase().replaceFirst('.', '') ?? '';
-    if (value.isNotEmpty && RegExp(r'^[a-z0-9]{2,6}$').hasMatch(value)) return value;
+    final value =
+        candidate?.toString().trim().toLowerCase().replaceFirst('.', '') ?? '';
+    if (value.isNotEmpty && RegExp(r'^[a-z0-9]{2,6}$').hasMatch(value))
+      return value;
   }
   return 'mp4';
 }

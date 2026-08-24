@@ -89,7 +89,8 @@ class SourceContentScreen extends StatelessWidget {
                         icon: Icons.movie_outlined,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => XtreamMoviesScreen(playlist: active),
+                            builder: (_) =>
+                                XtreamMoviesScreen(playlist: active),
                           ),
                         ),
                       ),
@@ -102,7 +103,8 @@ class SourceContentScreen extends StatelessWidget {
                         icon: Icons.video_library_outlined,
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
-                            builder: (_) => XtreamSeriesScreen(playlist: active),
+                            builder: (_) =>
+                                XtreamSeriesScreen(playlist: active),
                           ),
                         ),
                       ),
@@ -150,8 +152,8 @@ class SourceContentScreen extends StatelessWidget {
                         child: ListTile(
                           autofocus: index == 0,
                           selected: selected,
-                          selectedTileColor:
-                              const Color(0xFF1677FF).withValues(alpha: .18),
+                          selectedTileColor: const Color(0xFF1677FF)
+                              .withValues(alpha: .18),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(12),
                           ),
@@ -165,8 +167,9 @@ class SourceContentScreen extends StatelessWidget {
                             item.sourceType.name.toUpperCase(),
                             style: const TextStyle(color: Colors.white38),
                           ),
-                          trailing:
-                              selected ? const Icon(Icons.check_rounded) : null,
+                          trailing: selected
+                              ? const Icon(Icons.check_rounded)
+                              : null,
                           onTap: () => Navigator.of(dialogContext).pop(item.id),
                         ),
                       );
