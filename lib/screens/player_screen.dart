@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/xtream_http_client.dart';
 import 'android_media3_texture_player_screen.dart';
 import 'tv_full_vod_player_screen.dart';
 
@@ -35,6 +36,10 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
+    // Al comenzar reproducción, cualquier petición Xtream de navegación que
+    // siga activa cede inmediatamente la red. Media3 LIVE y MediaKit VOD usan
+    // sus propios clientes, por lo que este reinicio no corta el stream.
+    XtreamHttpClient.cancelBrowsingRequests();
     ArtworkCacheService.instance.pauseForPlayback();
   }
 
