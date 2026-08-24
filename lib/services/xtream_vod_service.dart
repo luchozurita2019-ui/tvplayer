@@ -54,6 +54,10 @@ class XtreamVodDetails {
   final String? rating;
   final String? duration;
   final String? country;
+  final String? language;
+  final String? originalLanguage;
+  final String? audioInfo;
+  final String? translation;
   final String? backdrop;
   final String? trailerUrl;
   final String? directSource;
@@ -69,6 +73,10 @@ class XtreamVodDetails {
     this.rating,
     this.duration,
     this.country,
+    this.language,
+    this.originalLanguage,
+    this.audioInfo,
+    this.translation,
     this.backdrop,
     this.trailerUrl,
     this.directSource,
@@ -202,6 +210,10 @@ class XtreamVodService {
 
       String? pick(List<String> keys) =>
           _firstText(info, keys) ?? _firstText(movieData, keys);
+      String? pickMetadata(List<String> keys) =>
+          _firstMetadataText(info, keys) ??
+          _firstMetadataText(movieData, keys);
+
       final extension = _cleanExtension(
         _firstText(movieData, const ['container_extension', 'extension']) ??
             _firstText(info, const ['container_extension', 'extension']) ??
@@ -238,8 +250,21 @@ class XtreamVodService {
             ]) ??
             summary.releaseDate,
         rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
-        duration: pick(const ['duration', 'duration_secs']),
-        country: pick(const ['country']),
+        duration: pick(const ['duration']) ??
+            _durationFromSeconds(pick(const ['duration_secs'])),
+        country: pickMetadata(const ['country']),
+        language: pickMetadata(
+          const ['language', 'spoken_languages', 'languages'],
+        ),
+        originalLanguage: pickMetadata(
+          const ['original_language', 'originalLanguage'],
+        ),
+        audioInfo: pickMetadata(
+          const ['audio_language', 'audio_languages', 'audio_info', 'audio'],
+        ),
+        translation: pickMetadata(
+          const ['translation', 'translation_type', 'audio_translation', 'dubbing'],
+        ),
         backdrop: backdrop,
         trailerUrl: _playableTrailer(
           _firstText(info, const [
@@ -320,6 +345,57 @@ class XtreamVodService {
     return null;
   }
 
+  static String? _firstMetadataText(
+    Map<String, dynamic> source,
+    List<String> keys,
+  ) {
+    for (final key in keys) {
+      final value = _metadataText(source[key]);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  static String? _metadataText(dynamic raw) {
+    if (raw == null) return null;
+    if (raw is bool) return raw ? 'Sí' : null;
+    if (raw is List) {
+      final values = raw
+          .map(_metadataText)
+          .whereType<String>()
+          .where((value) => value.isNotEmpty)
+          .toList(growable: false);
+      return values.isEmpty ? null : values.join(', ');
+    }
+    if (raw is Map) {
+      final map = Map<String, dynamic>.from(raw);
+      for (final key in const [
+        'name',
+        'label',
+        'language',
+        'title',
+        'iso_639_1',
+      ]) {
+        final value = _metadataText(map[key]);
+        if (value != null) return value;
+      }
+      return null;
+    }
+    if (raw is String) {
+      final value = raw.trim();
+      if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
+        return null;
+      }
+      if (value.startsWith('[') || value.startsWith('{')) {
+        try {
+          return _metadataText(jsonDecode(value));
+        } catch (_) {}
+      }
+      return value;
+    }
+    return _text(raw);
+  }
+
   static String? _text(dynamic raw) {
     if (raw == null) return null;
     final value = raw.toString().trim();
@@ -327,6 +403,17 @@ class XtreamVodService {
       return null;
     }
     return value;
+  }
+
+  static String? _durationFromSeconds(String? raw) {
+    final seconds = int.tryParse(raw?.trim() ?? '');
+    if (seconds == null || seconds <= 0) return null;
+    final hours = seconds ~/ 3600;
+    final minutes = (seconds % 3600) ~/ 60;
+    if (hours > 0) {
+      return '${hours}h ${minutes.toString().padLeft(2, '0')} min';
+    }
+    return '${minutes.clamp(1, 59)} min';
   }
 
   static String? _firstImage(dynamic raw) {
@@ -368,25 +455,31 @@ class XtreamVodService {
 
 String? _resolveDirect(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
     return null;
+  }
   if (value.startsWith('//')) return '${base.scheme}:$value';
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty) {
+    return parsed.toString();
+  }
   return value.startsWith('/') ? base.resolve(value).toString() : null;
 }
 
 String? _resolveArtwork(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
     return null;
+  }
   if (value.startsWith('//')) return '${base.scheme}:$value';
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-      parsed.host.isNotEmpty) return parsed.toString();
+      parsed.host.isNotEmpty) {
+    return parsed.toString();
+  }
   return base.resolve(value).toString();
 }
 
