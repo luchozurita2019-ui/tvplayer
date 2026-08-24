@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/m3u_fetcher.dart';
 import '../services/xtream_http_client.dart';
 import 'android_media3_texture_player_screen.dart';
 import 'tv_full_vod_player_screen.dart';

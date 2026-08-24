@@ -93,9 +93,10 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   Future<void> _refreshM3u() async {
     try {
-      final all = await SectionCatalogService.instance.refreshAll(
+      final all = await SectionCatalogService.instance.refreshIfStale(
         widget.playlist,
       );
+      if (all == null) return;
       final fresh = all[TvSectionKind.live];
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
       setState(() => _future = Future.value(_LiveData(fresh.channels)));

@@ -97,9 +97,10 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   Future<void> _refreshM3u() async {
     try {
-      final all = await SectionCatalogService.instance.refreshAll(
+      final all = await SectionCatalogService.instance.refreshIfStale(
         widget.playlist,
       );
+      if (all == null) return;
       final fresh = all[TvSectionKind.movies];
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
       setState(() => _future = Future.value(_MovieData.m3u(fresh.channels)));

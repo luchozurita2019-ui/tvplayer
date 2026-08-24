@@ -27,8 +27,11 @@ class SectionCatalogService {
   static final SectionCatalogService instance = SectionCatalogService._();
 
   final TvLocalStore _store = TvLocalStore.instance;
+  static const Duration _defaultFreshFor = Duration(minutes: 5);
+
   final Map<String, Future<Map<TvSectionKind, SectionCatalogSnapshot>>>
       _pending = {};
+  final Map<String, DateTime> _lastNetworkRefresh = {};
 
   Future<SectionCatalogSnapshot?> loadCached(
     Playlist playlist,
@@ -78,17 +81,41 @@ class SectionCatalogService {
   Future<Map<TvSectionKind, SectionCatalogSnapshot>> refreshAll(
     Playlist playlist,
   ) =>
-      _refreshAll(playlist, force: true);
+      _refreshAll(playlist);
 
-  Future<Map<TvSectionKind, SectionCatalogSnapshot>> _refreshAll(
+  Future<Map<TvSectionKind, SectionCatalogSnapshot>?> refreshIfStale(
     Playlist playlist, {
-    bool force = false,
+    Duration freshFor = _defaultFreshFor,
   }) async {
     final key = '${playlist.id}|${playlist.source}';
-    if (!force) {
-      final existing = _pending[key];
-      if (existing != null) return existing;
+    final pending = _pending[key];
+    if (pending != null) return pending;
+
+    final now = DateTime.now();
+    final memory = _lastNetworkRefresh[key];
+    if (memory != null && now.difference(memory) < freshFor) return null;
+
+    DateTime? persisted;
+    for (final kind in TvSectionKind.values) {
+      persisted = await _store.loadSnapshotUpdatedAt(
+        playlist.id,
+        'm3u_${kind.name}',
+      );
+      if (persisted != null) break;
     }
+    if (persisted != null && now.difference(persisted) < freshFor) {
+      _lastNetworkRefresh[key] = persisted;
+      return null;
+    }
+    return _refreshAll(playlist);
+  }
+
+  Future<Map<TvSectionKind, SectionCatalogSnapshot>> _refreshAll(
+    Playlist playlist,
+  ) async {
+    final key = '${playlist.id}|${playlist.source}';
+    final existing = _pending[key];
+    if (existing != null) return existing;
     final future = _downloadAndPartition(playlist);
     _pending[key] = future;
     try {
@@ -113,6 +140,8 @@ class SectionCatalogService {
     }
 
     final result = <TvSectionKind, SectionCatalogSnapshot>{};
+    _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
+
     for (final kind in TvSectionKind.values) {
       final channels = List<Channel>.unmodifiable(buckets[kind]!);
       final categories = List<String>.unmodifiable(_categories(channels));

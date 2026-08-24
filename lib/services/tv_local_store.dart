@@ -173,6 +173,25 @@ class TvLocalStore {
     }
   }
 
+  Future<DateTime?> loadSnapshotUpdatedAt(
+    String serviceId,
+    String kind,
+  ) async {
+    final db = await database;
+    final rows = await db.query(
+      'catalog_snapshots',
+      columns: ['updated_at'],
+      where: 'service_id = ? AND kind = ?',
+      whereArgs: [serviceId, kind],
+      limit: 1,
+    );
+    if (rows.isEmpty) return null;
+    final raw = rows.first['updated_at'];
+    final millis = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
+    if (millis == null || millis <= 0) return null;
+    return DateTime.fromMillisecondsSinceEpoch(millis);
+  }
+
   Future<void> clearServiceCatalogs(String serviceId) async {
     final db = await database;
     await db.delete(

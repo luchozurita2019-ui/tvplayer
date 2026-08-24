@@ -23,7 +23,15 @@ class M3uFetcher {
       'AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/96.0.4664.18 Safari/537.36';
 
-  static final http.Client _client = http.Client();
+  static http.Client _client = http.Client();
+  static int _generation = 0;
+
+  static void cancelBrowsingRequests() {
+    final previous = _client;
+    _client = http.Client();
+    _generation++;
+    previous.close();
+  }
 
   static Future<String> fetch(
     String url, {
@@ -31,9 +39,13 @@ class M3uFetcher {
     Duration timeout = const Duration(seconds: 15),
     Duration idleTimeout = const Duration(seconds: 30),
   }) async {
+    final generation = _generation;
     Object? lastError;
 
     for (var attempt = 0; attempt <= maxRetries; attempt++) {
+      if (generation != _generation) {
+        throw const _BrowsingCancelledException();
+      }
       try {
         final request = http.Request('GET', Uri.parse(url))
           ..headers.addAll(const {
@@ -56,14 +68,20 @@ class M3uFetcher {
                 .transform(utf8.decoder)
                 .join();
           } on TimeoutException {
+            if (generation != _generation)
+              throw const _BrowsingCancelledException();
             throw const _BodyDownloadException(
               'La descarga de la lista se interrumpió porque el servidor dejó de enviar datos.',
             );
           } on SocketException {
+            if (generation != _generation)
+              throw const _BrowsingCancelledException();
             throw const _BodyDownloadException(
               'La conexión se cortó mientras se estaba descargando la lista.',
             );
           } on http.ClientException {
+            if (generation != _generation)
+              throw const _BrowsingCancelledException();
             throw const _BodyDownloadException(
               'La conexión HTTP se interrumpió mientras se descargaba la lista.',
             );
@@ -82,6 +100,8 @@ class M3uFetcher {
           'El servidor respondió con código ${response.statusCode}',
         );
       } on _BodyDownloadException catch (e) {
+        if (generation != _generation)
+          throw const _BrowsingCancelledException();
         // Ya empezamos a recibir el catálogo: NO lo volvemos a descargar desde
         // cero automáticamente. Es la diferencia clave respecto de V3.7/V3.8.
         throw Exception(e.message);
@@ -102,6 +122,8 @@ class M3uFetcher {
           continue;
         }
       } on HttpException {
+        if (generation != _generation)
+          throw const _BrowsingCancelledException();
         lastError = Exception('Error al conectar con el servidor de la lista');
         if (attempt < maxRetries) {
           await _backoff(attempt);
@@ -132,4 +154,11 @@ class _BodyDownloadException implements Exception {
   final String message;
 
   const _BodyDownloadException(this.message);
+}
+
+class _BrowsingCancelledException implements Exception {
+  const _BrowsingCancelledException();
+  @override
+  String toString() =>
+      'La actualización M3U fue pausada para priorizar la reproducción.';
 }
