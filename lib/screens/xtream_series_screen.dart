@@ -350,7 +350,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                           maxLines: 3,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
-                            color: const Color(0xA6FFFFFF),
+                            color: Color(0xA6FFFFFF),
                             height: 1.35,
                           ),
                         ),
@@ -374,7 +374,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                           child: Text(
                             'TEMPORADAS',
                             style: TextStyle(
-                              color: const Color(0x73FFFFFF),
+                              color: Color(0x73FFFFFF),
                               fontSize: 12,
                               fontWeight: FontWeight.w900,
                             ),
@@ -430,7 +430,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                           child: Text(
                             'EPISODIOS  ·  ${episodes.length}',
                             style: const TextStyle(
-                              color: const Color(0x73FFFFFF),
+                              color: Color(0x73FFFFFF),
                               fontSize: 12,
                               fontWeight: FontWeight.w900,
                             ),
