@@ -1,11 +1,15 @@
-# one-time validated movie metadata pass
+# validate persisted clean source after functional changes
 name: Validate TV FULL PRO Clean
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - android-tv-full-pro-clean-source
     paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
       - '.github/workflows/validate-tv-full-pro-clean.yml'
 
 permissions:
@@ -14,16 +18,11 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
       - name: Checkout clean source
         uses: actions/checkout@v4
         with:
           ref: android-tv-full-pro-clean-source
-
-      - name: Preserve normal validator
-        shell: bash
-        run: git show HEAD^:.github/workflows/validate-tv-full-pro-clean.yml > /tmp/normal-validator.yml
 
       - name: Record validation run id
         shell: bash
@@ -32,11 +31,8 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add .github/last-clean-validation-run.txt
-          git commit -m "Record clean validation run $GITHUB_RUN_ID" || true
+          git commit -m "Record clean validation run $GITHUB_RUN_ID" || exit 0
           git push origin HEAD:android-tv-full-pro-clean-source
-
-      - name: Apply VOD metadata source change
-        run: python .github/scripts/apply_vod_metadata_once.py
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -53,8 +49,8 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Format changed Dart source
-        run: dart format lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart
+      - name: Verify Dart formatting
+        run: dart format --set-exit-if-changed lib
 
       - name: Analyze complete Dart source
         run: flutter analyze
@@ -64,13 +60,3 @@ jobs:
           flutter build apk --debug
           --dart-define=TV_FULL_ANDROID_TV=true
           --target-platform android-arm64
-
-      - name: Commit validated source and clean temporary updater
-        shell: bash
-        run: |
-          cp /tmp/normal-validator.yml .github/workflows/validate-tv-full-pro-clean.yml
-          rm .github/scripts/apply_vod_metadata_once.py
-          git add lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart .github/workflows/validate-tv-full-pro-clean.yml
-          git add -u .github/scripts/apply_vod_metadata_once.py
-          git commit -m "Add compact Xtream movie language metadata"
-          git push origin HEAD:android-tv-full-pro-clean-source
