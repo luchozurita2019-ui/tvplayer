@@ -1,10 +1,15 @@
+# validate persisted clean source after M3U network priority
 name: Validate TV FULL PRO Clean
 
 on:
+  workflow_dispatch:
   push:
     branches:
       - android-tv-full-pro-clean-source
     paths:
+      - 'lib/**'
+      - 'android/**'
+      - 'pubspec.yaml'
       - '.github/workflows/validate-tv-full-pro-clean.yml'
 
 permissions:
@@ -13,231 +18,21 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
     steps:
       - name: Checkout clean source
         uses: actions/checkout@v4
         with:
           ref: android-tv-full-pro-clean-source
 
-      - name: Record run id locally
-        run: printf '%s\n' "$GITHUB_RUN_ID" > .github/last-clean-validation-run.txt
-
-      - name: Apply compact Xtream metadata refinement
+      - name: Record validation run id
         shell: bash
         run: |
-          python - <<'PY'
-          from pathlib import Path
-
-          service = Path('lib/services/xtream_vod_service.dart')
-          text = service.read_text()
-
-          replacements = [
-          ('''  final String? duration;
-          final String? country;
-          final String? backdrop;
-          ''', '''  final String? duration;
-          final String? country;
-          final String? language;
-          final String? originalLanguage;
-          final String? audioInfo;
-          final String? translation;
-          final String? backdrop;
-          '''),
-          ('''    this.duration,
-              this.country,
-              this.backdrop,
-          ''', '''    this.duration,
-              this.country,
-              this.language,
-              this.originalLanguage,
-              this.audioInfo,
-              this.translation,
-              this.backdrop,
-          '''),
-          ('''      String? pick(List<String> keys) =>
-                    _firstText(info, keys) ?? _firstText(movieData, keys);
-          ''', '''      String? pick(List<String> keys) =>
-                    _firstText(info, keys) ?? _firstText(movieData, keys);
-                String? pickMetadata(List<String> keys) =>
-                    _firstMetadataText(info, keys) ??
-                    _firstMetadataText(movieData, keys);
-          '''),
-          ('''        rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
-                  duration: pick(const ['duration', 'duration_secs']),
-                  country: pick(const ['country']),
-                  backdrop: backdrop,
-          ''', '''        rating: pick(const ['rating', 'rating_5based']) ?? summary.rating,
-                  duration: pick(const ['duration']) ??
-                      _durationFromSeconds(pick(const ['duration_secs'])),
-                  country: pickMetadata(const ['country']),
-                  language: pickMetadata(
-                    const ['language', 'spoken_languages', 'languages'],
-                  ),
-                  originalLanguage: pickMetadata(
-                    const ['original_language', 'originalLanguage'],
-                  ),
-                  audioInfo: pickMetadata(
-                    const ['audio_language', 'audio_languages', 'audio_info', 'audio'],
-                  ),
-                  translation: pickMetadata(
-                    const ['translation', 'translation_type', 'audio_translation', 'dubbing'],
-                  ),
-                  backdrop: backdrop,
-          '''),
-          ('''  static String? _firstImage(dynamic raw) {
-          ''', '''  static String? _firstMetadataText(
-              Map<String, dynamic> source,
-              List<String> keys,
-            ) {
-              for (final key in keys) {
-                final value = _metadataText(source[key]);
-                if (value != null) return value;
-              }
-              return null;
-            }
-
-            static String? _metadataText(dynamic raw) {
-              if (raw == null) return null;
-              if (raw is bool) return raw ? 'Sí' : null;
-              if (raw is List) {
-                final values = raw
-                    .map(_metadataText)
-                    .whereType<String>()
-                    .where((value) => value.isNotEmpty)
-                    .toList(growable: false);
-                return values.isEmpty ? null : values.join(', ');
-              }
-              if (raw is Map) {
-                final map = Map<String, dynamic>.from(raw);
-                for (final key in const ['name', 'label', 'language', 'title', 'iso_639_1']) {
-                  final value = _metadataText(map[key]);
-                  if (value != null) return value;
-                }
-                return null;
-              }
-              if (raw is String) {
-                final value = raw.trim();
-                if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
-                  return null;
-                }
-                if (value.startsWith('[') || value.startsWith('{')) {
-                  try {
-                    return _metadataText(jsonDecode(value));
-                  } catch (_) {}
-                }
-                return value;
-              }
-              return _text(raw);
-            }
-
-            static String? _durationFromSeconds(String? raw) {
-              final seconds = int.tryParse(raw?.trim() ?? '');
-              if (seconds == null || seconds <= 0) return null;
-              final hours = seconds ~/ 3600;
-              final minutes = (seconds % 3600) ~/ 60;
-              if (hours > 0) {
-                return '${hours}h ${minutes.toString().padLeft(2, '0')} min';
-              }
-              return '${minutes.clamp(1, 59)} min';
-            }
-
-            static String? _firstImage(dynamic raw) {
-          '''),
-          ]
-          for old, new in replacements:
-              if old not in text:
-                  raise SystemExit('Expected Xtream VOD pattern not found:\n' + old)
-              text = text.replace(old, new, 1)
-          service.write_text(text)
-
-          screen = Path('lib/screens/xtream_movies_screen.dart')
-          text = screen.read_text()
-          replacements = [
-          ('''            rating: details.rating,
-                      duration: details.duration,
-                      channel: details.toChannel(data.connection!),
-          ''', '''            rating: details.rating,
-                      duration: details.duration,
-                      country: details.country,
-                      language: details.language,
-                      originalLanguage: details.originalLanguage,
-                      audioInfo: details.audioInfo,
-                      translation: details.translation,
-                      channel: details.toChannel(data.connection!),
-          '''),
-          ('''  final String? rating;
-            final String? duration;
-            final Channel channel;
-          ''', '''  final String? rating;
-            final String? duration;
-            final String? country;
-            final String? language;
-            final String? originalLanguage;
-            final String? audioInfo;
-            final String? translation;
-            final Channel channel;
-          '''),
-          ('''    this.rating,
-              this.duration,
-            });
-          ''', '''    this.rating,
-              this.duration,
-              this.country,
-              this.language,
-              this.originalLanguage,
-              this.audioInfo,
-              this.translation,
-            });
-          '''),
-          ('''      if ((rating ?? '').trim().isNotEmpty) '★ ${rating!.trim()}',
-              ];
-              return Scaffold(
-          ''', '''      if ((rating ?? '').trim().isNotEmpty) '★ ${rating!.trim()}',
-              ];
-              final languageDetails = <String>[
-                if ((language ?? '').trim().isNotEmpty) 'Idioma: ${language!.trim()}',
-                if ((originalLanguage ?? '').trim().isNotEmpty &&
-                    originalLanguage!.trim().toLowerCase() !=
-                        (language ?? '').trim().toLowerCase())
-                  'Original: ${originalLanguage!.trim()}',
-                if ((audioInfo ?? '').trim().isNotEmpty) 'Audio: ${audioInfo!.trim()}',
-                if ((translation ?? '').trim().isNotEmpty)
-                  'Traducción: ${translation!.trim()}',
-                if ((country ?? '').trim().isNotEmpty) country!.trim(),
-              ];
-              return Scaffold(
-          '''),
-          ('''                  const SizedBox(height: 18),
-                            Text(
-                              (plot ?? '').trim().isEmpty
-          ''', '''                  if (languageDetails.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                languageDetails.join('  ·  '),
-                                maxLines: 2,
-                                overflow: TextOverflow.ellipsis,
-                                style: const TextStyle(
-                                  color: Colors.white46,
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                              ),
-                            ],
-                            const SizedBox(height: 16),
-                            Text(
-                              (plot ?? '').trim().isEmpty
-          '''),
-          ]
-          for old, new in replacements:
-              if old not in text:
-                  raise SystemExit('Expected movie screen pattern not found:\n' + old)
-              text = text.replace(old, new, 1)
-          screen.write_text(text)
-          PY
-
-          rm -f .github/workflows/patch-vod-metadata-once.yml
-          git show HEAD^:.github/workflows/validate-tv-full-pro-clean.yml > .github/workflows/validate-tv-full-pro-clean.yml
+          printf '%s\n' "$GITHUB_RUN_ID" > .github/last-clean-validation-run.txt
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add .github/last-clean-validation-run.txt
+          git commit -m "Record clean validation run $GITHUB_RUN_ID" || exit 0
+          git push origin HEAD:android-tv-full-pro-clean-source
 
       - name: Set up Java 17
         uses: actions/setup-java@v4
@@ -254,8 +49,8 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Format changed source
-        run: dart format lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart
+      - name: Verify Dart formatting
+        run: dart format --set-exit-if-changed lib
 
       - name: Analyze complete Dart source
         run: flutter analyze
@@ -265,13 +60,3 @@ jobs:
           flutter build apk --debug
           --dart-define=TV_FULL_ANDROID_TV=true
           --target-platform android-arm64
-
-      - name: Commit validated source
-        shell: bash
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib/services/xtream_vod_service.dart lib/screens/xtream_movies_screen.dart .github/last-clean-validation-run.txt .github/workflows/validate-tv-full-pro-clean.yml
-          git add -u .github/workflows/patch-vod-metadata-once.yml
-          git commit -m "Add compact Xtream movie language metadata"
-          git push origin HEAD:android-tv-full-pro-clean-source
