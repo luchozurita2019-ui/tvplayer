@@ -5,6 +5,7 @@ import 'package:provider/provider.dart';
 
 import 'providers/iptv_provider.dart';
 import 'screens/home_screen.dart';
+import 'services/remote_access_guard.dart';
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
@@ -55,6 +56,66 @@ class TvFullProApp extends StatelessWidget {
               const ActivateIntent(),
           const SingleActivator(LogicalKeyboardKey.numpadEnter):
               const ActivateIntent(),
+        },
+        builder: (context, child) {
+          final provider = context.watch<IptvProvider>();
+          final blocked = provider.initialized
+              ? remoteAccessBlockMessage(provider)
+              : null;
+          if (blocked == null) return child ?? const SizedBox.shrink();
+          return Stack(
+            fit: StackFit.expand,
+            children: [
+              child ?? const SizedBox.shrink(),
+              const ModalBarrier(
+                dismissible: false,
+                color: Color(0xF205090F),
+              ),
+              Material(
+                color: Colors.transparent,
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 620),
+                    child: Padding(
+                      padding: const EdgeInsets.all(40),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          const Icon(Icons.lock_outline_rounded, size: 52),
+                          const SizedBox(height: 16),
+                          const Text(
+                            'TV FULL PRO',
+                            style: TextStyle(
+                              fontSize: 30,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          const SizedBox(height: 12),
+                          Text(
+                            blocked,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Colors.white70,
+                              fontSize: 18,
+                            ),
+                          ),
+                          const SizedBox(height: 10),
+                          const Text(
+                            'El catálogo guardado se conserva. Al reactivar el servicio volverá a habilitarse sin descargar todo otra vez.',
+                            textAlign: TextAlign.center,
+                            style: TextStyle(
+                              color: Colors.white38,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ],
+          );
         },
         home: const HomeScreen(),
       ),
