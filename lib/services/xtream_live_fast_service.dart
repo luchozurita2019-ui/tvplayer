@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:typed_data';
@@ -27,15 +26,6 @@ class XtreamLiveCatalogSnapshot {
   });
 }
 
-/// Cargador LIVE nativo con el mismo pipeline rápido de Películas/Series.
-///
-/// - reutiliza la sesión Xtream ya autenticada;
-/// - reutiliza el cliente HTTP keep-alive compartido;
-/// - muestra progreso en dos fases (categorías 1/2, canales 2/2);
-/// - usa timeout por inactividad, no por duración total;
-/// - prepara el catálogo en un isolate;
-/// - persiste el último catálogo LIVE para apertura local inmediata;
-/// - nunca descarga logos dentro de esta carga.
 class XtreamLiveFastService {
   XtreamLiveFastService._();
 
@@ -121,8 +111,6 @@ class XtreamLiveFastService {
         ),
       );
     } catch (_) {
-      // Algunos clones no implementan categorías o responden demasiado lento.
-      // get_live_streams suele incluir category_id/category_name suficiente.
       categoriesBody = '[]';
     }
 
@@ -172,7 +160,9 @@ class XtreamLiveFastService {
       fromCache: false,
     );
     XtreamFastCatalogService.instance.rememberConnection(connection);
-    unawaited(_writePreparedCache(playlistUrl, prepared, snapshot.savedAt));
+
+    // No devolvemos una primera carga como lista hasta confirmar el snapshot.
+    await _writePreparedCache(playlistUrl, prepared, snapshot.savedAt);
     return snapshot;
   }
 
@@ -209,23 +199,19 @@ class XtreamLiveFastService {
     Map<String, dynamic> prepared,
     DateTime savedAt,
   ) async {
-    try {
-      final payload = <String, dynamic>{
-        'version': _cacheVersion,
-        'kind': 'live',
-        'savedAt': savedAt.millisecondsSinceEpoch,
-        'categories': prepared['categories'] ?? const <String>[],
-        'items': prepared['items'] ?? const <dynamic>[],
-      };
-      final encoded = await compute(_encodeLiveCachePayload, payload);
-      final file = await _cacheFile(playlistUrl);
-      final temp = File('${file.path}.tmp');
-      await temp.writeAsString(encoded, flush: false);
-      if (await file.exists()) await file.delete();
-      await temp.rename(file.path);
-    } catch (_) {
-      // El caché local es una optimización; nunca debe romper LIVE.
-    }
+    final payload = <String, dynamic>{
+      'version': _cacheVersion,
+      'kind': 'live',
+      'savedAt': savedAt.millisecondsSinceEpoch,
+      'categories': prepared['categories'] ?? const <String>[],
+      'items': prepared['items'] ?? const <dynamic>[],
+    };
+    final encoded = await compute(_encodeLiveCachePayload, payload);
+    final file = await _cacheFile(playlistUrl);
+    final temp = File('${file.path}.tmp');
+    await temp.writeAsString(encoded, flush: true);
+    if (await file.exists()) await file.delete();
+    await temp.rename(file.path);
   }
 
   Future<File> _cacheFile(String playlistUrl) async {
@@ -385,8 +371,9 @@ String? _firstText(Map<String, dynamic> source, List<String> keys) {
 String? _cleanText(dynamic raw) {
   if (raw == null) return null;
   final value = raw.toString().trim();
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
     return null;
+  }
   return value;
 }
 
@@ -400,8 +387,9 @@ String _cleanExtension(String? raw, {required String fallback}) {
 
 String? _resolveDirect(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
     return null;
+  }
   final parsed = Uri.tryParse(value);
   if (parsed != null &&
       (parsed.scheme == 'http' || parsed.scheme == 'https') &&
