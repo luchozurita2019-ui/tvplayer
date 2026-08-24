@@ -44,27 +44,25 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       final service = XtreamLiveFastService.instance;
       final cached = await service.loadCached(widget.playlist.source);
       if (cached != null && cached.channels.isNotEmpty) {
+        final channels = _normalizeXtreamChannels(cached.channels);
         unawaited(_refreshXtream());
-        return _LiveData(cached.channels, cached.categories);
+        return _LiveData(channels);
       }
       final fresh = await service.refresh(
         widget.playlist.source,
         onProgress: (p) => _setStatus(p.label),
       );
-      return _LiveData(fresh.channels, fresh.categories);
+      return _LiveData(_normalizeXtreamChannels(fresh.channels));
     }
 
     final service = SectionCatalogService.instance;
     final cached = await service.loadCached(widget.playlist, TvSectionKind.live);
     if (cached != null && cached.channels.isNotEmpty) {
       unawaited(_refreshM3u());
-      return _LiveData(cached.channels, cached.categories);
+      return _LiveData(cached.channels);
     }
-    final fresh = await service.loadOrRefresh(
-      widget.playlist,
-      TvSectionKind.live,
-    );
-    return _LiveData(fresh.channels, fresh.categories);
+    final fresh = await service.loadOrRefresh(widget.playlist, TvSectionKind.live);
+    return _LiveData(fresh.channels);
   }
 
   Future<void> _refreshXtream() async {
@@ -74,7 +72,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         onProgress: (p) => _setStatus(p.label),
       );
       if (!mounted) return;
-      setState(() => _future = Future.value(_LiveData(fresh.channels, fresh.categories)));
+      setState(() => _future = Future.value(
+            _LiveData(_normalizeXtreamChannels(fresh.channels)),
+          ));
     } catch (_) {}
   }
 
@@ -83,8 +83,51 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       final all = await SectionCatalogService.instance.refreshAll(widget.playlist);
       final fresh = all[TvSectionKind.live];
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
-      setState(() => _future = Future.value(_LiveData(fresh.channels, fresh.categories)));
+      setState(() => _future = Future.value(_LiveData(fresh.channels)));
     } catch (_) {}
+  }
+
+  List<Channel> _normalizeXtreamChannels(List<Channel> channels) {
+    final base = _xtreamBaseUri(widget.playlist.source);
+    if (base == null) return channels;
+    return channels
+        .map((channel) => Channel(
+              name: channel.name,
+              url: channel.url,
+              logoUrl: _resolveArtwork(base, channel.logoUrl),
+              group: channel.group,
+              tvgId: channel.tvgId,
+              httpUserAgent: channel.httpUserAgent,
+              httpReferrer: channel.httpReferrer,
+              httpHeaders: channel.httpHeaders,
+            ))
+        .toList(growable: false);
+  }
+
+  Uri? _xtreamBaseUri(String raw) {
+    final uri = Uri.tryParse(raw.trim());
+    if (uri == null || uri.host.isEmpty) return null;
+    var path = uri.path;
+    final lower = path.toLowerCase();
+    for (final suffix in ['/get.php', '/player_api.php']) {
+      if (lower.endsWith(suffix)) {
+        path = path.substring(0, path.length - suffix.length);
+        break;
+      }
+    }
+    if (path.isEmpty) path = '/';
+    return uri.replace(path: path, query: '', fragment: '');
+  }
+
+  String? _resolveArtwork(Uri base, String? raw) {
+    final value = raw?.trim() ?? '';
+    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') return null;
+    if (value.startsWith('//')) return '${base.scheme}:$value';
+    final parsed = Uri.tryParse(value);
+    if (parsed != null &&
+        (parsed.scheme == 'http' || parsed.scheme == 'https') &&
+        parsed.host.isNotEmpty) return parsed.toString();
+    return base.resolve(value).toString();
   }
 
   void _setStatus(String value) {
@@ -214,7 +257,6 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   }
 
   Future<void> _openPlayer(List<Channel> channels, int index) async {
-    ArtworkCacheService.instance.pauseForPlayback();
     final provider = context.read<IptvProvider>();
     await Navigator.of(context).push(
       MaterialPageRoute(
@@ -227,8 +269,6 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         ),
       ),
     );
-    if (!mounted) return;
-    ArtworkCacheService.instance.resumeBrowsing();
   }
 }
 
@@ -320,8 +360,18 @@ class _ChannelRowState extends State<_ChannelRow> {
 
 class _LiveData {
   final List<Channel> channels;
-  final List<String> categories;
-  const _LiveData(this.channels, this.categories);
+  const _LiveData(this.channels);
+
+  List<String> get categories {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final channel in channels) {
+      final group = channel.group?.trim();
+      if (group == null || group.isEmpty) continue;
+      if (seen.add(group)) values.add(group);
+    }
+    return values;
+  }
 }
 
 class _Loading extends StatelessWidget {

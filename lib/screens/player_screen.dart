@@ -3,16 +3,15 @@ import 'package:flutter/material.dart';
 
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
+import '../services/artwork_cache_service.dart';
 import 'android_media3_texture_player_screen.dart';
 import 'tv_full_vod_player_screen.dart';
 
 const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
 
 /// Router único de reproducción de TV FULL PRO.
-///
-/// LIVE y VOD no comparten motor ni interfaz. Esto impide que una película
-/// vuelva a aparecer dentro del menú de canales o que VOD llegue al Media3 LIVE.
-class PlayerScreen extends StatelessWidget {
+/// LIVE y VOD están aislados y la reproducción siempre tiene prioridad de red.
+class PlayerScreen extends StatefulWidget {
   final Channel channel;
   final List<Channel> playlist;
   final int initialIndex;
@@ -29,21 +28,38 @@ class PlayerScreen extends StatelessWidget {
   });
 
   @override
+  State<PlayerScreen> createState() => _PlayerScreenState();
+}
+
+class _PlayerScreenState extends State<PlayerScreen> {
+  @override
+  void initState() {
+    super.initState();
+    ArtworkCacheService.instance.pauseForPlayback();
+  }
+
+  @override
+  void dispose() {
+    ArtworkCacheService.instance.resumeBrowsing();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final androidTv = _androidTvBuild &&
         !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android;
 
-    if (androidTv && isLiveContent) {
+    if (androidTv && widget.isLiveContent) {
       return AndroidMedia3TexturePlayerScreen(
-        playlist: playlist,
-        initialIndex: initialIndex,
+        playlist: widget.playlist,
+        initialIndex: widget.initialIndex,
       );
     }
 
     return TvFullVodPlayerScreen(
-      channel: channel,
-      settings: settings,
+      channel: widget.channel,
+      settings: widget.settings,
     );
   }
 }
