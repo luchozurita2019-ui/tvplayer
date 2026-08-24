@@ -1,0 +1,104 @@
+name: Add VOD Startup Watchdog
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/workflows/add-vod-startup-watchdog.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout clean source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Patch VOD startup watchdog
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          path = Path('lib/screens/tv_full_vod_player_screen.dart')
+          text = path.read_text()
+
+          replacements = [
+              (
+                  "class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {\n  late final Player _player;",
+                  "class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {\n  static const Duration _startupTimeout = Duration(seconds: 15);\n\n  late final Player _player;",
+              ),
+              (
+                  "  Timer? _overlayTimer;\n",
+                  "  Timer? _overlayTimer;\n  Timer? _startupWatchdog;\n",
+              ),
+              (
+                  "    _positionSub = _player.stream.position.listen((value) {\n      if (!mounted) return;\n      setState(() => _position = value);\n    });",
+                  "    _positionSub = _player.stream.position.listen((value) {\n      if (!mounted) return;\n      if (value > Duration.zero) _cancelStartupWatchdog();\n      setState(() => _position = value);\n    });",
+              ),
+              (
+                  "    _playingSub = _player.stream.playing.listen((value) {\n      if (mounted) setState(() => _playing = value);\n    });",
+                  "    _playingSub = _player.stream.playing.listen((value) {\n      if (!mounted) return;\n      if (value) _cancelStartupWatchdog();\n      setState(() => _playing = value);\n    });",
+              ),
+              (
+                  "      if (!mounted) return;\n      setState(() {\n        _buffering = false;\n        _error = _friendlyVodError(detail);",
+                  "      if (!mounted) return;\n      _cancelStartupWatchdog();\n      setState(() {\n        _buffering = false;\n        _error = _friendlyVodError(detail);",
+              ),
+              (
+                  "    _completedSub = _player.stream.completed.listen((completed) {\n      if (!mounted || !completed) return;\n      setState(() {",
+                  "    _completedSub = _player.stream.completed.listen((completed) {\n      if (!mounted || !completed) return;\n      _cancelStartupWatchdog();\n      setState(() {",
+              ),
+              (
+                  "  Future<void> _open() async {\n    if (mounted) {",
+                  "  Future<void> _open() async {\n    _cancelStartupWatchdog();\n    if (mounted) {",
+              ),
+              (
+                  "    }\n    try {\n      final platform = _player.platform;",
+                  "    }\n    _startStartupWatchdog();\n    try {\n      final platform = _player.platform;",
+              ),
+              (
+                  "    } catch (error) {\n      debugPrint('TV FULL PRO VOD open: $error');\n      if (!mounted) return;",
+                  "    } catch (error) {\n      debugPrint('TV FULL PRO VOD open: $error');\n      if (!mounted) return;\n      _cancelStartupWatchdog();",
+              ),
+              (
+                  "  String _friendlyVodError(String raw) {",
+                  "  void _startStartupWatchdog() {\n    _startupWatchdog?.cancel();\n    _startupWatchdog = Timer(_startupTimeout, () {\n      if (!mounted ||\n          _error != null ||\n          _playing ||\n          _position > Duration.zero) {\n        return;\n      }\n      unawaited(_player.stop());\n      setState(() {\n        _buffering = false;\n        _error = 'El servidor tardó demasiado en iniciar este contenido.';\n        _overlayVisible = true;\n      });\n      _rootFocus.requestFocus();\n    });\n  }\n\n  void _cancelStartupWatchdog() {\n    _startupWatchdog?.cancel();\n    _startupWatchdog = null;\n  }\n\n  String _friendlyVodError(String raw) {",
+              ),
+              (
+                  "  void dispose() {\n    _overlayTimer?.cancel();",
+                  "  void dispose() {\n    _cancelStartupWatchdog();\n    _overlayTimer?.cancel();",
+              ),
+          ]
+
+          for old, new in replacements:
+              if old not in text:
+                  raise SystemExit(f'Missing expected VOD marker:\n{old[:120]}')
+              text = text.replace(old, new, 1)
+
+          path.write_text(text)
+          PY
+
+      - name: Install Flutter for formatting
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Format patched VOD file
+        run: dart format lib/screens/tv_full_vod_player_screen.dart
+
+      - name: Remove one-off patcher and commit
+        shell: bash
+        run: |
+          rm -f .github/workflows/add-vod-startup-watchdog.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/screens/tv_full_vod_player_screen.dart .github/workflows/add-vod-startup-watchdog.yml
+          git commit -m "Add bounded VOD startup watchdog"
+          git push origin HEAD:android-tv-full-pro-clean-source
