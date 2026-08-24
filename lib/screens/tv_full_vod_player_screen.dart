@@ -8,7 +8,8 @@ import 'package:media_kit_video/media_kit_video.dart';
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
 
-const String _vodUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+const String _vodUserAgent =
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/96.0.4664.18 Safari/537.36';
 
@@ -27,6 +28,8 @@ class TvFullVodPlayerScreen extends StatefulWidget {
 }
 
 class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
+  static const Duration _startupTimeout = Duration(seconds: 15);
+
   late final Player _player;
   late final VideoController _controller;
   final FocusNode _rootFocus = FocusNode(debugLabel: 'tvfull-pro-vod');
@@ -40,6 +43,7 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   StreamSubscription? _trackSub;
   StreamSubscription? _completedSub;
   Timer? _overlayTimer;
+  Timer? _startupWatchdog;
 
   Duration _position = Duration.zero;
   Duration _duration = Duration.zero;
@@ -69,13 +73,16 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
     );
     _positionSub = _player.stream.position.listen((value) {
       if (!mounted) return;
+      if (value > Duration.zero) _cancelStartupWatchdog();
       setState(() => _position = value);
     });
     _durationSub = _player.stream.duration.listen((value) {
       if (mounted) setState(() => _duration = value);
     });
     _playingSub = _player.stream.playing.listen((value) {
-      if (mounted) setState(() => _playing = value);
+      if (!mounted) return;
+      if (value) _cancelStartupWatchdog();
+      setState(() => _playing = value);
     });
     _bufferingSub = _player.stream.buffering.listen((value) {
       if (mounted) setState(() => _buffering = value);
@@ -84,6 +91,7 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
       final detail = value.toString();
       debugPrint('TV FULL PRO VOD: $detail');
       if (!mounted) return;
+      _cancelStartupWatchdog();
       setState(() {
         _buffering = false;
         _error = _friendlyVodError(detail);
@@ -98,6 +106,7 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
     });
     _completedSub = _player.stream.completed.listen((completed) {
       if (!mounted || !completed) return;
+      _cancelStartupWatchdog();
       setState(() {
         _playing = false;
         _overlayVisible = true;
@@ -111,12 +120,14 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   }
 
   Future<void> _open() async {
+    _cancelStartupWatchdog();
     if (mounted) {
       setState(() {
         _buffering = true;
         _error = null;
       });
     }
+    _startStartupWatchdog();
     try {
       final platform = _player.platform;
       if (platform is NativePlayer) {
@@ -132,12 +143,34 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
     } catch (error) {
       debugPrint('TV FULL PRO VOD open: $error');
       if (!mounted) return;
+      _cancelStartupWatchdog();
       setState(() {
         _buffering = false;
         _error = _friendlyVodError(error.toString());
         _overlayVisible = true;
       });
     }
+  }
+
+  void _startStartupWatchdog() {
+    _startupWatchdog?.cancel();
+    _startupWatchdog = Timer(_startupTimeout, () {
+      if (!mounted || _error != null || _playing || _position > Duration.zero) {
+        return;
+      }
+      unawaited(_player.stop());
+      setState(() {
+        _buffering = false;
+        _error = 'El servidor tardó demasiado en iniciar este contenido.';
+        _overlayVisible = true;
+      });
+      _rootFocus.requestFocus();
+    });
+  }
+
+  void _cancelStartupWatchdog() {
+    _startupWatchdog?.cancel();
+    _startupWatchdog = null;
   }
 
   String _friendlyVodError(String raw) {
@@ -207,8 +240,9 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   }
 
   Future<void> _chooseAudio() async {
-    final items =
-        _tracks.audio.where((item) => item.id != 'no').toList(growable: false);
+    final items = _tracks.audio
+        .where((item) => item.id != 'no')
+        .toList(growable: false);
     if (items.isEmpty) return;
     final chosen = await showDialog<AudioTrack>(
       context: context,
@@ -274,6 +308,7 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
 
   @override
   void dispose() {
+    _cancelStartupWatchdog();
     _overlayTimer?.cancel();
     _positionSub?.cancel();
     _durationSub?.cancel();
@@ -428,48 +463,47 @@ class _TvFullVodPlayerScreenState extends State<TvFullVodPlayerScreen> {
   }
 
   Widget _errorView() => Center(
-        child: Container(
-          constraints: const BoxConstraints(maxWidth: 520),
-          padding: const EdgeInsets.all(24),
-          decoration: BoxDecoration(
-            color: const Color(0xEE10161D),
-            borderRadius: BorderRadius.circular(16),
+    child: Container(
+      constraints: const BoxConstraints(maxWidth: 520),
+      padding: const EdgeInsets.all(24),
+      decoration: BoxDecoration(
+        color: const Color(0xEE10161D),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const Icon(
+            Icons.movie_filter_outlined,
+            size: 44,
+            color: Colors.white54,
           ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
+          const SizedBox(height: 12),
+          Text(
+            _error!,
+            textAlign: TextAlign.center,
+            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+          ),
+          const SizedBox(height: 18),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              const Icon(
-                Icons.movie_filter_outlined,
-                size: 44,
-                color: Colors.white54,
+              FilledButton(
+                autofocus: true,
+                onPressed: () => unawaited(_open()),
+                child: const Text('Reintentar'),
               ),
-              const SizedBox(height: 12),
-              Text(
-                _error!,
-                textAlign: TextAlign.center,
-                style:
-                    const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
-              ),
-              const SizedBox(height: 18),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  FilledButton(
-                    autofocus: true,
-                    onPressed: () => unawaited(_open()),
-                    child: const Text('Reintentar'),
-                  ),
-                  const SizedBox(width: 12),
-                  OutlinedButton(
-                    onPressed: () => Navigator.of(context).maybePop(),
-                    child: const Text('Volver'),
-                  ),
-                ],
+              const SizedBox(width: 12),
+              OutlinedButton(
+                onPressed: () => Navigator.of(context).maybePop(),
+                child: const Text('Volver'),
               ),
             ],
           ),
-        ),
-      );
+        ],
+      ),
+    ),
+  );
 }
 
 class _ControlButton extends StatelessWidget {
@@ -486,14 +520,14 @@ class _ControlButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 5),
-        child: OutlinedButton.icon(
-          autofocus: autofocus,
-          onPressed: onPressed,
-          icon: Icon(icon, size: 19),
-          label: Text(label),
-        ),
-      );
+    padding: const EdgeInsets.symmetric(horizontal: 5),
+    child: OutlinedButton.icon(
+      autofocus: autofocus,
+      onPressed: onPressed,
+      icon: Icon(icon, size: 19),
+      label: Text(label),
+    ),
+  );
 }
 
 class _TrackDialog<T> extends StatelessWidget {
@@ -517,48 +551,45 @@ class _TrackDialog<T> extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Dialog(
-        backgroundColor: const Color(0xFF0D151E),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 500, maxHeight: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(20),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  title,
-                  style: const TextStyle(
-                      fontSize: 21, fontWeight: FontWeight.w900),
-                ),
-                const SizedBox(height: 12),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: tracks.length,
-                    itemBuilder: (context, index) {
-                      final item = tracks[index];
-                      final selected = _id(item) == selectedId;
-                      return ListTile(
-                        autofocus:
-                            selected || (selectedId.isEmpty && index == 0),
-                        selected: selected,
-                        selectedTileColor:
-                            const Color(0xFF1677FF).withValues(alpha: .18),
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        title: Text(label(item)),
-                        trailing:
-                            selected ? const Icon(Icons.check_rounded) : null,
-                        onTap: () => Navigator.of(context).pop(item),
-                      );
-                    },
-                  ),
-                ),
-              ],
+    backgroundColor: const Color(0xFF0D151E),
+    child: ConstrainedBox(
+      constraints: const BoxConstraints(maxWidth: 500, maxHeight: 520),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text(
+              title,
+              style: const TextStyle(fontSize: 21, fontWeight: FontWeight.w900),
             ),
-          ),
+            const SizedBox(height: 12),
+            Flexible(
+              child: ListView.builder(
+                shrinkWrap: true,
+                itemCount: tracks.length,
+                itemBuilder: (context, index) {
+                  final item = tracks[index];
+                  final selected = _id(item) == selectedId;
+                  return ListTile(
+                    autofocus: selected || (selectedId.isEmpty && index == 0),
+                    selected: selected,
+                    selectedTileColor: const Color(0xFF1677FF)
+                        .withValues(alpha: .18),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    title: Text(label(item)),
+                    trailing: selected ? const Icon(Icons.check_rounded) : null,
+                    onTap: () => Navigator.of(context).pop(item),
+                  );
+                },
+              ),
+            ),
+          ],
         ),
-      );
+      ),
+    ),
+  );
 }
