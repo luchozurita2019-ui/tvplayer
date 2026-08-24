@@ -1,4 +1,5 @@
 name: Build TV FULL PRO Clean
+# Clean source formatted with Dart 3.13 and ready for verification.
 
 on:
   workflow_dispatch:
