@@ -1,4 +1,4 @@
-# validate persisted clean source after Flutter 3.47 scroll cache migration
+# validate persisted clean source after VOD startup watchdog
 name: Validate TV FULL PRO Clean
 
 on:
