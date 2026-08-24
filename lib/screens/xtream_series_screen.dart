@@ -250,15 +250,22 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         );
         model = _SeriesDetailModel.fromXtream(data.connection!, details);
       } catch (_) {
-        if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text(
-              'El proveedor no devolvió episodios para esta serie.',
-            ),
-          ),
+        final fallback = await _findM3uSeriesFallback(
+          item,
+          data.connection!,
         );
-        return;
+        if (fallback == null) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text(
+                'El proveedor no devolvió episodios para esta serie.',
+              ),
+            ),
+          );
+          return;
+        }
+        model = _SeriesDetailModel.fromM3u(fallback);
       }
     } else {
       model = _SeriesDetailModel.fromM3u(item);
@@ -267,6 +274,54 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     await Navigator.of(context).push(
       MaterialPageRoute(builder: (_) => _SeriesDetailScreen(model: model)),
     );
+  }
+
+  Future<_SeriesItem?> _findM3uSeriesFallback(
+    _SeriesItem xtreamItem,
+    XtreamConnectionResult connection,
+  ) async {
+    final fallbackPlaylist = widget.playlist.copyWith(
+      source: connection.playlistUrl,
+      sourceType: PlaylistSourceType.m3u,
+    );
+    final service = SectionCatalogService.instance;
+    final target = _normalizeSeriesKey(xtreamItem.name);
+
+    _SeriesItem? exactFrom(List<Channel> channels) {
+      final m3uData = _SeriesData.m3u(channels);
+      for (final candidate in m3uData.items) {
+        if (_normalizeSeriesKey(candidate.name) == target) return candidate;
+      }
+      return null;
+    }
+
+    final cached = await service.loadCached(
+      fallbackPlaylist,
+      TvSectionKind.series,
+    );
+    if (cached != null && cached.channels.isNotEmpty) {
+      final exact = exactFrom(cached.channels);
+      if (exact != null) return exact;
+
+      final refreshed = await service.refreshIfStale(
+        fallbackPlaylist,
+        freshFor: _cacheFreshFor,
+      );
+      final freshSeries = refreshed?[TvSectionKind.series];
+      if (freshSeries == null || freshSeries.channels.isEmpty) return null;
+      return exactFrom(freshSeries.channels);
+    }
+
+    try {
+      final fresh = await service.loadOrRefresh(
+        fallbackPlaylist,
+        TvSectionKind.series,
+      );
+      if (fresh.channels.isEmpty) return null;
+      return exactFrom(fresh.channels);
+    } catch (_) {
+      return null;
+    }
   }
 }
 
@@ -632,7 +687,7 @@ class _SeriesData {
     final byKey = <String, _SeriesItem>{};
     for (final channel in channels) {
       final parsed = _parseM3uEpisode(channel);
-      final key = parsed.seriesTitle.toLowerCase();
+      final key = _normalizeSeriesKey(parsed.seriesTitle);
       final existing = byKey[key];
       if (existing == null) {
         byKey[key] = _SeriesItem(
@@ -653,8 +708,9 @@ class _SeriesData {
     final result = <String>[];
     for (final item in items) {
       final value = item.category?.trim();
-      if (value != null && value.isNotEmpty && seen.add(value))
+      if (value != null && value.isNotEmpty && seen.add(value)) {
         result.add(value);
+      }
     }
     return result;
   }
@@ -786,17 +842,24 @@ _M3uEpisode _parseM3uEpisode(Channel channel) {
   final patterns = <RegExp>[
     RegExp(r'\bS(\d{1,2})\s*E(\d{1,3})\b', caseSensitive: false),
     RegExp(r'\b(\d{1,2})x(\d{1,3})\b', caseSensitive: false),
+    RegExp(r'\bT(\d{1,2})\s*E(\d{1,3})\b', caseSensitive: false),
   ];
   for (final pattern in patterns) {
     final match = pattern.firstMatch(name);
     if (match == null) continue;
     final season = int.tryParse(match.group(1) ?? '') ?? 1;
     final episode = int.tryParse(match.group(2) ?? '') ?? 1;
-    var title = name.replaceFirst(match.group(0)!, '').trim();
-    title = title.replaceAll(RegExp(r'^[\s\-_:|]+|[\s\-_:|]+$'), '').trim();
-    if (title.isEmpty) title = channel.group?.trim() ?? name;
+    final before = _trimSeriesSeparators(name.substring(0, match.start));
+    final after = _trimSeriesSeparators(name.substring(match.end));
+    final seriesTitle = before.isNotEmpty
+        ? before
+        : after.isNotEmpty
+            ? after
+            : channel.group?.trim().isNotEmpty == true
+                ? channel.group!.trim()
+                : name;
     return _M3uEpisode(
-      seriesTitle: title,
+      seriesTitle: seriesTitle,
       season: season,
       number: episode,
       channel: channel,
@@ -811,15 +874,36 @@ _M3uEpisode _parseM3uEpisode(Channel channel) {
   );
 }
 
+String _trimSeriesSeparators(String value) => value
+    .replaceAll(RegExp(r'^[\s\-_:|.]+|[\s\-_:|.]+$'), '')
+    .trim();
+
+String _normalizeSeriesKey(String value) => value
+    .trim()
+    .toLowerCase()
+    .replaceAll('á', 'a')
+    .replaceAll('é', 'e')
+    .replaceAll('í', 'i')
+    .replaceAll('ó', 'o')
+    .replaceAll('ú', 'u')
+    .replaceAll('ü', 'u')
+    .replaceAll('ñ', 'n')
+    .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+    .replaceAll(RegExp(r'\s+'), ' ')
+    .trim();
+
 String? _resolveArtwork(Uri base, String? raw) {
   final value = raw?.trim() ?? '';
-  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0')
+  if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
     return null;
+  }
   if (value.startsWith('//')) return '${base.scheme}:$value';
   final uri = Uri.tryParse(value);
   if (uri != null &&
       (uri.scheme == 'http' || uri.scheme == 'https') &&
-      uri.host.isNotEmpty) return uri.toString();
+      uri.host.isNotEmpty) {
+    return uri.toString();
+  }
   return base.resolve(value).toString();
 }
 
