@@ -1,4 +1,4 @@
-TV FULL PRO final release build requested after clean validation.
-validated_run=32794027397
-version=1.1.2+4
-requested_at=2026-08-24T21:38:00-03:00
+TV FULL PRO final release build requested after durable catalog storage validation.
+validated_run=32799413249
+version=1.1.3+5
+requested_at=2026-08-24T22:58:00-03:00
