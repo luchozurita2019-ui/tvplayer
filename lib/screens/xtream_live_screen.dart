@@ -48,24 +48,20 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       final service = XtreamLiveFastService.instance;
       final cached = await service.loadCached(widget.playlist.source);
       if (cached != null && cached.channels.isNotEmpty) {
-        final channels = _normalizeXtreamChannels(cached.channels);
         if (DateTime.now().difference(cached.savedAt) >= _cacheFreshFor) {
           unawaited(_refreshXtream());
         }
-        return _LiveData(channels);
+        return _LiveData(cached.channels, categories: cached.categories);
       }
 
-      try {
-        final fresh = await service.refresh(
-          widget.playlist.source,
-          onProgress: (p) => _setStatus(p.label),
-        );
-        if (fresh.channels.isNotEmpty) {
-          return _LiveData(_normalizeXtreamChannels(fresh.channels));
-        }
-      } catch (_) {}
-
-      return _loadM3uFallback();
+      final fresh = await service.refresh(
+        widget.playlist.source,
+        onProgress: (p) => _setStatus(p.label),
+      );
+      if (fresh.channels.isEmpty) {
+        throw const FormatException('Xtream no devolvió canales LIVE válidos.');
+      }
+      return _LiveData(fresh.channels, categories: fresh.categories);
     }
 
     return _loadM3uFallback();
@@ -97,7 +93,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       if (!mounted || fresh.channels.isEmpty) return;
       setState(
         () => _future = Future.value(
-          _LiveData(_normalizeXtreamChannels(fresh.channels)),
+          _LiveData(fresh.channels, categories: fresh.categories),
         ),
       );
     } catch (_) {}
@@ -113,55 +109,6 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
       setState(() => _future = Future.value(_LiveData(fresh.channels)));
     } catch (_) {}
-  }
-
-  List<Channel> _normalizeXtreamChannels(List<Channel> channels) {
-    final base = _xtreamBaseUri(widget.playlist.source);
-    if (base == null) return channels;
-    return channels
-        .map(
-          (channel) => Channel(
-            name: channel.name,
-            url: channel.url,
-            logoUrl: _resolveArtwork(base, channel.logoUrl),
-            group: channel.group,
-            tvgId: channel.tvgId,
-            httpUserAgent: channel.httpUserAgent,
-            httpReferrer: channel.httpReferrer,
-            httpHeaders: channel.httpHeaders,
-          ),
-        )
-        .toList(growable: false);
-  }
-
-  Uri? _xtreamBaseUri(String raw) {
-    final uri = Uri.tryParse(raw.trim());
-    if (uri == null || uri.host.isEmpty) return null;
-    var path = uri.path;
-    final lower = path.toLowerCase();
-    for (final suffix in ['/get.php', '/player_api.php']) {
-      if (lower.endsWith(suffix)) {
-        path = path.substring(0, path.length - suffix.length);
-        break;
-      }
-    }
-    if (path.isEmpty) path = '/';
-    return uri.replace(path: path, query: '', fragment: '');
-  }
-
-  String? _resolveArtwork(Uri base, String? raw) {
-    final value = raw?.trim() ?? '';
-    if (value.isEmpty || value.toLowerCase() == 'null' || value == '0') {
-      return null;
-    }
-    if (value.startsWith('//')) return '${base.scheme}:$value';
-    final parsed = Uri.tryParse(value);
-    if (parsed != null &&
-        (parsed.scheme == 'http' || parsed.scheme == 'https') &&
-        parsed.host.isNotEmpty) {
-      return parsed.toString();
-    }
-    return base.resolve(value).toString();
   }
 
   void _setStatus(String value) {
@@ -465,9 +412,15 @@ class _ChannelRowState extends State<_ChannelRow> {
 
 class _LiveData {
   final List<Channel> channels;
-  const _LiveData(this.channels);
+  final List<String> _storedCategories;
+
+  const _LiveData(
+    this.channels, {
+    List<String> categories = const <String>[],
+  }) : _storedCategories = categories;
 
   List<String> get categories {
+    if (_storedCategories.isNotEmpty) return _storedCategories;
     final seen = <String>{};
     final values = <String>[];
     for (final channel in channels) {
