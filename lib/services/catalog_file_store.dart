@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -40,8 +39,35 @@ class CatalogFileStore {
   }
 
   Future<DateTime?> loadUpdatedAt(String serviceId, String kind) async {
-    final snapshot = await loadSnapshot(serviceId, kind);
-    return snapshot?.updatedAt;
+    final section = await _sectionDirectory(serviceId, kind);
+    if (!await section.exists()) return null;
+
+    final current = File('${section.path}/current.json');
+    if (await current.exists()) {
+      try {
+        final decoded = jsonDecode(await current.readAsString());
+        if (decoded is Map && decoded['version'] == _version) {
+          final millis = int.tryParse(decoded['updatedAt']?.toString() ?? '');
+          if (millis != null && millis > 0) {
+            return DateTime.fromMillisecondsSinceEpoch(millis);
+          }
+        }
+      } catch (_) {}
+    }
+
+    final generation = await _resolveCurrentGeneration(section);
+    if (generation == null) return null;
+    try {
+      final meta = jsonDecode(
+        await File('${generation.path}/meta.json').readAsString(),
+      );
+      if (meta is! Map || meta['version'] != _version) return null;
+      final millis = int.tryParse(meta['updatedAt']?.toString() ?? '');
+      if (millis == null || millis <= 0) return null;
+      return DateTime.fromMillisecondsSinceEpoch(millis);
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<void> saveSnapshot({
