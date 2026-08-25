@@ -472,6 +472,14 @@ class _AndroidMedia3VodPlayerScreenState
       unawaited(_togglePlayPause());
       return KeyEventResult.handled;
     }
+    if (key == LogicalKeyboardKey.pageUp) {
+      unawaited(_previous());
+      return KeyEventResult.handled;
+    }
+    if (key == LogicalKeyboardKey.pageDown) {
+      unawaited(_next());
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.arrowLeft) {
       _showOverlay(focus: _rewindFocus);
       return KeyEventResult.handled;
