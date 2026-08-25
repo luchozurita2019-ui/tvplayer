@@ -31,7 +31,12 @@ class _AndroidMedia3VodPlayerScreenState
     'tvfull/media3_texture_events',
   );
 
-  final FocusNode _focusNode = FocusNode(debugLabel: 'tvfull-vod-player');
+  final FocusNode _rootFocus = FocusNode(debugLabel: 'tvfull-vod-root');
+  final FocusNode _rewindFocus = FocusNode(debugLabel: 'tvfull-vod-rewind');
+  final FocusNode _playFocus = FocusNode(debugLabel: 'tvfull-vod-play');
+  final FocusNode _forwardFocus = FocusNode(debugLabel: 'tvfull-vod-forward');
+  final FocusNode _tracksFocus = FocusNode(debugLabel: 'tvfull-vod-tracks');
+
   StreamSubscription<dynamic>? _eventSub;
   Timer? _progressTimer;
   Timer? _overlayTimer;
@@ -43,9 +48,11 @@ class _AndroidMedia3VodPlayerScreenState
   bool _ready = false;
   bool _playing = true;
   bool _overlayVisible = true;
+  bool _seekable = false;
   String? _error;
   String? _codecWarning;
   int _positionMs = 0;
+  int _bufferedMs = 0;
   int _durationMs = 0;
   int _openGeneration = 0;
   List<_TrackOption> _audioTracks = const [];
@@ -75,12 +82,12 @@ class _AndroidMedia3VodPlayerScreenState
       },
     );
     _progressTimer = Timer.periodic(
-      const Duration(milliseconds: 850),
+      const Duration(seconds: 1),
       (_) => unawaited(_refreshProgress()),
     );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
-      _focusNode.requestFocus();
+      _rootFocus.requestFocus();
       _showOverlay();
     });
     unawaited(_initialize());
@@ -91,10 +98,14 @@ class _AndroidMedia3VodPlayerScreenState
       final id = await _player.invokeMethod<int>(
         'initialize',
         <String, Object?>{
-          'minBuffer': 5000,
-          'maxBuffer': 18000,
-          'bufferForPlayback': 2500,
-          'bufferForPlaybackAfterRebuffer': 1200,
+          // VOD gets its own buffering profile. LIVE uses a separate call and
+          // keeps its existing low-latency values untouched.
+          'minBuffer': 15000,
+          'maxBuffer': 90000,
+          'bufferForPlayback': 1500,
+          'bufferForPlaybackAfterRebuffer': 2500,
+          'backBuffer': 30000,
+          'retainBackBufferFromKeyframe': true,
         },
       );
       if (!mounted) return;
@@ -118,9 +129,11 @@ class _AndroidMedia3VodPlayerScreenState
       _buffering = true;
       _ready = false;
       _playing = true;
+      _seekable = false;
       _error = null;
       _codecWarning = null;
       _positionMs = positionMs;
+      _bufferedMs = positionMs;
       _durationMs = 0;
       _audioTracks = const [];
       _subtitleTracks = const [];
@@ -222,6 +235,7 @@ class _AndroidMedia3VodPlayerScreenState
           setState(() {
             _playing = false;
             _positionMs = _durationMs;
+            _bufferedMs = _durationMs;
             _overlayVisible = true;
           });
         }
@@ -232,28 +246,52 @@ class _AndroidMedia3VodPlayerScreenState
   Future<void> _refreshProgress() async {
     if (!_ready || !mounted) return;
     try {
-      final values = await Future.wait<Object?>([
-        _player.invokeMethod<int>('getCurrentPosition'),
-        _player.invokeMethod<int>('getDuration'),
-      ]);
-      if (!mounted) return;
-      final position = (values[0] as int?) ?? 0;
-      final duration = (values[1] as int?) ?? 0;
-      if (position != _positionMs || duration != _durationMs) {
+      final raw = await _player.invokeMethod<Map<dynamic, dynamic>>(
+        'getPlaybackSnapshot',
+      );
+      if (!mounted || raw == null) return;
+      final position = (raw['position'] as num?)?.toInt() ?? 0;
+      final buffered = (raw['bufferedPosition'] as num?)?.toInt() ?? position;
+      final duration = (raw['duration'] as num?)?.toInt() ?? 0;
+      final seekable = raw['seekable'] == true;
+      final nativeLive = raw['live'] == true;
+      if (nativeLive) {
+        debugPrint(
+          'TV FULL PRO VOD: el proveedor reportó timeline LIVE para ${_channel.name}',
+        );
+      }
+      final safeDuration = duration < 0 ? 0 : duration;
+      final maxPosition = safeDuration > 0 ? safeDuration : 1 << 31;
+      final safePosition = position.clamp(0, maxPosition);
+      final safeBuffered = buffered.clamp(safePosition, maxPosition);
+      if (safePosition != _positionMs ||
+          safeBuffered != _bufferedMs ||
+          safeDuration != _durationMs ||
+          seekable != _seekable) {
         setState(() {
-          _positionMs = position.clamp(0, duration > 0 ? duration : 1 << 31);
-          _durationMs = duration < 0 ? 0 : duration;
+          _positionMs = safePosition;
+          _bufferedMs = safeBuffered;
+          _durationMs = safeDuration;
+          _seekable = seekable;
         });
       }
     } catch (_) {}
   }
 
-  void _showOverlay() {
+  void _showOverlay({FocusNode? focus}) {
     _overlayTimer?.cancel();
     if (mounted && !_overlayVisible) setState(() => _overlayVisible = true);
-    _overlayTimer = Timer(const Duration(seconds: 4), () {
+    if (focus != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && focus.canRequestFocus) focus.requestFocus();
+      });
+    }
+    _overlayTimer = Timer(const Duration(seconds: 6), () {
       if (!mounted || _error != null || _buffering) return;
       setState(() => _overlayVisible = false);
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _rootFocus.requestFocus();
+      });
     });
   }
 
@@ -266,7 +304,7 @@ class _AndroidMedia3VodPlayerScreenState
     }
     if (!mounted) return;
     setState(() => _playing = !_playing);
-    _showOverlay();
+    _showOverlay(focus: _playFocus);
   }
 
   Future<void> _seekBy(int deltaMs) async {
@@ -276,7 +314,11 @@ class _AndroidMedia3VodPlayerScreenState
     await _player.invokeMethod<void>('seekTo', <String, Object?>{
       'position': target,
     });
-    if (mounted) setState(() => _positionMs = target);
+    if (!mounted) return;
+    setState(() {
+      _positionMs = target;
+      if (_bufferedMs < target) _bufferedMs = target;
+    });
     _showOverlay();
   }
 
@@ -305,7 +347,7 @@ class _AndroidMedia3VodPlayerScreenState
               'trackIndex': track.trackIndex,
             },
     );
-    _showOverlay();
+    _showOverlay(focus: _tracksFocus);
   }
 
   Future<void> _selectSubtitle(_TrackOption? track, {bool off = false}) async {
@@ -320,7 +362,7 @@ class _AndroidMedia3VodPlayerScreenState
                   'trackIndex': track.trackIndex,
                 },
     );
-    _showOverlay();
+    _showOverlay(focus: _tracksFocus);
   }
 
   Future<void> _showTrackMenu() async {
@@ -339,6 +381,11 @@ class _AndroidMedia3VodPlayerScreenState
                 style: TextStyle(fontWeight: FontWeight.w900),
               ),
               ListTile(
+                autofocus: true,
+                focusColor: const Color(0xFF12324A),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(9),
+                ),
                 leading: const Icon(Icons.auto_awesome_rounded),
                 title: const Text('Automático'),
                 onTap: () {
@@ -348,6 +395,10 @@ class _AndroidMedia3VodPlayerScreenState
               ),
               ..._audioTracks.map(
                 (track) => ListTile(
+                  focusColor: const Color(0xFF12324A),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
                   leading: const Icon(Icons.volume_up_rounded),
                   title: Text(track.displayName),
                   trailing:
@@ -364,6 +415,10 @@ class _AndroidMedia3VodPlayerScreenState
                 style: TextStyle(fontWeight: FontWeight.w900),
               ),
               ListTile(
+                focusColor: const Color(0xFF12324A),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(9),
+                ),
                 leading: const Icon(Icons.subtitles_off_rounded),
                 title: const Text('Desactivados'),
                 onTap: () {
@@ -372,6 +427,10 @@ class _AndroidMedia3VodPlayerScreenState
                 },
               ),
               ListTile(
+                focusColor: const Color(0xFF12324A),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(9),
+                ),
                 leading: const Icon(Icons.auto_awesome_rounded),
                 title: const Text('Automático'),
                 onTap: () {
@@ -381,6 +440,10 @@ class _AndroidMedia3VodPlayerScreenState
               ),
               ..._subtitleTracks.map(
                 (track) => ListTile(
+                  focusColor: const Color(0xFF12324A),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(9),
+                  ),
                   leading: const Icon(Icons.subtitles_rounded),
                   title: Text(track.displayName),
                   trailing:
@@ -396,37 +459,33 @@ class _AndroidMedia3VodPlayerScreenState
         ),
       ),
     );
-    if (mounted) _showOverlay();
+    if (mounted) _showOverlay(focus: _tracksFocus);
   }
 
-  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
-    if (event is! KeyDownEvent) return KeyEventResult.ignored;
+  KeyEventResult _onRootKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent || !node.hasPrimaryFocus) {
+      return KeyEventResult.ignored;
+    }
     final key = event.logicalKey;
-    final wasVisible = _overlayVisible;
-    _showOverlay();
 
+    if (key == LogicalKeyboardKey.mediaPlayPause) {
+      unawaited(_togglePlayPause());
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.arrowLeft) {
-      unawaited(_seekBy(-10000));
+      _showOverlay(focus: _rewindFocus);
       return KeyEventResult.handled;
     }
     if (key == LogicalKeyboardKey.arrowRight) {
-      unawaited(_seekBy(10000));
+      _showOverlay(focus: _forwardFocus);
       return KeyEventResult.handled;
     }
-    if (key == LogicalKeyboardKey.pageUp || key == LogicalKeyboardKey.arrowUp) {
-      unawaited(_previous());
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.pageDown ||
-        key == LogicalKeyboardKey.arrowDown) {
-      unawaited(_next());
-      return KeyEventResult.handled;
-    }
-    if (key == LogicalKeyboardKey.select ||
+    if (key == LogicalKeyboardKey.arrowUp ||
+        key == LogicalKeyboardKey.arrowDown ||
+        key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
-        key == LogicalKeyboardKey.numpadEnter ||
-        key == LogicalKeyboardKey.mediaPlayPause) {
-      if (wasVisible) unawaited(_togglePlayPause());
+        key == LogicalKeyboardKey.numpadEnter) {
+      _showOverlay(focus: _playFocus);
       return KeyEventResult.handled;
     }
     return KeyEventResult.ignored;
@@ -449,7 +508,11 @@ class _AndroidMedia3VodPlayerScreenState
     _overlayTimer?.cancel();
     _progressTimer?.cancel();
     _eventSub?.cancel();
-    _focusNode.dispose();
+    _rootFocus.dispose();
+    _rewindFocus.dispose();
+    _playFocus.dispose();
+    _forwardFocus.dispose();
+    _tracksFocus.dispose();
     unawaited(_player.invokeMethod<void>('dispose'));
     super.dispose();
   }
@@ -463,16 +526,19 @@ class _AndroidMedia3VodPlayerScreenState
       );
     }
 
-    final progress = _durationMs > 0
+    final played = _durationMs > 0
         ? (_positionMs / _durationMs).clamp(0.0, 1.0).toDouble()
+        : 0.0;
+    final buffered = _durationMs > 0
+        ? (_bufferedMs / _durationMs).clamp(0.0, 1.0).toDouble()
         : 0.0;
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: Focus(
-        focusNode: _focusNode,
+        focusNode: _rootFocus,
         autofocus: true,
-        onKeyEvent: _onKey,
+        onKeyEvent: _onRootKey,
         child: Stack(
           fit: StackFit.expand,
           children: [
@@ -525,6 +591,7 @@ class _AndroidMedia3VodPlayerScreenState
                         spacing: 10,
                         children: [
                           FilledButton.icon(
+                            autofocus: true,
                             onPressed: () => unawaited(
                               _prepareCurrent(positionMs: _positionMs),
                             ),
@@ -533,7 +600,7 @@ class _AndroidMedia3VodPlayerScreenState
                           ),
                           TextButton(
                             onPressed: () => Navigator.of(context).maybePop(),
-                            child: const Text('Volver al catálogo'),
+                            child: const Text('Volver'),
                           ),
                         ],
                       ),
@@ -547,7 +614,7 @@ class _AndroidMedia3VodPlayerScreenState
                   alignment: Alignment.bottomCenter,
                   child: Container(
                     margin: const EdgeInsets.fromLTRB(20, 0, 20, 18),
-                    padding: const EdgeInsets.fromLTRB(14, 10, 14, 10),
+                    padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
                     decoration: BoxDecoration(
                       color: const Color(0xD90A1018),
                       borderRadius: BorderRadius.circular(14),
@@ -556,8 +623,6 @@ class _AndroidMedia3VodPlayerScreenState
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        LinearProgressIndicator(value: progress, minHeight: 2),
-                        const SizedBox(height: 8),
                         Row(
                           children: [
                             Expanded(
@@ -566,51 +631,103 @@ class _AndroidMedia3VodPlayerScreenState
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
                                 style: const TextStyle(
+                                  fontSize: 15,
                                   fontWeight: FontWeight.w800,
                                 ),
                               ),
                             ),
-                            Text(_clock(_positionMs)),
-                            IconButton(
-                              tooltip: 'Retroceder 10 segundos',
-                              onPressed: () => unawaited(_seekBy(-10000)),
-                              icon: const Icon(Icons.replay_10_rounded),
-                            ),
-                            IconButton(
-                              tooltip: _playing ? 'Pausar' : 'Reproducir',
-                              onPressed: () => unawaited(_togglePlayPause()),
-                              icon: Icon(
-                                _playing
-                                    ? Icons.pause_circle_filled_rounded
-                                    : Icons.play_circle_fill_rounded,
-                                size: 34,
+                            if (!_seekable && _durationMs > 0)
+                              const Text(
+                                'Buscando información de navegación…',
+                                style: TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 11,
+                                ),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 9),
+                        _VodTimeline(played: played, buffered: buffered),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Text(
+                              _clock(_positionMs),
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                               ),
                             ),
-                            IconButton(
-                              tooltip: 'Adelantar 10 segundos',
-                              onPressed: () => unawaited(_seekBy(10000)),
-                              icon: const Icon(Icons.forward_10_rounded),
-                            ),
+                            const Spacer(),
+                            if (_durationMs > 0)
+                              Text(
+                                'Cargado hasta ${_clock(_bufferedMs)}',
+                                style: const TextStyle(
+                                  color: Colors.white38,
+                                  fontSize: 11,
+                                ),
+                              ),
+                            const Spacer(),
                             Text(
                               _durationMs > 0 ? _clock(_durationMs) : '--:--',
-                            ),
-                            const SizedBox(width: 8),
-                            IconButton(
-                              tooltip: 'Audio y subtítulos',
-                              onPressed: _ready
-                                  ? () => unawaited(_showTrackMenu())
-                                  : null,
-                              icon: const Icon(Icons.tune_rounded),
-                            ),
-                            TextButton.icon(
-                              onPressed: () => Navigator.of(context).maybePop(),
-                              icon: const Icon(
-                                Icons.grid_view_rounded,
-                                size: 20,
+                              style: const TextStyle(
+                                color: Colors.white70,
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
                               ),
-                              label: const Text('Catálogo'),
                             ),
                           ],
+                        ),
+                        const SizedBox(height: 8),
+                        FocusTraversalGroup(
+                          child: Row(
+                            mainAxisAlignment: MainAxisAlignment.center,
+                            children: [
+                              _VodControlButton(
+                                focusNode: _rewindFocus,
+                                tooltip: 'Retroceder 10 segundos',
+                                icon: Icons.replay_10_rounded,
+                                onPressed: _ready
+                                    ? () => unawaited(_seekBy(-10000))
+                                    : null,
+                                onFocus: _showOverlay,
+                              ),
+                              const SizedBox(width: 8),
+                              _VodControlButton(
+                                focusNode: _playFocus,
+                                tooltip: _playing ? 'Pausar' : 'Reproducir',
+                                icon: _playing
+                                    ? Icons.pause_circle_filled_rounded
+                                    : Icons.play_circle_fill_rounded,
+                                iconSize: 34,
+                                onPressed: _ready
+                                    ? () => unawaited(_togglePlayPause())
+                                    : null,
+                                onFocus: _showOverlay,
+                              ),
+                              const SizedBox(width: 8),
+                              _VodControlButton(
+                                focusNode: _forwardFocus,
+                                tooltip: 'Adelantar 10 segundos',
+                                icon: Icons.forward_10_rounded,
+                                onPressed: _ready
+                                    ? () => unawaited(_seekBy(10000))
+                                    : null,
+                                onFocus: _showOverlay,
+                              ),
+                              const SizedBox(width: 18),
+                              _VodControlButton(
+                                focusNode: _tracksFocus,
+                                tooltip: 'Audio y subtítulos',
+                                icon: Icons.tune_rounded,
+                                onPressed: _ready
+                                    ? () => unawaited(_showTrackMenu())
+                                    : null,
+                                onFocus: _showOverlay,
+                              ),
+                            ],
+                          ),
                         ),
                       ],
                     ),
@@ -618,6 +735,112 @@ class _AndroidMedia3VodPlayerScreenState
                 ),
               ),
           ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VodTimeline extends StatelessWidget {
+  final double played;
+  final double buffered;
+
+  const _VodTimeline({required this.played, required this.buffered});
+
+  @override
+  Widget build(BuildContext context) {
+    return SizedBox(
+      height: 8,
+      child: LayoutBuilder(
+        builder: (context, constraints) {
+          final width = constraints.maxWidth;
+          final playedWidth = width * played.clamp(0.0, 1.0);
+          final bufferedWidth = width * buffered.clamp(0.0, 1.0);
+          return ClipRRect(
+            borderRadius: BorderRadius.circular(999),
+            child: Stack(
+              fit: StackFit.expand,
+              children: [
+                const ColoredBox(color: Color(0x33FFFFFF)),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    width: bufferedWidth,
+                    child: const ColoredBox(color: Color(0x66FFFFFF)),
+                  ),
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: SizedBox(
+                    width: playedWidth,
+                    child: const ColoredBox(color: Color(0xFF42AFFF)),
+                  ),
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _VodControlButton extends StatefulWidget {
+  final FocusNode focusNode;
+  final String tooltip;
+  final IconData icon;
+  final double iconSize;
+  final VoidCallback? onPressed;
+  final VoidCallback onFocus;
+
+  const _VodControlButton({
+    required this.focusNode,
+    required this.tooltip,
+    required this.icon,
+    required this.onPressed,
+    required this.onFocus,
+    this.iconSize = 26,
+  });
+
+  @override
+  State<_VodControlButton> createState() => _VodControlButtonState();
+}
+
+class _VodControlButtonState extends State<_VodControlButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: widget.tooltip,
+      child: Material(
+        color: _focused ? const Color(0xFF12324A) : Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        child: InkWell(
+          focusNode: widget.focusNode,
+          canRequestFocus: widget.onPressed != null,
+          borderRadius: BorderRadius.circular(12),
+          onFocusChange: (value) {
+            setState(() => _focused = value);
+            if (value) widget.onFocus();
+          },
+          onTap: widget.onPressed,
+          child: Container(
+            width: 52,
+            height: 44,
+            alignment: Alignment.center,
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _focused ? const Color(0xFF58B9FF) : Colors.transparent,
+              ),
+            ),
+            child: Icon(
+              widget.icon,
+              size: widget.iconSize,
+              color: widget.onPressed == null ? Colors.white30 : Colors.white,
+            ),
+          ),
         ),
       ),
     );
