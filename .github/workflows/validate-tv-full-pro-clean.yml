@@ -49,105 +49,16 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Apply catalog retention and LIVE timeout hotfixes
+      - name: Normalize Dart formatting
         shell: bash
         run: |
           set -euo pipefail
-          python3 - <<'PY'
-          from pathlib import Path
-          import re
-
-          provider = Path('lib/providers/iptv_provider.dart')
-          text = provider.read_text()
-          pattern = re.compile(r"\s*if \(old != null &&\s*\(old\.source != next\.source \|\| old\.sourceType != next\.sourceType\)\) \{\s*await _localStore\.clearServiceCatalogs\(id\);\s*\}\s*nextRemote\.add\(next\);", re.MULTILINE)
-          replacement = "\n        // La sincronización del panel nunca borra el último catálogo bueno.\n        // Una fuente nueva reemplaza datos sólo cuando su descarga termina bien.\n        nextRemote.add(next);"
-          text, count = pattern.subn(replacement, text, count=1)
-          if count != 1 and 'sincronización del panel nunca borra' not in text:
-              raise SystemExit('No se encontró el borrado automático de catálogos')
-          provider.write_text(text)
-
-          section = Path('lib/services/section_catalog_service.dart')
-          text = section.read_text()
-          if 'La lista M3U descargada no contiene entradas válidas.' not in text:
-              needle = "    final parsed = await compute(parseM3uInBackground, content);\n"
-              insert = needle + "    if (parsed.isEmpty) {\n      throw const FormatException(\n        'La lista M3U descargada no contiene entradas válidas.',\n      );\n    }\n"
-              if needle not in text:
-                  raise SystemExit('No se encontró parseM3uInBackground')
-              text = text.replace(needle, insert, 1)
-          loop_pattern = re.compile(r"    for \(final kind in TvSectionKind\.values\) \{\n      final channels = List<Channel>\.unmodifiable\(buckets\[kind\]!\);[\s\S]*?\n    \}\n\n    // La primera carga sólo se considera terminada cuando LIVE/Películas/Series\n    // quedaron persistidos\. Así, salir y volver nunca depende de otra descarga\.\n    await Future\.wait\(writes\);", re.MULTILINE)
-          loop_lines = [
-              "    for (final kind in TvSectionKind.values) {",
-              "      final downloaded = buckets[kind]!;",
-              "      if (downloaded.isEmpty) {",
-              "        final previous = await loadCached(playlist, kind);",
-              "        result[kind] = previous ??",
-              "            const SectionCatalogSnapshot(",
-              "              channels: [],",
-              "              categories: [],",
-              "              fromCache: false,",
-              "            );",
-              "        continue;",
-              "      }",
-              "",
-              "      final channels = List<Channel>.unmodifiable(downloaded);",
-              "      final categories = List<String>.unmodifiable(_categories(channels));",
-              "      final snapshot = SectionCatalogSnapshot(",
-              "        channels: channels,",
-              "        categories: categories,",
-              "        fromCache: false,",
-              "      );",
-              "      result[kind] = snapshot;",
-              "      writes.add(",
-              "        _store.saveSnapshot(playlist.id, 'm3u_${kind.name}', {",
-              "          'categories': categories,",
-              "          'items': channels.map((e) => e.toJson()).toList(growable: false),",
-              "        }),",
-              "      );",
-              "    }",
-              "",
-              "    // Un refresh vacío jamás pisa el último snapshot bueno.",
-              "    await Future.wait(writes);",
-          ]
-          loop_replacement = "\n".join(loop_lines)
-          text, count = loop_pattern.subn(loop_replacement, text, count=1)
-          if count != 1 and 'Un refresh vacío jamás pisa' not in text:
-              raise SystemExit('No se encontró el bloque de snapshots M3U')
-          section.write_text(text)
-
-          player = Path('lib/screens/android_media3_texture_player_screen.dart')
-          text = player.read_text()
-          text = text.replace("  static const Duration _liveStartupTimeout = Duration(seconds: 4);\n", "")
-          text = text.replace("  static const Duration _liveRebufferTimeout = Duration(seconds: 7);\n", "")
-          text = text.replace("  Timer? _bufferingWatchdog;\n", "")
-          text = text.replace("  bool _hasReachedReady = false;\n", "")
-          text = text.replace("    _hasReachedReady = false;\n", "")
-          text = text.replace("        _hasReachedReady = true;\n", "")
-          text = text.replace("    _cancelBufferingWatchdog();\n", "")
-          text = text.replace("\n    _startBufferingWatchdog(_liveStartupTimeout);\n", "\n")
-          buffer_pattern = re.compile(r"      case 'bufferingStart':\n        setState\(\(\) => _buffering = true\);\n        _startBufferingWatchdog\([\s\S]*?\n        \);\n        break;")
-          text = buffer_pattern.sub("      case 'bufferingStart':\n        setState(() => _buffering = true);\n        break;", text, count=1)
-          text = text.replace("    final watchdogTimeout = combined.contains('live_buffer_timeout');\n", "")
-          text = text.replace("    final transient = !watchdogTimeout &&\n        !permanentHttp &&", "    final transient = !permanentHttp &&")
-          methods = re.compile(r"\n  void _startBufferingWatchdog\(Duration timeout\) \{[\s\S]*?\n  String _friendlyMessage")
-          text = methods.sub("\n  String _friendlyMessage", text, count=1)
-          text = text.replace("    if (value.contains('live_buffer_timeout')) {\n      return 'Canal no disponible';\n    }\n", "")
-          if '_bufferingWatchdog' in text or '_liveStartupTimeout' in text or '_liveRebufferTimeout' in text or '_hasReachedReady' in text:
-              raise SystemExit('Quedaron referencias al watchdog LIVE')
-          player.write_text(text)
-
-          pubspec = Path('pubspec.yaml')
-          text = pubspec.read_text()
-          if 'version: 1.1.1+3' in text:
-              text = text.replace('version: 1.1.1+3', 'version: 1.1.2+4', 1)
-          pubspec.write_text(text)
-          PY
-
           dart format lib
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add lib pubspec.yaml
-          if ! git diff --cached --quiet; then
-            git commit -m "Finalize catalog retention hotfix [skip ci]"
+          if ! git diff --quiet -- lib; then
+            git config user.name "github-actions[bot]"
+            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+            git add lib
+            git commit -m "Format TV FULL PRO source [skip ci]"
             git push origin HEAD:android-tv-full-pro-clean-source
           fi
 
