@@ -119,6 +119,9 @@ jobs:
           text = text.replace("  static const Duration _liveStartupTimeout = Duration(seconds: 4);\n", "")
           text = text.replace("  static const Duration _liveRebufferTimeout = Duration(seconds: 7);\n", "")
           text = text.replace("  Timer? _bufferingWatchdog;\n", "")
+          text = text.replace("  bool _hasReachedReady = false;\n", "")
+          text = text.replace("    _hasReachedReady = false;\n", "")
+          text = text.replace("        _hasReachedReady = true;\n", "")
           text = text.replace("    _cancelBufferingWatchdog();\n", "")
           text = text.replace("\n    _startBufferingWatchdog(_liveStartupTimeout);\n", "\n")
           buffer_pattern = re.compile(r"      case 'bufferingStart':\n        setState\(\(\) => _buffering = true\);\n        _startBufferingWatchdog\([\s\S]*?\n        \);\n        break;")
@@ -128,7 +131,7 @@ jobs:
           methods = re.compile(r"\n  void _startBufferingWatchdog\(Duration timeout\) \{[\s\S]*?\n  String _friendlyMessage")
           text = methods.sub("\n  String _friendlyMessage", text, count=1)
           text = text.replace("    if (value.contains('live_buffer_timeout')) {\n      return 'Canal no disponible';\n    }\n", "")
-          if '_bufferingWatchdog' in text or '_liveStartupTimeout' in text or '_liveRebufferTimeout' in text:
+          if '_bufferingWatchdog' in text or '_liveStartupTimeout' in text or '_liveRebufferTimeout' in text or '_hasReachedReady' in text:
               raise SystemExit('Quedaron referencias al watchdog LIVE')
           player.write_text(text)
 
@@ -144,7 +147,7 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add lib pubspec.yaml
           if ! git diff --cached --quiet; then
-            git commit -m "Fix catalog retention and false LIVE timeout [skip ci]"
+            git commit -m "Finalize catalog retention hotfix [skip ci]"
             git push origin HEAD:android-tv-full-pro-clean-source
           fi
 
