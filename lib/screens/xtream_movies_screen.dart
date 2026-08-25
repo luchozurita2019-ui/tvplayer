@@ -14,6 +14,7 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_service.dart';
 import '../services/xtream_vod_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/tv_catalog_category_row.dart';
 import 'player_screen.dart';
 
 class XtreamMoviesScreen extends StatefulWidget {
@@ -170,28 +171,11 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
               itemBuilder: (context, index) {
                 final value = index == 0 ? null : categories[index - 1];
                 final selected = value == _category;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: ListTile(
-                    autofocus: false,
-                    selected: selected,
-                    minTileHeight: 50,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    selectedTileColor:
-                        const Color(0xFF1677FF).withValues(alpha: .18),
-                    title: Text(
-                      value ?? 'Todas',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight:
-                            selected ? FontWeight.w800 : FontWeight.w600,
-                      ),
-                    ),
-                    onTap: () => setState(() => _category = value),
-                  ),
+                return TvCatalogCategoryRow(
+                  label: value ?? 'Todas',
+                  selected: selected,
+                  autofocus: index == 0,
+                  onTap: () => setState(() => _category = value),
                 );
               },
             ),
