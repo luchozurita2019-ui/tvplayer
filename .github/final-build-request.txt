@@ -1,4 +1,4 @@
-TV FULL PRO final release build requested after VOD audio language and subtitle selector validation.
-validated_run=32809060837
-version=1.1.5+7
-requested_at=2026-08-25T01:28:00-03:00
+TV FULL PRO final release build requested after LIVE classification/cache and launcher icon validation.
+validated_run=32815526005
+version=1.1.6+8
+requested_at=2026-08-25T03:20:00-03:00
