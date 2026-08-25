@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
+import 'catalog_file_store.dart';
 import 'm3u_fetcher.dart';
 import 'm3u_parser.dart';
 import 'tv_local_store.dart';
@@ -25,6 +26,7 @@ class SectionCatalogService {
   static final SectionCatalogService instance = SectionCatalogService._();
 
   final TvLocalStore _store = TvLocalStore.instance;
+  final CatalogFileStore _catalogFiles = CatalogFileStore.instance;
   static const Duration _defaultFreshFor = Duration(minutes: 5);
 
   final Map<String, Future<Map<TvSectionKind, SectionCatalogSnapshot>>>
@@ -35,27 +37,32 @@ class SectionCatalogService {
     Playlist playlist,
     TvSectionKind kind,
   ) async {
-    final raw = await _store.loadSnapshot(playlist.id, 'm3u_${kind.name}');
-    if (raw is! Map) return null;
-    final rawItems = raw['items'];
-    final rawCategories = raw['categories'];
-    if (rawItems is! List) return null;
-    final channels = <Channel>[];
-    for (final item in rawItems) {
-      if (item is! Map) continue;
-      try {
-        channels.add(Channel.fromJson(Map<String, dynamic>.from(item)));
-      } catch (_) {}
+    final key = 'm3u_${kind.name}';
+
+    final fileSnapshot = await _catalogFiles.loadSnapshot(playlist.id, key);
+    if (fileSnapshot != null) {
+      return _decodeSnapshot(fileSnapshot.payload);
     }
-    if (channels.isEmpty) return null;
-    final categories = rawCategories is List
-        ? rawCategories.map((e) => e.toString()).toList(growable: false)
-        : _categories(channels);
-    return SectionCatalogSnapshot(
-      channels: List.unmodifiable(channels),
-      categories: List.unmodifiable(categories),
-      fromCache: true,
-    );
+
+    // Migración única desde la arquitectura vieja. La fila SQLite se elimina
+    // sólo después de confirmar que el catálogo quedó persistido en archivos.
+    final legacy = await _store.loadLegacySnapshot(playlist.id, key);
+    final migrated = _decodeSnapshot(legacy);
+    if (migrated != null) {
+      try {
+        await _catalogFiles.saveSnapshot(
+          serviceId: playlist.id,
+          kind: key,
+          categories: migrated.categories,
+          items: migrated.channels.map((channel) => channel.toJson()),
+        );
+        await _store.deleteLegacySnapshot(playlist.id, key);
+      } catch (_) {
+        // Si la migración falla, se conserva la fila antigua y se sigue usando
+        // este snapshot en la sesión actual. Nunca destruimos el último bueno.
+      }
+    }
+    return migrated;
   }
 
   Future<SectionCatalogSnapshot> loadOrRefresh(
@@ -95,10 +102,10 @@ class SectionCatalogService {
 
     DateTime? persisted;
     for (final kind in TvSectionKind.values) {
-      persisted = await _store.loadSnapshotUpdatedAt(
-        playlist.id,
-        'm3u_${kind.name}',
-      );
+      final snapshotKey = 'm3u_${kind.name}';
+      persisted = await _catalogFiles.loadUpdatedAt(playlist.id, snapshotKey);
+      persisted ??=
+          await _store.loadLegacySnapshotUpdatedAt(playlist.id, snapshotKey);
       if (persisted != null) break;
     }
     if (persisted != null && now.difference(persisted) < freshFor) {
@@ -167,17 +174,46 @@ class SectionCatalogService {
       );
       result[kind] = snapshot;
       writes.add(
-        _store.saveSnapshot(playlist.id, 'm3u_${kind.name}', {
-          'categories': categories,
-          'items': channels.map((e) => e.toJson()).toList(growable: false),
-        }),
+        _catalogFiles.saveSnapshot(
+          serviceId: playlist.id,
+          kind: 'm3u_${kind.name}',
+          categories: categories,
+          items: channels.map((channel) => channel.toJson()),
+        ),
       );
     }
 
-    // Un refresh vacío jamás pisa el último snapshot bueno.
+    // La primera carga sólo termina cuando las secciones no vacías quedaron
+    // confirmadas en Application Support. Un refresh vacío conserva la versión
+    // anterior y nunca reemplaza el último catálogo bueno.
     await Future.wait(writes);
     _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
     return result;
+  }
+
+  SectionCatalogSnapshot? _decodeSnapshot(dynamic raw) {
+    if (raw is! Map) return null;
+    final rawItems = raw['items'];
+    final rawCategories = raw['categories'];
+    if (rawItems is! List) return null;
+
+    final channels = <Channel>[];
+    for (final item in rawItems) {
+      if (item is! Map) continue;
+      try {
+        channels.add(Channel.fromJson(Map<String, dynamic>.from(item)));
+      } catch (_) {}
+    }
+    if (channels.isEmpty) return null;
+
+    final categories = rawCategories is List
+        ? rawCategories.map((e) => e.toString()).toList(growable: false)
+        : _categories(channels);
+    return SectionCatalogSnapshot(
+      channels: List<Channel>.unmodifiable(channels),
+      categories: List<String>.unmodifiable(categories),
+      fromCache: true,
+    );
   }
 
   TvSectionKind _classify(Channel channel) {
@@ -185,12 +221,11 @@ class SectionCatalogService {
     final uri = Uri.tryParse(channel.url);
     final path = (uri?.path ?? url).toLowerCase();
 
-    // No reclasificamos por palabras del group-title. El proveedor puede llamar
-    // "Series 24/7", "Novelas" o "Cine" a canales lineales reales.
+    // El nombre de la carpeta no decide el tipo. Si el proveedor llama
+    // "Series 24/7", "Novelas" o "Cine" a un canal lineal, sigue siendo LIVE.
     if (path.contains('/series/')) return TvSectionKind.series;
     if (path.contains('/movie/')) return TvSectionKind.movies;
 
-    // Sólo una URL de archivo VOD inequívoca mueve una entrada M3U a Películas.
     if (_hasVideoFile(path)) return TvSectionKind.movies;
     return TvSectionKind.live;
   }
