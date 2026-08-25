@@ -1,7 +1,7 @@
 name: iptv_player
 description: TV FULL PRO para Android TV, rápido, liviano y orientado a control remoto.
 publish_to: 'none'
-version: 1.1.6+8
+version: 1.1.7+9
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
