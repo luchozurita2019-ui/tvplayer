@@ -151,10 +151,8 @@ class IptvProvider extends ChangeNotifier {
         final id = '$_remotePlaylistPrefix${service.id}';
         final old = previous[id];
         final next = _playlistFromRemote(service, id, old);
-        if (old != null &&
-            (old.source != next.source || old.sourceType != next.sourceType)) {
-          await _localStore.clearServiceCatalogs(id);
-        }
+        // La sincronización del panel nunca borra el último catálogo bueno.
+        // Una fuente nueva reemplaza datos sólo cuando su descarga termina bien.
         nextRemote.add(next);
       }
 

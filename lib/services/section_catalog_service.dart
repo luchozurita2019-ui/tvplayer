@@ -128,6 +128,11 @@ class SectionCatalogService {
   ) async {
     final content = await M3uFetcher.fetch(playlist.source);
     final parsed = await compute(parseM3uInBackground, content);
+    if (parsed.isEmpty) {
+      throw const FormatException(
+        'La lista M3U descargada no contiene entradas válidas.',
+      );
+    }
     final buckets = <TvSectionKind, List<Channel>>{
       TvSectionKind.live: <Channel>[],
       TvSectionKind.movies: <Channel>[],
@@ -141,7 +146,19 @@ class SectionCatalogService {
     final writes = <Future<void>>[];
 
     for (final kind in TvSectionKind.values) {
-      final channels = List<Channel>.unmodifiable(buckets[kind]!);
+      final downloaded = buckets[kind]!;
+      if (downloaded.isEmpty) {
+        final previous = await loadCached(playlist, kind);
+        result[kind] = previous ??
+            const SectionCatalogSnapshot(
+              channels: [],
+              categories: [],
+              fromCache: false,
+            );
+        continue;
+      }
+
+      final channels = List<Channel>.unmodifiable(downloaded);
       final categories = List<String>.unmodifiable(_categories(channels));
       final snapshot = SectionCatalogSnapshot(
         channels: channels,
@@ -157,8 +174,7 @@ class SectionCatalogService {
       );
     }
 
-    // La primera carga sólo se considera terminada cuando LIVE/Películas/Series
-    // quedaron persistidos. Así, salir y volver nunca depende de otra descarga.
+    // Un refresh vacío jamás pisa el último snapshot bueno.
     await Future.wait(writes);
     _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
     return result;
