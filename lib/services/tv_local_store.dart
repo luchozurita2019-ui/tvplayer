@@ -4,18 +4,19 @@ import 'package:sqflite/sqflite.dart';
 
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
+import 'catalog_file_store.dart';
 
-/// Persistencia liviana de TV FULL PRO.
+/// Persistencia chica de TV FULL PRO.
 ///
-/// Hot Player separa configuración/listas del catálogo pesado. TV FULL PRO hace
-/// lo mismo: la definición de cada servicio y la lista seleccionada viven en
-/// SQLite; los catálogos se guardan por sección y jamás dentro de
-/// SharedPreferences.
+/// SQLite conserva únicamente definición/orden de servicios y estado de la app.
+/// Los catálogos pesados viven en CatalogFileStore dentro de Application Support.
+/// La tabla catalog_snapshots sólo se lee para migrar instalaciones anteriores.
 class TvLocalStore {
   TvLocalStore._();
 
   static final TvLocalStore instance = TvLocalStore._();
 
+  final CatalogFileStore _catalogFiles = CatalogFileStore.instance;
   Database? _database;
 
   Future<Database> get database async {
@@ -24,7 +25,7 @@ class TvLocalStore {
     final base = await getDatabasesPath();
     final db = await openDatabase(
       '$base/tv_full_pro.db',
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
           CREATE TABLE services (
@@ -43,19 +44,11 @@ class TvLocalStore {
             value TEXT
           )
         ''');
-        await db.execute('''
-          CREATE TABLE catalog_snapshots (
-            service_id TEXT NOT NULL,
-            kind TEXT NOT NULL,
-            payload TEXT NOT NULL,
-            updated_at INTEGER NOT NULL,
-            PRIMARY KEY (service_id, kind)
-          )
-        ''');
-        await db.execute(
-          'CREATE INDEX catalog_snapshots_service_idx '
-          'ON catalog_snapshots(service_id)',
-        );
+      },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        // v1 -> v2: no se borra catalog_snapshots aquí. SectionCatalogService
+        // migra cada snapshot válido a archivos y elimina la fila sólo después
+        // de confirmar la escritura nueva.
       },
     );
     _database = db;
@@ -129,75 +122,89 @@ class TvLocalStore {
       return;
     }
     await db.insert(
-        'app_state',
-        {
-          'key': 'selected_service_id',
-          'value': id.trim(),
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace);
-  }
-
-  Future<void> saveSnapshot(
-    String serviceId,
-    String kind,
-    Object payload,
-  ) async {
-    final db = await database;
-    await db.insert(
-        'catalog_snapshots',
-        {
-          'service_id': serviceId,
-          'kind': kind,
-          'payload': jsonEncode(payload),
-          'updated_at': DateTime.now().millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.replace);
-  }
-
-  Future<dynamic> loadSnapshot(String serviceId, String kind) async {
-    final db = await database;
-    final rows = await db.query(
-      'catalog_snapshots',
-      columns: ['payload'],
-      where: 'service_id = ? AND kind = ?',
-      whereArgs: [serviceId, kind],
-      limit: 1,
+      'app_state',
+      {
+        'key': 'selected_service_id',
+        'value': id.trim(),
+      },
+      conflictAlgorithm: ConflictAlgorithm.replace,
     );
-    if (rows.isEmpty) return null;
-    final raw = rows.first['payload']?.toString();
-    if (raw == null || raw.isEmpty) return null;
+  }
+
+  Future<dynamic> loadLegacySnapshot(String serviceId, String kind) async {
+    final db = await database;
+    if (!await _tableExists(db, 'catalog_snapshots')) return null;
     try {
+      final rows = await db.query(
+        'catalog_snapshots',
+        columns: ['payload'],
+        where: 'service_id = ? AND kind = ?',
+        whereArgs: [serviceId, kind],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      final raw = rows.first['payload']?.toString();
+      if (raw == null || raw.isEmpty) return null;
       return jsonDecode(raw);
     } catch (_) {
       return null;
     }
   }
 
-  Future<DateTime?> loadSnapshotUpdatedAt(
+  Future<DateTime?> loadLegacySnapshotUpdatedAt(
     String serviceId,
     String kind,
   ) async {
     final db = await database;
-    final rows = await db.query(
-      'catalog_snapshots',
-      columns: ['updated_at'],
-      where: 'service_id = ? AND kind = ?',
-      whereArgs: [serviceId, kind],
-      limit: 1,
-    );
-    if (rows.isEmpty) return null;
-    final raw = rows.first['updated_at'];
-    final millis = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
-    if (millis == null || millis <= 0) return null;
-    return DateTime.fromMillisecondsSinceEpoch(millis);
+    if (!await _tableExists(db, 'catalog_snapshots')) return null;
+    try {
+      final rows = await db.query(
+        'catalog_snapshots',
+        columns: ['updated_at'],
+        where: 'service_id = ? AND kind = ?',
+        whereArgs: [serviceId, kind],
+        limit: 1,
+      );
+      if (rows.isEmpty) return null;
+      final raw = rows.first['updated_at'];
+      final millis = raw is int ? raw : int.tryParse(raw?.toString() ?? '');
+      if (millis == null || millis <= 0) return null;
+      return DateTime.fromMillisecondsSinceEpoch(millis);
+    } catch (_) {
+      return null;
+    }
+  }
+
+  Future<void> deleteLegacySnapshot(String serviceId, String kind) async {
+    final db = await database;
+    if (!await _tableExists(db, 'catalog_snapshots')) return;
+    try {
+      await db.delete(
+        'catalog_snapshots',
+        where: 'service_id = ? AND kind = ?',
+        whereArgs: [serviceId, kind],
+      );
+    } catch (_) {}
   }
 
   Future<void> clearServiceCatalogs(String serviceId) async {
+    await _catalogFiles.clearService(serviceId);
     final db = await database;
-    await db.delete(
-      'catalog_snapshots',
-      where: 'service_id = ?',
-      whereArgs: [serviceId],
+    if (!await _tableExists(db, 'catalog_snapshots')) return;
+    try {
+      await db.delete(
+        'catalog_snapshots',
+        where: 'service_id = ?',
+        whereArgs: [serviceId],
+      );
+    } catch (_) {}
+  }
+
+  Future<bool> _tableExists(Database db, String table) async {
+    final rows = await db.rawQuery(
+      "SELECT name FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+      [table],
     );
+    return rows.isNotEmpty;
   }
 }
