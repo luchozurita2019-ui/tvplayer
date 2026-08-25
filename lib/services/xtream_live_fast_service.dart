@@ -97,7 +97,7 @@ class XtreamLiveFastService {
         XtreamFastCatalogService.instance.invalidateSession(playlistUrl);
         connection = await XtreamFastCatalogService.instance
             .connectionForPlaylist(playlistUrl, forceRefresh: true);
-        return _fetch(
+        return await _fetch(
           connection,
           playlistUrl,
           onProgress,
@@ -222,8 +222,7 @@ class XtreamLiveFastService {
     final count = (prepared['count'] as num?)?.toInt() ?? 0;
     if (count <= 0 || !await itemsTemp.exists()) {
       unawaited(_deleteFileQuietly(itemsTemp));
-      throw const FormatException(
-          'get_live_streams no devolvió canales válidos.');
+      throw const FormatException('get_live_streams no devolvió canales válidos.');
     }
 
     final savedAt = DateTime.now();
@@ -281,8 +280,10 @@ class XtreamLiveFastService {
 
   Future<List<Channel>> _readCachedChannels(File file) async {
     final channels = <Channel>[];
-    final lines =
-        file.openRead().transform(utf8.decoder).transform(const LineSplitter());
+    final lines = file
+        .openRead()
+        .transform(utf8.decoder)
+        .transform(const LineSplitter());
 
     await for (final line in lines) {
       if (line.trim().isEmpty) continue;
@@ -364,8 +365,7 @@ class XtreamLiveFastService {
         final sink = file.openWrite();
         var received = 0;
         try {
-          await for (final chunk
-              in response.stream.timeout(inactivityTimeout)) {
+          await for (final chunk in response.stream.timeout(inactivityTimeout)) {
             received += chunk.length;
             sink.add(chunk);
             onBytes?.call(received);
@@ -453,10 +453,7 @@ class XtreamLiveFastService {
       format = 'GZIP';
       final decoded = File('${source.path}.decoded.json');
       try {
-        await source
-            .openRead()
-            .transform(gzip.decoder)
-            .pipe(decoded.openWrite());
+        await source.openRead().transform(gzip.decoder).pipe(decoded.openWrite());
         await source.delete();
         usable = decoded;
       } catch (_) {
@@ -711,8 +708,8 @@ Map<String, dynamic> _prepareLiveCatalogFromFile(Map<String, String> input) {
         streamServer,
         _cleanText(item['direct_source']),
       );
-      final url =
-          direct ?? _liveUrl(streamServer, username, password, id, extension);
+      final url = direct ??
+          _liveUrl(streamServer, username, password, id, extension);
 
       buffer.writeln(
         jsonEncode(<String, dynamic>{
@@ -836,17 +833,19 @@ String _liveUrl(
   String extension,
 ) {
   final prefix = base.pathSegments.where((e) => e.trim().isNotEmpty).toList();
-  return base.replace(
-    pathSegments: <String>[
-      ...prefix,
-      'live',
-      username,
-      password,
-      '$streamId.$extension',
-    ],
-    query: '',
-    fragment: '',
-  ).toString();
+  return base
+      .replace(
+        pathSegments: <String>[
+          ...prefix,
+          'live',
+          username,
+          password,
+          '$streamId.$extension',
+        ],
+        query: '',
+        fragment: '',
+      )
+      .toString();
 }
 
 DateTime? _dateFromMillis(dynamic raw) {
@@ -890,8 +889,6 @@ String _formatBytes(int bytes) {
 
 String _sanitizeDiagnostic(String value) {
   return value
-      .replaceAll(
-          RegExp(r'([?&]username=)[^&\s]+', caseSensitive: false), r'$1***')
-      .replaceAll(
-          RegExp(r'([?&]password=)[^&\s]+', caseSensitive: false), r'$1***');
+      .replaceAll(RegExp(r'([?&]username=)[^&\s]+', caseSensitive: false), r'$1***')
+      .replaceAll(RegExp(r'([?&]password=)[^&\s]+', caseSensitive: false), r'$1***');
 }
