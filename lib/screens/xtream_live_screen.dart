@@ -11,7 +11,9 @@ import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/remote_access_guard.dart';
 import '../services/section_catalog_service.dart';
+import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_live_fast_service.dart';
+import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import 'player_screen.dart';
 
@@ -54,6 +56,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         return _LiveData(cached.channels, categories: cached.categories);
       }
 
+      _primeXtreamCatalogConnection();
       final fresh = await service.refresh(
         widget.playlist.source,
         onProgress: (p) => _setStatus(p.label),
@@ -86,6 +89,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   Future<void> _refreshXtream() async {
     try {
+      _primeXtreamCatalogConnection();
       final fresh = await XtreamLiveFastService.instance.refresh(
         widget.playlist.source,
         onProgress: (p) => _setStatus(p.label),
@@ -97,6 +101,50 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         ),
       );
     } catch (_) {}
+  }
+
+  void _primeXtreamCatalogConnection() {
+    final raw = widget.playlist.source.trim();
+    final uri = Uri.tryParse(raw);
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        uri.host.isEmpty) {
+      return;
+    }
+
+    final username = uri.queryParameters['username']?.trim() ?? '';
+    final password = uri.queryParameters['password']?.trim() ?? '';
+    if (username.isEmpty || password.isEmpty) return;
+
+    var path = uri.path;
+    final lower = path.toLowerCase();
+    if (lower.endsWith('/get.php')) {
+      path = path.substring(0, path.length - '/get.php'.length);
+    } else if (lower.endsWith('get.php')) {
+      path = path.substring(0, path.length - 'get.php'.length);
+      if (path.endsWith('/')) path = path.substring(0, path.length - 1);
+    } else if (lower.endsWith('/player_api.php')) {
+      path = path.substring(0, path.length - '/player_api.php'.length);
+    } else if (lower.endsWith('player_api.php')) {
+      path = path.substring(0, path.length - 'player_api.php'.length);
+      if (path.endsWith('/')) path = path.substring(0, path.length - 1);
+    }
+
+    final server = uri.replace(
+      path: path.isEmpty ? '/' : path,
+      query: '',
+      fragment: '',
+    );
+
+    XtreamFastCatalogService.instance.rememberConnection(
+      XtreamConnectionResult(
+        playlistUrl: raw,
+        apiServer: server,
+        streamServer: server,
+        username: username,
+        password: password,
+      ),
+    );
   }
 
   Future<void> _refreshM3u() async {
