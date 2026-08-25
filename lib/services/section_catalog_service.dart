@@ -3,6 +3,7 @@ import 'package:flutter/foundation.dart';
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import 'catalog_file_store.dart';
+import 'content_classifier.dart';
 import 'm3u_fetcher.dart';
 import 'm3u_parser.dart';
 import 'tv_local_store.dart';
@@ -44,8 +45,6 @@ class SectionCatalogService {
       return _decodeSnapshot(fileSnapshot.payload);
     }
 
-    // Migración única desde la arquitectura vieja. La fila SQLite se elimina
-    // sólo después de confirmar que el catálogo quedó persistido en archivos.
     final legacy = await _store.loadLegacySnapshot(playlist.id, key);
     final migrated = _decodeSnapshot(legacy);
     if (migrated != null) {
@@ -57,10 +56,7 @@ class SectionCatalogService {
           items: migrated.channels.map((channel) => channel.toJson()),
         );
         await _store.deleteLegacySnapshot(playlist.id, key);
-      } catch (_) {
-        // Si la migración falla, se conserva la fila antigua y se sigue usando
-        // este snapshot en la sesión actual. Nunca destruimos el último bueno.
-      }
+      } catch (_) {}
     }
     return migrated;
   }
@@ -183,9 +179,6 @@ class SectionCatalogService {
       );
     }
 
-    // La primera carga sólo termina cuando las secciones no vacías quedaron
-    // confirmadas en Application Support. Un refresh vacío conserva la versión
-    // anterior y nunca reemplaza el último catálogo bueno.
     await Future.wait(writes);
     _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
     return result;
@@ -217,17 +210,12 @@ class SectionCatalogService {
   }
 
   TvSectionKind _classify(Channel channel) {
-    final url = channel.url.toLowerCase();
-    final uri = Uri.tryParse(channel.url);
-    final path = (uri?.path ?? url).toLowerCase();
-
-    // El nombre de la carpeta no decide el tipo. Si el proveedor llama
-    // "Series 24/7", "Novelas" o "Cine" a un canal lineal, sigue siendo LIVE.
-    if (path.contains('/series/')) return TvSectionKind.series;
-    if (path.contains('/movie/')) return TvSectionKind.movies;
-
-    if (_hasVideoFile(path)) return TvSectionKind.movies;
-    return TvSectionKind.live;
+    return switch (ContentClassifier.classify(channel)) {
+      IptvContentKind.movies => TvSectionKind.movies,
+      IptvContentKind.series => TvSectionKind.series,
+      IptvContentKind.live => TvSectionKind.live,
+      IptvContentKind.radios => TvSectionKind.live,
+    };
   }
 
   List<String> _categories(Iterable<Channel> channels) {
@@ -240,15 +228,4 @@ class SectionCatalogService {
     }
     return values;
   }
-
-  bool _hasVideoFile(String path) => const [
-        '.mp4',
-        '.mkv',
-        '.avi',
-        '.mov',
-        '.m4v',
-        '.webm',
-        '.wmv',
-        '.flv',
-      ].any(path.endsWith);
 }
