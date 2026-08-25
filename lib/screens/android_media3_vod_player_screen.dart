@@ -110,17 +110,26 @@ String _friendlyTrackLanguage(String language, String label) {
       probe.contains('espanol')) {
     return 'Español';
   }
-  if (probe.contains('english') || probe.contains('inglés') || probe.contains('ingles')) {
+  if (probe.contains('english') ||
+      probe.contains('inglés') ||
+      probe.contains('ingles')) {
     return 'Inglés';
   }
-  if (probe.contains('portuguese') || probe.contains('português') || probe.contains('portugues')) {
+  if (probe.contains('portuguese') ||
+      probe.contains('português') ||
+      probe.contains('portugues')) {
     return 'Portugués';
   }
-  if (probe.contains('french') || probe.contains('français') || probe.contains('frances')) {
+  if (probe.contains('french') ||
+      probe.contains('français') ||
+      probe.contains('frances')) {
     return 'Francés';
   }
-  if (probe.contains('italian') || probe.contains('italiano')) return 'Italiano';
-  if (probe.contains('german') || probe.contains('deutsch') || probe.contains('alemán')) {
+  if (probe.contains('italian') || probe.contains('italiano'))
+    return 'Italiano';
+  if (probe.contains('german') ||
+      probe.contains('deutsch') ||
+      probe.contains('alemán')) {
     return 'Alemán';
   }
 
@@ -499,7 +508,8 @@ class _AndroidMedia3VodPlayerScreenState
     if (sameLanguage.length <= 1) return base;
     final index = sameLanguage.indexWhere(
       (item) =>
-          item.groupIndex == track.groupIndex && item.trackIndex == track.trackIndex,
+          item.groupIndex == track.groupIndex &&
+          item.trackIndex == track.trackIndex,
     );
     return '$base ${index >= 0 ? index + 1 : track.trackIndex + 1}';
   }
