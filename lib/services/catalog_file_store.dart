@@ -146,7 +146,8 @@ class CatalogFileStore {
         await File('${generation.path}/meta.json').readAsString(),
       );
       if (metaRaw is! Map || metaRaw['version'] != _version) return null;
-      final updatedMillis = int.tryParse(metaRaw['updatedAt']?.toString() ?? '');
+      final updatedMillis =
+          int.tryParse(metaRaw['updatedAt']?.toString() ?? '');
       if (updatedMillis == null || updatedMillis <= 0) return null;
 
       final categoriesRaw = jsonDecode(
