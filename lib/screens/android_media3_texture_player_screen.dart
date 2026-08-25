@@ -52,7 +52,6 @@ class _AndroidMedia3TexturePlayerScreenState
   String? _friendlyError;
   int _openGeneration = 0;
   int _autoRetryCount = 0;
-  bool _hasReachedReady = false;
 
   Channel get _channel => widget.playlist[_index];
   Map<String, String> get _headers =>
@@ -98,7 +97,6 @@ class _AndroidMedia3TexturePlayerScreenState
     if (widget.playlist.isEmpty || _textureId == null) return;
     final generation = ++_openGeneration;
     _retryTimer?.cancel();
-    _hasReachedReady = false;
     if (!preserveRetry) _autoRetryCount = 0;
     if (mounted) {
       setState(() {
@@ -139,7 +137,6 @@ class _AndroidMedia3TexturePlayerScreenState
         break;
       case 'prepared':
       case 'bufferingEnd':
-        _hasReachedReady = true;
         _autoRetryCount = 0;
         setState(() {
           _buffering = false;
