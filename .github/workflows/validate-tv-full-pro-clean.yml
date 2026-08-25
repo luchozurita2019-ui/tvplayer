@@ -50,7 +50,7 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Apply compact LIVE HUD and normalize Dart
+      - name: Apply catalog retention and LIVE timeout hotfixes
         shell: bash
         run: |
           set -euo pipefail
@@ -58,99 +58,145 @@ jobs:
           from pathlib import Path
           import re
 
-          path = Path('lib/screens/android_media3_texture_player_screen.dart')
-          text = path.read_text()
-          if "label: const Text('Catálogo')" not in text:
-              replacement = r'''  Widget _liveHud() => SafeArea(
-                child: Align(
-                  alignment: Alignment.bottomCenter,
-                  child: Container(
-                    height: 54,
-                    margin: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xE80A1017),
-                      borderRadius: BorderRadius.circular(10),
-                      border: Border.all(color: Colors.white12),
-                    ),
-                    child: Row(
-                      children: [
-                        SizedBox(
-                          width: 34,
-                          height: 34,
-                          child: ClipRRect(
-                            borderRadius: BorderRadius.circular(7),
-                            child: CachedArtworkImage(
-                              url: _channel.logoUrl,
-                              fit: BoxFit.contain,
-                              cacheWidth: 68,
-                              cacheHeight: 68,
-                              prefetchExtent: 0,
-                              fallback: const Icon(Icons.live_tv_rounded, size: 20),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: Text(
-                            _channel.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ),
-                        Container(width: 1, height: 24, color: Colors.white12),
-                        const SizedBox(width: 10),
-                        const Icon(Icons.circle, size: 8, color: Colors.redAccent),
-                        const SizedBox(width: 5),
-                        const Text(
-                          'LIVE',
-                          style: TextStyle(
-                            color: Colors.redAccent,
-                            fontSize: 11,
-                            fontWeight: FontWeight.w900,
-                          ),
-                        ),
-                        const SizedBox(width: 12),
-                        SizedBox(
-                          height: 34,
-                          child: OutlinedButton.icon(
-                            style: OutlinedButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(horizontal: 10),
-                              visualDensity: VisualDensity.compact,
-                            ),
-                            onPressed: _openChannelList,
-                            icon: const Icon(Icons.list_rounded, size: 18),
-                            label: const Text('Catálogo'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              );
+          # 1) La sincronización del panel nunca borra el último catálogo bueno.
+          provider = Path('lib/providers/iptv_provider.dart')
+          text = provider.read_text()
+          old = '''        if (old != null &&
+            (old.source != next.source || old.sourceType != next.sourceType)) {
+          await _localStore.clearServiceCatalogs(id);
+        }
+        nextRemote.add(next);'''
+          new = '''        // Una sincronización rutinaria del panel jamás borra catálogos.
+        // Si la fuente cambió, el nuevo catálogo reemplazará al anterior recién
+        // después de descargarse y persistirse correctamente.
+        nextRemote.add(next);'''
+          if old in text:
+              text = text.replace(old, new, 1)
+              provider.write_text(text)
 
-            Widget _channelDrawer() => Align('''
-              patched, count = re.subn(
-                  r"  Widget _liveHud\(\) => SafeArea\([\s\S]*?\n  Widget _channelDrawer\(\) => Align\(",
-                  replacement,
-                  text,
-                  count=1,
+          # 2) Un refresh M3U vacío no pisa snapshots válidos; reutiliza el último bueno.
+          section = Path('lib/services/section_catalog_service.dart')
+          text = section.read_text()
+          old = '''    for (final kind in TvSectionKind.values) {
+      final channels = List<Channel>.unmodifiable(buckets[kind]!);
+      final categories = List<String>.unmodifiable(_categories(channels));
+      final snapshot = SectionCatalogSnapshot(
+        channels: channels,
+        categories: categories,
+        fromCache: false,
+      );
+      result[kind] = snapshot;
+      writes.add(
+        _store.saveSnapshot(playlist.id, 'm3u_${kind.name}', {
+          'categories': categories,
+          'items': channels.map((e) => e.toJson()).toList(growable: false),
+        }),
+      );
+    }
+
+    // La primera carga sólo se considera terminada cuando LIVE/Películas/Series
+    // quedaron persistidos. Así, salir y volver nunca depende de otra descarga.
+    await Future.wait(writes);'''
+          new = '''    for (final kind in TvSectionKind.values) {
+      final downloaded = buckets[kind]!;
+      if (downloaded.isEmpty) {
+        // Nunca reemplazar un catálogo bueno por una respuesta vacía/truncada.
+        final previous = await loadCached(playlist, kind);
+        result[kind] = previous ??
+            const SectionCatalogSnapshot(
+              channels: [],
+              categories: [],
+              fromCache: false,
+            );
+        continue;
+      }
+
+      final channels = List<Channel>.unmodifiable(downloaded);
+      final categories = List<String>.unmodifiable(_categories(channels));
+      final snapshot = SectionCatalogSnapshot(
+        channels: channels,
+        categories: categories,
+        fromCache: false,
+      );
+      result[kind] = snapshot;
+      writes.add(
+        _store.saveSnapshot(playlist.id, 'm3u_${kind.name}', {
+          'categories': categories,
+          'items': channels.map((e) => e.toJson()).toList(growable: false),
+        }),
+      );
+    }
+
+    // La primera carga sólo termina cuando todo snapshot NO vacío quedó escrito.
+    // Las secciones vacías conservan el último catálogo bueno existente.
+    await Future.wait(writes);'''
+          if old not in text:
+              raise SystemExit('No se encontró el bloque de persistencia M3U esperado')
+          text = text.replace(old, new, 1)
+          # Una respuesta completamente vacía tampoco es un catálogo válido.
+          marker = '''    final parsed = await compute(parseM3uInBackground, content);\n'''
+          if "La lista M3U descargada no contiene entradas válidas" not in text:
+              text = text.replace(
+                  marker,
+                  marker + '''    if (parsed.isEmpty) {\n      throw const FormatException(\n        'La lista M3U descargada no contiene entradas válidas.',\n      );\n    }\n''',
+                  1,
               )
-              if count != 1:
-                  raise SystemExit('No se encontró el bloque LIVE HUD esperado')
-              patched = patched.replace('width: 390,', 'width: 350,', 1)
-              path.write_text(patched)
+          section.write_text(text)
+
+          # 3) Quitar el watchdog de 4/7 s que mostraba error mientras Media3 seguía cargando.
+          player = Path('lib/screens/android_media3_texture_player_screen.dart')
+          text = player.read_text()
+          text = text.replace(
+              "  static const Duration _liveStartupTimeout = Duration(seconds: 4);\n"
+              "  static const Duration _liveRebufferTimeout = Duration(seconds: 7);\n",
+              "",
+          )
+          text = text.replace("  Timer? _bufferingWatchdog;\n", "")
+          text = text.replace("    _cancelBufferingWatchdog();\n", "")
+          text = text.replace("\n    _startBufferingWatchdog(_liveStartupTimeout);\n", "\n")
+          text = re.sub(
+              r"      case 'bufferingStart':\n        setState\(\(\) => _buffering = true\);\n        _startBufferingWatchdog\([\s\S]*?\n        \);\n        break;",
+              "      case 'bufferingStart':\n        setState(() => _buffering = true);\n        break;",
+              text,
+              count=1,
+          )
+          text = text.replace(
+              "    final watchdogTimeout = combined.contains('live_buffer_timeout');\n",
+              "",
+          )
+          text = text.replace(
+              "    final transient = !watchdogTimeout &&\n        !permanentHttp &&",
+              "    final transient = !permanentHttp &&",
+          )
+          text = re.sub(
+              r"\n  void _startBufferingWatchdog\(Duration timeout\) \{[\s\S]*?\n  String _friendlyMessage",
+              "\n  String _friendlyMessage",
+              text,
+              count=1,
+          )
+          text = text.replace(
+              "    if (value.contains('live_buffer_timeout')) {\n"
+              "      return 'Canal no disponible';\n"
+              "    }\n",
+              "",
+          )
+          if '_bufferingWatchdog' in text or '_liveStartupTimeout' in text:
+              raise SystemExit('Quedaron referencias al watchdog LIVE')
+          player.write_text(text)
+
+          # 4) Build de hotfix instalable encima de 1.1.1+3.
+          pubspec = Path('pubspec.yaml')
+          text = pubspec.read_text()
+          text = text.replace('version: 1.1.1+3', 'version: 1.1.2+4', 1)
+          pubspec.write_text(text)
           PY
+
           dart format lib
-          if ! git diff --quiet -- lib; then
-            git config user.name "github-actions[bot]"
-            git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git add lib
-            git commit -m "Apply compact TV FULL PRO LIVE interface"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib pubspec.yaml
+          if ! git diff --cached --quiet; then
+            git commit -m "Fix catalog retention and false LIVE timeout [skip ci]"
             git push origin HEAD:android-tv-full-pro-clean-source
           fi
 
