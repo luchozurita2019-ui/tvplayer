@@ -1,4 +1,4 @@
-TV FULL PRO final release build requested after VOD navigation, buffering and DNS fallback validation.
-validated_run=32805491090
-version=1.1.4+6
-requested_at=2026-08-25T00:35:00-03:00
+TV FULL PRO final release build requested after VOD audio language and subtitle selector validation.
+validated_run=32809060837
+version=1.1.5+7
+requested_at=2026-08-25T01:28:00-03:00
