@@ -14,6 +14,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
@@ -26,6 +27,15 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
+import java.net.InetAddress
+import java.net.UnknownHostException
+import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
+import okhttp3.Dns
+import okhttp3.HttpUrl.Companion.toHttpUrl
+import okhttp3.OkHttpClient
+import okhttp3.dnsoverhttps.DnsOverHttps
 
 @UnstableApi
 class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
@@ -41,8 +51,22 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var surface: Surface? = null
     private var eventSink: EventChannel.EventSink? = null
     private var currentUrl: String? = null
+    private var currentHeaders: Map<String, String> = emptyMap()
+    private var currentUserAgent: String = DEFAULT_UA
     private var isLive = false
     private var endedRecoveries = 0
+    private var dnsFallbackActive = false
+
+    private val fallbackDns by lazy { TvFullFallbackDns() }
+    private val fallbackHttpClient by lazy {
+        OkHttpClient.Builder()
+            .dns(fallbackDns)
+            .connectTimeout(12, TimeUnit.SECONDS)
+            .readTimeout(35, TimeUnit.SECONDS)
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
+    }
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
@@ -66,6 +90,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 override fun onListen(arguments: Any?, events: EventChannel.EventSink?) {
                     eventSink = events
                 }
+
                 override fun onCancel(arguments: Any?) {
                     eventSink = null
                 }
@@ -91,8 +116,11 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                         call.argument<Int>("maxBuffer") ?: 15000,
                         call.argument<Int>("bufferForPlayback") ?: 2500,
                         call.argument<Int>("bufferForPlaybackAfterRebuffer") ?: 1000,
+                        call.argument<Int>("backBuffer") ?: 0,
+                        call.argument<Boolean>("retainBackBufferFromKeyframe") ?: false,
                     )
                 )
+
                 "prepare" -> {
                     val url = call.argument<String>("url")
                     if (url.isNullOrBlank()) {
@@ -107,21 +135,58 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                     prepare(url, headers, userAgent, position)
                     result.success(null)
                 }
-                "play" -> { player?.play(); applyKeepScreenOn(); result.success(null) }
-                "pause" -> { player?.pause(); result.success(null) }
+
+                "play" -> {
+                    player?.play()
+                    applyKeepScreenOn()
+                    result.success(null)
+                }
+
+                "pause" -> {
+                    player?.pause()
+                    result.success(null)
+                }
+
                 "seekTo" -> {
                     val raw = call.argument<Number>("position")?.toLong() ?: 0L
                     val duration = player?.duration ?: 0L
-                    val target = if (duration > 0 && duration != C.TIME_UNSET) raw.coerceIn(0L, duration) else raw.coerceAtLeast(0L)
+                    val target = if (duration > 0 && duration != C.TIME_UNSET) {
+                        raw.coerceIn(0L, duration)
+                    } else {
+                        raw.coerceAtLeast(0L)
+                    }
                     player?.seekTo(target)
                     result.success(null)
                 }
-                "getCurrentPosition" -> result.success((player?.currentPosition ?: 0L).coerceAtLeast(0L))
-                "getBufferedPosition" -> result.success((player?.bufferedPosition ?: 0L).coerceAtLeast(0L))
+
+                "getCurrentPosition" -> result.success(
+                    (player?.currentPosition ?: 0L).coerceAtLeast(0L)
+                )
+
+                "getBufferedPosition" -> result.success(
+                    (player?.bufferedPosition ?: 0L).coerceAtLeast(0L)
+                )
+
                 "getDuration" -> {
                     val value = player?.duration ?: 0L
                     result.success(if (value < 0L || value == C.TIME_UNSET) 0L else value)
                 }
+
+                "getPlaybackSnapshot" -> {
+                    val exo = player
+                    val duration = exo?.duration ?: 0L
+                    result.success(
+                        mapOf(
+                            "position" to (exo?.currentPosition ?: 0L).coerceAtLeast(0L),
+                            "bufferedPosition" to (exo?.bufferedPosition ?: 0L).coerceAtLeast(0L),
+                            "duration" to if (duration < 0L || duration == C.TIME_UNSET) 0L else duration,
+                            "seekable" to (exo?.isCurrentMediaItemSeekable == true),
+                            "live" to (exo?.isCurrentMediaItemLive == true),
+                            "dnsFallback" to dnsFallbackActive,
+                        )
+                    )
+                }
+
                 "setAudioTrack" -> result.success(
                     selectTrack(
                         C.TRACK_TYPE_AUDIO,
@@ -131,6 +196,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                         false,
                     )
                 )
+
                 "setSubtitleTrack" -> result.success(
                     selectTrack(
                         C.TRACK_TYPE_TEXT,
@@ -140,7 +206,12 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                         call.argument<Boolean>("off") ?: false,
                     )
                 )
-                "dispose" -> { disposePlayer(); result.success(null) }
+
+                "dispose" -> {
+                    disposePlayer()
+                    result.success(null)
+                }
+
                 else -> result.notImplemented()
             }
         } catch (t: Throwable) {
@@ -176,11 +247,14 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         maxBuffer: Int,
         playBuffer: Int,
         rebuffer: Int,
+        backBuffer: Int,
+        retainBackBufferFromKeyframe: Boolean,
     ): Long {
         disposePlayer()
         applyKeepScreenOn()
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(minBuffer, maxBuffer, playBuffer, rebuffer)
+            .setBackBuffer(backBuffer.coerceAtLeast(0), retainBackBufferFromKeyframe)
             .build()
         val renderersFactory = NextRenderersFactory(this)
             .setEnableDecoderFallback(true)
@@ -212,17 +286,44 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         userAgent: String,
         positionMs: Long,
     ) {
+        currentUrl = url
+        currentHeaders = headers.toMap()
+        currentUserAgent = userAgent
+        endedRecoveries = 0
+        dnsFallbackActive = false
+        prepareSource(url, headers, userAgent, positionMs, useFallbackDns = false)
+    }
+
+    private fun prepareSource(
+        url: String,
+        headers: Map<String, String>,
+        userAgent: String,
+        positionMs: Long,
+        useFallbackDns: Boolean,
+    ) {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
         applyKeepScreenOn()
-        currentUrl = url
-        endedRecoveries = 0
         exo.stop()
         exo.clearMediaItems()
-        val httpFactory = DefaultHttpDataSource.Factory()
-            .setUserAgent(userAgent)
-            .setAllowCrossProtocolRedirects(true)
-        if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
-        val source = DefaultMediaSourceFactory(httpFactory).createMediaSource(
+
+        val mediaSourceFactory = if (useFallbackDns) {
+            val okHttpFactory = OkHttpDataSource.Factory(fallbackHttpClient)
+                .setUserAgent(userAgent)
+            if (headers.isNotEmpty()) {
+                okHttpFactory.setDefaultRequestProperties(headers)
+            }
+            DefaultMediaSourceFactory(okHttpFactory)
+        } else {
+            val httpFactory = DefaultHttpDataSource.Factory()
+                .setUserAgent(userAgent)
+                .setAllowCrossProtocolRedirects(true)
+            if (headers.isNotEmpty()) {
+                httpFactory.setDefaultRequestProperties(headers)
+            }
+            DefaultMediaSourceFactory(httpFactory)
+        }
+
+        val source = mediaSourceFactory.createMediaSource(
             MediaItem.Builder().setUri(Uri.parse(url)).build()
         )
         exo.setMediaSource(source)
@@ -299,6 +400,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 applyKeepScreenOn()
                 eventSink?.success(mapOf("eventType" to "bufferingStart"))
             }
+
             Player.STATE_READY -> {
                 applyKeepScreenOn()
                 endedRecoveries = 0
@@ -306,6 +408,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 eventSink?.success(mapOf("eventType" to "bufferingEnd"))
                 sendTracks()
             }
+
             Player.STATE_ENDED -> {
                 val exo = player
                 if (isLive && currentUrl != null && exo != null && endedRecoveries < 5) {
@@ -336,6 +439,33 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     }
 
     override fun onPlayerError(error: PlaybackException) {
+        if (!dnsFallbackActive && hasUnknownHost(error)) {
+            val url = currentUrl
+            if (url != null) {
+                val resumePosition = (player?.currentPosition ?: 0L).coerceAtLeast(0L)
+                try {
+                    dnsFallbackActive = true
+                    prepareSource(
+                        url,
+                        currentHeaders,
+                        currentUserAgent,
+                        resumePosition,
+                        useFallbackDns = true,
+                    )
+                    eventSink?.success(
+                        mapOf(
+                            "eventType" to "dnsFallback",
+                            "host" to (Uri.parse(url).host ?: ""),
+                        )
+                    )
+                    return
+                } catch (_: Throwable) {
+                    // If the fallback path itself cannot be prepared, return the
+                    // original Media3 error below instead of looping.
+                }
+            }
+        }
+
         eventSink?.success(
             mapOf(
                 "eventType" to "videoError",
@@ -344,6 +474,16 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 "error" to (error.message ?: "error de reproducción"),
             )
         )
+    }
+
+    private fun hasUnknownHost(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        repeat(12) {
+            if (cause == null) return false
+            if (cause is UnknownHostException) return true
+            cause = cause?.cause
+        }
+        return false
     }
 
     override fun onVideoCodecError(
@@ -384,12 +524,90 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         textureEntry?.release()
         textureEntry = null
         currentUrl = null
+        currentHeaders = emptyMap()
+        currentUserAgent = DEFAULT_UA
         endedRecoveries = 0
+        dnsFallbackActive = false
         clearKeepScreenOn()
     }
 
     override fun onDestroy() {
         disposePlayer()
         super.onDestroy()
+    }
+}
+
+private data class DnsCacheEntry(
+    val addresses: List<InetAddress>,
+    val expiresAtMs: Long,
+)
+
+/**
+ * Lightweight DNS fallback inspired by the resolver set present in Hot Player.
+ *
+ * The normal Media3 path continues using Android/system DNS. This resolver is
+ * instantiated only after that normal path fails with UnknownHostException.
+ * Results are cached so a provider host is not resolved again for every stream.
+ */
+private class TvFullFallbackDns : Dns {
+    companion object {
+        private const val CACHE_TTL_MS = 10 * 60 * 1000L
+    }
+
+    private val cache = ConcurrentHashMap<String, DnsCacheEntry>()
+    private val bootstrapClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .build()
+
+    private val resolvers: List<Dns> by lazy {
+        listOf(
+            createResolver(
+                "https://cloudflare-dns.com/dns-query",
+                listOf("1.1.1.1", "1.0.0.1"),
+            ),
+            createResolver(
+                "https://dns.google/dns-query",
+                listOf("8.8.8.8", "8.8.4.4"),
+            ),
+            createResolver(
+                "https://dns.adguard-dns.com/dns-query",
+                listOf("94.140.14.14", "94.140.15.15"),
+            ),
+        )
+    }
+
+    override fun lookup(hostname: String): List<InetAddress> {
+        if (hostname.isBlank()) throw UnknownHostException("hostname vacío")
+        val key = hostname.lowercase(Locale.US)
+        val now = System.currentTimeMillis()
+        val cached = cache[key]
+        if (cached != null && cached.expiresAtMs > now && cached.addresses.isNotEmpty()) {
+            return cached.addresses
+        }
+        if (cached != null) cache.remove(key)
+
+        var lastError: UnknownHostException? = null
+        for (resolver in resolvers) {
+            try {
+                val result = resolver.lookup(hostname)
+                if (result.isNotEmpty()) {
+                    cache[key] = DnsCacheEntry(result, now + CACHE_TTL_MS)
+                    return result
+                }
+            } catch (error: UnknownHostException) {
+                lastError = error
+            }
+        }
+        throw lastError ?: UnknownHostException(hostname)
+    }
+
+    private fun createResolver(url: String, bootstrapIps: List<String>): Dns {
+        val bootstrap = bootstrapIps.map { InetAddress.getByName(it) }
+        return DnsOverHttps.Builder()
+            .client(bootstrapClient)
+            .url(url.toHttpUrl())
+            .bootstrapDnsHosts(bootstrap)
+            .build()
     }
 }
