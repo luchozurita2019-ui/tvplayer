@@ -211,10 +211,8 @@ class XtreamLiveFastService {
 
   Future<List<Channel>> _readCachedChannels(File file) async {
     final channels = <Channel>[];
-    final lines = file
-        .openRead()
-        .transform(utf8.decoder)
-        .transform(const LineSplitter());
+    final lines =
+        file.openRead().transform(utf8.decoder).transform(const LineSplitter());
 
     await for (final line in lines) {
       if (line.trim().isEmpty) continue;
@@ -344,7 +342,8 @@ class XtreamLiveFastService {
     final existing = _transferDirectory;
     if (existing != null) return existing;
     final temporary = await getTemporaryDirectory();
-    final directory = Directory('${temporary.path}/tv_full_xtream_live_transfer');
+    final directory =
+        Directory('${temporary.path}/tv_full_xtream_live_transfer');
     if (!await directory.exists()) await directory.create(recursive: true);
     _transferDirectory = directory;
     unawaited(_cleanupStaleTransfers(directory));
