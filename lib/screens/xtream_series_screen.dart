@@ -14,6 +14,7 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_series_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/tv_catalog_category_row.dart';
 import 'player_screen.dart';
 
 class XtreamSeriesScreen extends StatefulWidget {
@@ -167,28 +168,11 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
               itemBuilder: (context, index) {
                 final value = index == 0 ? null : categories[index - 1];
                 final selected = value == _category;
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 3),
-                  child: ListTile(
-                    autofocus: false,
-                    selected: selected,
-                    minTileHeight: 50,
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(11),
-                    ),
-                    selectedTileColor:
-                        const Color(0xFF1677FF).withValues(alpha: .18),
-                    title: Text(
-                      value ?? 'Todas',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontWeight:
-                            selected ? FontWeight.w800 : FontWeight.w600,
-                      ),
-                    ),
-                    onTap: () => setState(() => _category = value),
-                  ),
+                return TvCatalogCategoryRow(
+                  label: value ?? 'Todas',
+                  selected: selected,
+                  autofocus: index == 0,
+                  onTap: () => setState(() => _category = value),
                 );
               },
             ),
@@ -444,28 +428,10 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                           child: ListView(
                             children: widget.model.seasons.keys.map((season) {
                               final selected = season == _season;
-                              return Padding(
-                                padding: const EdgeInsets.symmetric(
-                                  vertical: 3,
-                                ),
-                                child: ListTile(
-                                  autofocus: false,
-                                  selected: selected,
-                                  selectedTileColor: const Color(0xFF1677FF)
-                                      .withValues(alpha: .18),
-                                  shape: RoundedRectangleBorder(
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                  title: Text(
-                                    'Temporada $season',
-                                    style: TextStyle(
-                                      fontWeight: selected
-                                          ? FontWeight.w800
-                                          : FontWeight.w600,
-                                    ),
-                                  ),
-                                  onTap: () => setState(() => _season = season),
-                                ),
+                              return TvCatalogCategoryRow(
+                                label: 'Temporada $season',
+                                selected: selected,
+                                onTap: () => setState(() => _season = season),
                               );
                             }).toList(growable: false),
                           ),
@@ -502,6 +468,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                                 ),
                                 child: ListTile(
                                   autofocus: index == 0,
+                                  focusColor: const Color(0xFF12324A),
                                   minTileHeight: 58,
                                   shape: RoundedRectangleBorder(
                                     borderRadius: BorderRadius.circular(10),
