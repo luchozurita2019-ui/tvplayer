@@ -19,8 +19,7 @@ class ArtworkCacheService {
 
   static const int _maxArtworkBytes = 3 * 1024 * 1024;
 
-  int get _maxConcurrent =>
-      DevicePerformanceService.instance.lowRam ? 2 : 3;
+  int get _maxConcurrent => DevicePerformanceService.instance.lowRam ? 2 : 3;
   int get _maxCacheBytes => DevicePerformanceService.instance.lowRam
       ? 40 * 1024 * 1024
       : 64 * 1024 * 1024;

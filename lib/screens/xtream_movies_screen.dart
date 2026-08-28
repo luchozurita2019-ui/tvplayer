@@ -111,7 +111,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
       categoryOrder: data.categories,
       nameOf: (item) => item.name,
       categoryOf: (item) => item.category,
-      include: (item) => _parental.canShowItem(name: item.name, group: item.category),
+      include: (item) =>
+          _parental.canShowItem(name: item.name, group: item.category),
     );
     _indexedData = data;
     _catalogIndex = built;
@@ -266,9 +267,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   Widget _catalog(_MovieData data) {
     final index = _catalogIndexFor(data);
     final categories = index.categories;
-    final visible = _searchOpen
-        ? index.search(_query)
-        : index.forCategory(_category);
+    final visible =
+        _searchOpen ? index.search(_query) : index.forCategory(_category);
 
     return Row(
       children: [

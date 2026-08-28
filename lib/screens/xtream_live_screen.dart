@@ -329,9 +329,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   Widget _buildCatalog(_LiveData data) {
     final index = _catalogIndexFor(data);
     final categories = index.categories;
-    final visible = _searchOpen
-        ? index.search(_query)
-        : index.forCategory(_category);
+    final visible =
+        _searchOpen ? index.search(_query) : index.forCategory(_category);
 
     return Row(
       children: [
