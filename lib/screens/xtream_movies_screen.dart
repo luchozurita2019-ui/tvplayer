@@ -72,16 +72,6 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     });
   }
 
-  Future<bool> _handleBack() async {
-    if (!_searchOpen) return true;
-    if (_searchFocus.hasFocus) {
-      _searchFocus.unfocus();
-      return false;
-    }
-    _closeSearch();
-    return false;
-  }
-
   Future<_MovieData> _loadInitial() async {
     if (widget.playlist.sourceType == PlaylistSourceType.xtream) {
       final fast = XtreamFastCatalogService.instance;
@@ -148,8 +138,16 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return WillPopScope(
-      onWillPop: _handleBack,
+    return PopScope<void>(
+      canPop: !_searchOpen,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || !_searchOpen) return;
+        if (_searchFocus.hasFocus) {
+          _searchFocus.unfocus();
+          return;
+        }
+        _closeSearch();
+      },
       child: Scaffold(
         backgroundColor: const Color(0xFF05090F),
         appBar: AppBar(
