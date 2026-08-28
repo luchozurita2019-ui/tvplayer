@@ -1,3 +1,4 @@
+/// TV FULL PRO +13: índice liviano reutilizable para catálogos grandes.
 class CatalogIndex<T> {
   final List<T> all;
   final List<String> categories;
