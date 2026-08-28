@@ -52,10 +52,17 @@ class _AndroidMedia3TexturePlayerScreenState
   String? _friendlyError;
   int _openGeneration = 0;
   int _autoRetryCount = 0;
+  List<_LiveAudioTrack> _audioTracks = const <_LiveAudioTrack>[];
 
   Channel get _channel => widget.playlist[_index];
   Map<String, String> get _headers =>
       _channel.resolvedHttpHeaders(_media3DefaultUserAgent);
+
+  List<_LiveAudioTrack> get _selectableAudioTracks => _audioTracks
+      .where((track) => track.supported)
+      .toList(growable: false);
+
+  bool get _hasMultipleAudioTracks => _selectableAudioTracks.length > 1;
 
   @override
   void initState() {
@@ -103,6 +110,7 @@ class _AndroidMedia3TexturePlayerScreenState
         _buffering = true;
         _friendlyError = null;
         _channelListVisible = false;
+        _audioTracks = const <_LiveAudioTrack>[];
       });
     }
 
@@ -142,6 +150,20 @@ class _AndroidMedia3TexturePlayerScreenState
           _buffering = false;
           _friendlyError = null;
         });
+        break;
+      case 'tracksChanged':
+        final rawTracks = event['audioTracks'];
+        final tracks = <_LiveAudioTrack>[];
+        if (rawTracks is List) {
+          for (final rawTrack in rawTracks) {
+            if (rawTrack is Map) {
+              tracks.add(
+                _LiveAudioTrack.fromMap(rawTrack.cast<Object?, Object?>()),
+              );
+            }
+          }
+        }
+        setState(() => _audioTracks = tracks);
         break;
       case 'videoSize':
         final width = (event['width'] as num?)?.toDouble() ?? 0;
@@ -235,6 +257,7 @@ class _AndroidMedia3TexturePlayerScreenState
       _friendlyError = friendly;
       _overlayVisible = false;
       _channelListVisible = false;
+      _audioTracks = const <_LiveAudioTrack>[];
     });
   }
 
@@ -245,6 +268,82 @@ class _AndroidMedia3TexturePlayerScreenState
       if (!mounted || _channelListVisible || _friendlyError != null) return;
       setState(() => _overlayVisible = false);
     });
+  }
+
+  Future<void> _showAudioPicker() async {
+    final tracks = _selectableAudioTracks;
+    if (!mounted || tracks.length < 2) return;
+    _overlayTimer?.cancel();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF101A26),
+        title: const Row(
+          children: [
+            Icon(Icons.language_rounded, color: Color(0xFF58B9FF)),
+            SizedBox(width: 10),
+            Text('Idioma / pista de audio'),
+          ],
+        ),
+        content: SizedBox(
+          width: 430,
+          child: ListView(
+            shrinkWrap: true,
+            children: [
+              ListTile(
+                autofocus: !tracks.any((track) => track.selected),
+                leading: const Icon(Icons.auto_awesome_rounded),
+                title: const Text('Automático'),
+                subtitle: const Text('Usar la pista predeterminada del canal'),
+                onTap: () async {
+                  await _player.invokeMethod<void>('setAudioTrack', {
+                    'auto': true,
+                  });
+                  if (dialogContext.mounted) Navigator.pop(dialogContext);
+                },
+              ),
+              const Divider(height: 1),
+              ...tracks.asMap().entries.map((entry) {
+                final index = entry.key;
+                final track = entry.value;
+                return ListTile(
+                  autofocus: track.selected,
+                  leading: const Icon(Icons.audiotrack_rounded),
+                  title: Text(track.displayName(index + 1)),
+                  subtitle: track.mimeType.isEmpty
+                      ? null
+                      : Text(track.mimeType.replaceFirst('audio/', '').toUpperCase()),
+                  trailing: track.selected
+                      ? const Icon(
+                          Icons.check_circle_rounded,
+                          color: Color(0xFF58B9FF),
+                        )
+                      : null,
+                  onTap: () async {
+                    await _player.invokeMethod<void>('setAudioTrack', {
+                      'groupIndex': track.groupIndex,
+                      'trackIndex': track.trackIndex,
+                      'auto': false,
+                    });
+                    if (dialogContext.mounted) Navigator.pop(dialogContext);
+                  },
+                );
+              }),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text('Cerrar'),
+          ),
+        ],
+      ),
+    );
+    if (mounted) {
+      _rootFocus.requestFocus();
+      _showOverlay();
+    }
   }
 
   void _openChannelList() {
@@ -332,6 +431,10 @@ class _AndroidMedia3TexturePlayerScreenState
       return KeyEventResult.handled;
     }
 
+    if (key == LogicalKeyboardKey.arrowUp && _hasMultipleAudioTracks) {
+      unawaited(_showAudioPicker());
+      return KeyEventResult.handled;
+    }
     if (key == LogicalKeyboardKey.select ||
         key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter) {
@@ -458,6 +561,21 @@ class _AndroidMedia3TexturePlayerScreenState
                     ),
                   ),
                 ),
+                if (_hasMultipleAudioTracks) ...[
+                  SizedBox(
+                    height: 34,
+                    child: OutlinedButton.icon(
+                      style: OutlinedButton.styleFrom(
+                        padding: const EdgeInsets.symmetric(horizontal: 10),
+                        visualDensity: VisualDensity.compact,
+                      ),
+                      onPressed: () => unawaited(_showAudioPicker()),
+                      icon: const Icon(Icons.language_rounded, size: 18),
+                      label: const Text('Audio'),
+                    ),
+                  ),
+                  const SizedBox(width: 10),
+                ],
                 Container(width: 1, height: 24, color: Colors.white12),
                 const SizedBox(width: 10),
                 const Icon(Icons.circle, size: 8, color: Colors.redAccent),
@@ -624,4 +742,68 @@ class _AndroidMedia3TexturePlayerScreenState
           ),
         ),
       );
+}
+
+class _LiveAudioTrack {
+  final int groupIndex;
+  final int trackIndex;
+  final String label;
+  final String language;
+  final String mimeType;
+  final bool selected;
+  final bool supported;
+
+  const _LiveAudioTrack({
+    required this.groupIndex,
+    required this.trackIndex,
+    required this.label,
+    required this.language,
+    required this.mimeType,
+    required this.selected,
+    required this.supported,
+  });
+
+  factory _LiveAudioTrack.fromMap(Map<Object?, Object?> map) {
+    return _LiveAudioTrack(
+      groupIndex: (map['groupIndex'] as num?)?.toInt() ?? -1,
+      trackIndex: (map['trackIndex'] as num?)?.toInt() ?? -1,
+      label: map['label']?.toString().trim() ?? '',
+      language: map['language']?.toString().trim() ?? '',
+      mimeType: map['mimeType']?.toString().trim() ?? '',
+      selected: map['selected'] == true,
+      supported: map['supported'] != false,
+    );
+  }
+
+  String displayName(int fallbackIndex) {
+    final languageName = _languageName(language);
+    if (languageName != null && label.isNotEmpty) {
+      if (!label.toLowerCase().contains(languageName.toLowerCase())) {
+        return '$languageName · $label';
+      }
+    }
+    if (languageName != null) return languageName;
+    if (label.isNotEmpty) return label;
+    return 'Audio $fallbackIndex';
+  }
+
+  String? _languageName(String raw) {
+    final value = raw.trim().toLowerCase();
+    if (value.isEmpty || value == 'und') return null;
+    final normalized = value.split(RegExp(r'[-_]')).first;
+    return switch (normalized) {
+      'es' || 'spa' => 'Español',
+      'en' || 'eng' => 'Inglés',
+      'pt' || 'por' => 'Portugués',
+      'fr' || 'fra' || 'fre' => 'Francés',
+      'it' || 'ita' => 'Italiano',
+      'de' || 'deu' || 'ger' => 'Alemán',
+      'ja' || 'jpn' => 'Japonés',
+      'ko' || 'kor' => 'Coreano',
+      'zh' || 'zho' || 'chi' => 'Chino',
+      'ru' || 'rus' => 'Ruso',
+      'ar' || 'ara' => 'Árabe',
+      _ => raw.trim().toUpperCase(),
+    };
+  }
 }
