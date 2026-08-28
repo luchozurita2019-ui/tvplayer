@@ -292,8 +292,11 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                       )
                     : LayoutBuilder(
                         builder: (context, constraints) {
-                          final columns =
-                              (constraints.maxWidth / 170).floor().clamp(3, 5);
+                          final columns = constraints.maxWidth >= 850
+                              ? 5
+                              : constraints.maxWidth >= 620
+                                  ? 4
+                                  : 3;
                           return GridView.builder(
                             controller: _searchOpen
                                 ? _searchScrollController
