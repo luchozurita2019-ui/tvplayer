@@ -37,7 +37,6 @@ jobs:
           grep -q '_scheduleSearch' lib/screens/xtream_live_screen.dart
           grep -q '_scheduleSearch' lib/screens/xtream_movies_screen.dart
           grep -q '_scheduleSearch' lib/screens/xtream_series_screen.dart
-          grep -q 'Publish stable latest APK URL' .github/workflows/build-tv-full-pro-clean.yml
 
       - name: Commit optimized source
         shell: bash
@@ -45,6 +44,9 @@ jobs:
           set -euo pipefail
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add pubspec.yaml lib android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt .github/workflows/build-tv-full-pro-clean.yml
+          # Workflows are updated separately by the authorized connector. The
+          # app bot only commits app/source files so GitHub never rejects push.
+          git restore .github/workflows/build-tv-full-pro-clean.yml
+          git add pubspec.yaml lib android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
           git commit -m "Optimize TV FULL PRO catalogs artwork and low RAM profile" || true
           git push origin HEAD:android-tv-full-pro-clean-source
