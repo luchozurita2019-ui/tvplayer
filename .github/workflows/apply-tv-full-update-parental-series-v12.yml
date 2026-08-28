@@ -1,0 +1,46 @@
+name: Apply TV FULL PRO +12 Improvements
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/scripts/apply_tv_full_update_parental_series_v12.py'
+      - '.github/workflows/apply-tv-full-update-parental-series-v12.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Apply prepared improvements
+        run: python3 .github/scripts/apply_tv_full_update_parental_series_v12.py
+
+      - name: Verify prepared source markers
+        run: |
+          grep -q "version: 1.2.0+12" pubspec.yaml
+          grep -q "url_launcher: ^6.3.2" pubspec.yaml
+          grep -q "ACTUALIZACIÓN DISPONIBLE" lib/screens/source_content_screen.dart
+          grep -q "AppUpdateService.instance.checkOnce" lib/screens/home_screen.dart
+          grep -q "childAspectRatio: 0.62" lib/screens/xtream_series_screen.dart
+          grep -q "ParentalControlService" lib/screens/xtream_live_screen.dart
+          grep -q "ParentalControlService" lib/screens/xtream_movies_screen.dart
+          grep -q "ParentalControlService" lib/screens/xtream_series_screen.dart
+
+      - name: Commit source changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pubspec.yaml lib
+          git commit -m "Add series posters parental lock and lightweight updates" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
