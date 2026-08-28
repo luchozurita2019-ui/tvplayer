@@ -1,4 +1,5 @@
-TV FULL PRO final release build requested after LIVE audio, global search and movie poster UI validation.
-validated_run=33144202396
-version=1.1.9+11
-requested_at=2026-08-28T02:20:00-03:00
+TV FULL PRO final release build requested after Series poster UI, parental lock/filter and lightweight update flow validation.
+validated_run=33148623678
+validation_result=flutter analyze clean; Android TV debug compile success
+version=1.2.0+12
+requested_at=2026-08-28T03:46:00-03:00
