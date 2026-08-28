@@ -103,6 +103,17 @@ class XtreamFastCatalogService {
   final Map<String, Future<XtreamConnectionResult>> _pendingSessions =
       <String, Future<XtreamConnectionResult>>{};
 
+  final Map<String, XtreamMovieCatalogSnapshot> _movieMemory =
+      <String, XtreamMovieCatalogSnapshot>{};
+  final Map<String, XtreamSeriesCatalogSnapshot> _seriesMemory =
+      <String, XtreamSeriesCatalogSnapshot>{};
+  final Map<String, Future<XtreamMovieCatalogSnapshot?>>
+      _pendingMovieCacheReads =
+      <String, Future<XtreamMovieCatalogSnapshot?>>{};
+  final Map<String, Future<XtreamSeriesCatalogSnapshot?>>
+      _pendingSeriesCacheReads =
+      <String, Future<XtreamSeriesCatalogSnapshot?>>{};
+
   Directory? _cacheDirectory;
   Directory? _transferDirectory;
 
@@ -161,6 +172,31 @@ class XtreamFastCatalogService {
   Future<XtreamMovieCatalogSnapshot?> loadCachedMovies(
     String playlistUrl,
   ) async {
+    final key = playlistUrl.trim();
+    final memory = _movieMemory[key];
+    if (memory != null) {
+      _touchMovieMemory(key, memory);
+      return memory;
+    }
+    final pending = _pendingMovieCacheReads[key];
+    if (pending != null) return pending;
+
+    final future = _loadCachedMoviesFromDisk(key);
+    _pendingMovieCacheReads[key] = future;
+    try {
+      final snapshot = await future;
+      if (snapshot != null) _rememberMovieSnapshot(key, snapshot);
+      return snapshot;
+    } finally {
+      if (identical(_pendingMovieCacheReads[key], future)) {
+        _pendingMovieCacheReads.remove(key);
+      }
+    }
+  }
+
+  Future<XtreamMovieCatalogSnapshot?> _loadCachedMoviesFromDisk(
+    String playlistUrl,
+  ) async {
     final raw = await _readCache(playlistUrl, 'movies');
     if (raw == null) return null;
     try {
@@ -187,7 +223,36 @@ class XtreamFastCatalogService {
     }
   }
 
+  Future<void> prewarmCachedMovies(String playlistUrl) async {
+    await loadCachedMovies(playlistUrl);
+  }
+
   Future<XtreamSeriesCatalogSnapshot?> loadCachedSeries(
+    String playlistUrl,
+  ) async {
+    final key = playlistUrl.trim();
+    final memory = _seriesMemory[key];
+    if (memory != null) {
+      _touchSeriesMemory(key, memory);
+      return memory;
+    }
+    final pending = _pendingSeriesCacheReads[key];
+    if (pending != null) return pending;
+
+    final future = _loadCachedSeriesFromDisk(key);
+    _pendingSeriesCacheReads[key] = future;
+    try {
+      final snapshot = await future;
+      if (snapshot != null) _rememberSeriesSnapshot(key, snapshot);
+      return snapshot;
+    } finally {
+      if (identical(_pendingSeriesCacheReads[key], future)) {
+        _pendingSeriesCacheReads.remove(key);
+      }
+    }
+  }
+
+  Future<XtreamSeriesCatalogSnapshot?> _loadCachedSeriesFromDisk(
     String playlistUrl,
   ) async {
     final raw = await _readCache(playlistUrl, 'series');
@@ -216,23 +281,58 @@ class XtreamFastCatalogService {
     }
   }
 
+  Future<void> prewarmCachedSeries(String playlistUrl) async {
+    await loadCachedSeries(playlistUrl);
+  }
+
+  void _rememberMovieSnapshot(String key, XtreamMovieCatalogSnapshot snapshot) {
+    _movieMemory.remove(key);
+    _movieMemory[key] = snapshot;
+    while (_movieMemory.length > 2) {
+      _movieMemory.remove(_movieMemory.keys.first);
+    }
+  }
+
+  void _rememberSeriesSnapshot(String key, XtreamSeriesCatalogSnapshot snapshot) {
+    _seriesMemory.remove(key);
+    _seriesMemory[key] = snapshot;
+    while (_seriesMemory.length > 2) {
+      _seriesMemory.remove(_seriesMemory.keys.first);
+    }
+  }
+
+  void _touchMovieMemory(String key, XtreamMovieCatalogSnapshot snapshot) {
+    _movieMemory.remove(key);
+    _movieMemory[key] = snapshot;
+  }
+
+  void _touchSeriesMemory(String key, XtreamSeriesCatalogSnapshot snapshot) {
+    _seriesMemory.remove(key);
+    _seriesMemory[key] = snapshot;
+  }
+
   Future<XtreamMovieCatalogSnapshot> refreshMovies(
     String playlistUrl, {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
+    final key = playlistUrl.trim();
     var connection = await _connectionForCatalog(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
 
     try {
-      return await _fetchMovies(connection, playlistUrl, onProgress);
+      final snapshot = await _fetchMovies(connection, playlistUrl, onProgress);
+      _rememberMovieSnapshot(key, snapshot);
+      return snapshot;
     } on _XtreamHttpException catch (error) {
       if (error.statusCode != 401 && error.statusCode != 403) rethrow;
       invalidateSession(playlistUrl);
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
-      return _fetchMovies(connection, playlistUrl, onProgress);
+      final snapshot = await _fetchMovies(connection, playlistUrl, onProgress);
+      _rememberMovieSnapshot(key, snapshot);
+      return snapshot;
     } on TimeoutException {
       rethrow;
     } on SocketException {
@@ -249,6 +349,7 @@ class XtreamFastCatalogService {
           fromCache: false,
         );
         await _writeMovieCache(playlistUrl, snapshot);
+        _rememberMovieSnapshot(key, snapshot);
         return snapshot;
       } catch (_) {
         throw error;
@@ -261,6 +362,7 @@ class XtreamFastCatalogService {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
+    final key = playlistUrl.trim();
     final totalWatch = Stopwatch()..start();
     final connectionWatch = Stopwatch()..start();
     var connection = await _connectionForCatalog(
@@ -271,13 +373,15 @@ class XtreamFastCatalogService {
     var connectionElapsed = connectionWatch.elapsed;
 
     try {
-      return await _fetchSeries(
+      final snapshot = await _fetchSeries(
         connection,
         playlistUrl,
         onProgress,
         totalWatch: totalWatch,
         connectionElapsed: connectionElapsed,
       );
+      _rememberSeriesSnapshot(key, snapshot);
+      return snapshot;
     } on _XtreamHttpException catch (error) {
       if (error.statusCode != 401 && error.statusCode != 403) rethrow;
       invalidateSession(playlistUrl);
@@ -285,13 +389,15 @@ class XtreamFastCatalogService {
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
       authWatch.stop();
       connectionElapsed += authWatch.elapsed;
-      return _fetchSeries(
+      final snapshot = await _fetchSeries(
         connection,
         playlistUrl,
         onProgress,
         totalWatch: totalWatch,
         connectionElapsed: connectionElapsed,
       );
+      _rememberSeriesSnapshot(key, snapshot);
+      return snapshot;
     } on TimeoutException {
       rethrow;
     } on SocketException {
@@ -323,6 +429,7 @@ class XtreamFastCatalogService {
           fromCache: false,
         );
         await _writeSeriesCache(playlistUrl, snapshot);
+        _rememberSeriesSnapshot(key, snapshot);
         return snapshot;
       } catch (_) {
         throw error;

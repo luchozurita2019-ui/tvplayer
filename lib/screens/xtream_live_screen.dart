@@ -18,6 +18,7 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_live_fast_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/tv_catalog_category_row.dart';
 import 'player_screen.dart';
 
 class XtreamLiveScreen extends StatefulWidget {
@@ -41,6 +42,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   String _status = 'Cargando TV en vivo…';
   String _query = '';
   bool _searchOpen = false;
+  bool _openingPlayer = false;
   Timer? _searchDebounce;
   CatalogIndex<Channel>? _catalogIndex;
   _LiveData? _indexedData;
@@ -344,9 +346,10 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               itemBuilder: (context, index) {
                 final category = index == 0 ? null : categories[index - 1];
                 final selected = category == _category;
-                return _CategoryRow(
+                return TvCatalogCategoryRow(
                   label: category ?? 'Todos',
                   selected: selected,
+                  primary: index == 0,
                   autofocus: !_searchOpen && index == 0,
                   onTap: () {
                     if (_searchOpen) _closeSearch();
@@ -411,77 +414,24 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   }
 
   Future<void> _openPlayer(List<Channel> channels, int index) async {
-    final provider = context.read<IptvProvider>();
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => PlayerScreen(
-          channel: channels[index],
-          playlist: channels,
-          initialIndex: index,
-          settings: provider.playbackSettings,
-          isLiveContent: true,
-        ),
-      ),
-    );
-  }
-}
-
-class _CategoryRow extends StatefulWidget {
-  final String label;
-  final bool selected;
-  final bool autofocus;
-  final VoidCallback onTap;
-
-  const _CategoryRow({
-    required this.label,
-    required this.selected,
-    required this.onTap,
-    this.autofocus = false,
-  });
-
-  @override
-  State<_CategoryRow> createState() => _CategoryRowState();
-}
-
-class _CategoryRowState extends State<_CategoryRow> {
-  bool _focused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final highlighted = _focused || widget.selected;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Material(
-        color: highlighted ? const Color(0xFF12324A) : Colors.transparent,
-        borderRadius: BorderRadius.circular(9),
-        child: InkWell(
-          autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(9),
-          onFocusChange: (value) => setState(() => _focused = value),
-          onTap: widget.onTap,
-          child: Container(
-            height: 44,
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            alignment: Alignment.centerLeft,
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(9),
-              border: Border.all(
-                color: _focused ? const Color(0xFF58B9FF) : Colors.transparent,
-              ),
-            ),
-            child: Text(
-              widget.label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(
-                fontSize: 14,
-                fontWeight: highlighted ? FontWeight.w800 : FontWeight.w600,
-              ),
-            ),
+    if (_openingPlayer) return;
+    _openingPlayer = true;
+    try {
+      final provider = context.read<IptvProvider>();
+      await Navigator.of(context).push(
+        MaterialPageRoute(
+          builder: (_) => PlayerScreen(
+            channel: channels[index],
+            playlist: channels,
+            initialIndex: index,
+            settings: provider.playbackSettings,
+            isLiveContent: true,
           ),
         ),
-      ),
-    );
+      );
+    } finally {
+      _openingPlayer = false;
+    }
   }
 }
 
@@ -507,8 +457,15 @@ class _ChannelRowState extends State<_ChannelRow> {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Material(
-        color: _focused ? const Color(0xFF10283B) : const Color(0xFF0A141E),
-        borderRadius: BorderRadius.circular(10),
+        color: _focused ? const Color(0xFF252A2F) : const Color(0xFF0A141E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(10),
+          side: BorderSide(
+            color: _focused ? const Color(0xFFD7B45A) : Colors.white10,
+            width: _focused ? 2 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           autofocus: widget.autofocus,
           borderRadius: BorderRadius.circular(10),
@@ -529,6 +486,7 @@ class _ChannelRowState extends State<_ChannelRow> {
                       fit: BoxFit.contain,
                       cacheWidth: 80,
                       cacheHeight: 80,
+                      priority: _focused ? 100 : 20,
                       prefetchExtent: 0,
                       fallback: Container(
                         alignment: Alignment.center,

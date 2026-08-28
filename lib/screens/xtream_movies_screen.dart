@@ -40,6 +40,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   String? _category;
   String _query = '';
   bool _searchOpen = false;
+  bool _openingMovie = false;
+  static String? _preparedKey;
+  static _MovieData? _preparedData;
   Timer? _searchDebounce;
   CatalogIndex<_MovieItem>? _catalogIndex;
   _MovieData? _indexedData;
@@ -121,18 +124,43 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   Future<_MovieData> _loadInitial() async {
     if (widget.playlist.sourceType == PlaylistSourceType.xtream) {
+      final key = widget.playlist.source.trim();
+      final prepared = _preparedData;
+      if (!DevicePerformanceService.instance.lowRam &&
+          _preparedKey == key &&
+          prepared != null) {
+        if (DateTime.now().difference(prepared.savedAt) >= _cacheFreshFor) {
+          unawaited(_refreshXtream());
+        }
+        return prepared;
+      }
+
       final fast = XtreamFastCatalogService.instance;
       final cached = await fast.loadCachedMovies(widget.playlist.source);
       if (cached != null && cached.movies.isNotEmpty) {
         if (DateTime.now().difference(cached.savedAt) >= _cacheFreshFor) {
           unawaited(_refreshXtream());
         }
-        return _MovieData.xtream(cached.connection, cached.movies);
+        final data = _MovieData.xtream(
+          cached.connection,
+          cached.movies,
+          categories: cached.categories,
+          savedAt: cached.savedAt,
+        );
+        _rememberPrepared(data);
+        return data;
       }
       try {
         final fresh = await fast.refreshMovies(widget.playlist.source);
         if (fresh.movies.isNotEmpty) {
-          return _MovieData.xtream(fresh.connection, fresh.movies);
+          final data = _MovieData.xtream(
+            fresh.connection,
+            fresh.movies,
+            categories: fresh.categories,
+            savedAt: fresh.savedAt,
+          );
+          _rememberPrepared(data);
+          return data;
         }
       } catch (_) {}
       return _loadM3uFallback();
@@ -163,12 +191,21 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         widget.playlist.source,
       );
       if (!mounted || fresh.movies.isEmpty) return;
-      setState(
-        () => _future = Future.value(
-          _MovieData.xtream(fresh.connection, fresh.movies),
-        ),
+      final data = _MovieData.xtream(
+        fresh.connection,
+        fresh.movies,
+        categories: fresh.categories,
+        savedAt: fresh.savedAt,
       );
+      _rememberPrepared(data);
+      setState(() => _future = Future.value(data));
     } catch (_) {}
+  }
+
+  void _rememberPrepared(_MovieData data) {
+    if (DevicePerformanceService.instance.lowRam) return;
+    _preparedKey = widget.playlist.source.trim();
+    _preparedData = data;
   }
 
   Future<void> _refreshM3u() async {
@@ -285,6 +322,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                 return TvCatalogCategoryRow(
                   label: value ?? 'Todas',
                   selected: selected,
+                  primary: index == 0,
                   autofocus: !_searchOpen && index == 0,
                   onTap: () {
                     if (_searchOpen) _closeSearch();
@@ -362,58 +400,64 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   }
 
   Future<void> _openMovie(_MovieData data, _MovieItem item) async {
-    if (item.summary != null && data.connection != null) {
-      XtreamVodDetails details;
-      try {
-        details = await XtreamVodService.fetchDetails(
-          data.connection!,
-          item.summary!,
+    if (_openingMovie) return;
+    _openingMovie = true;
+    try {
+      if (item.summary != null && data.connection != null) {
+        XtreamVodDetails details;
+        try {
+          details = await XtreamVodService.fetchDetails(
+            data.connection!,
+            item.summary!,
+          );
+        } catch (_) {
+          details = XtreamVodDetails(
+            movie: item.summary!,
+            extension: item.summary!.extension,
+            genre: item.summary!.genre,
+            releaseDate: item.summary!.releaseDate,
+            rating: item.summary!.rating,
+            directSource: item.summary!.directSource,
+          );
+        }
+        if (!mounted) return;
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => _MovieDetailScreen(
+              title: item.name,
+              poster: item.cover,
+              category: item.category,
+              plot: details.plot,
+              genre: details.genre,
+              releaseDate: details.releaseDate,
+              rating: details.rating,
+              duration: details.duration,
+              country: details.country,
+              language: details.language,
+              originalLanguage: details.originalLanguage,
+              audioInfo: details.audioInfo,
+              translation: details.translation,
+              channel: details.toChannel(data.connection!),
+            ),
+          ),
         );
-      } catch (_) {
-        details = XtreamVodDetails(
-          movie: item.summary!,
-          extension: item.summary!.extension,
-          genre: item.summary!.genre,
-          releaseDate: item.summary!.releaseDate,
-          rating: item.summary!.rating,
-          directSource: item.summary!.directSource,
+        return;
+      }
+
+      if (item.channel != null) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(
+            builder: (_) => _MovieDetailScreen(
+              title: item.name,
+              poster: item.cover,
+              category: item.category,
+              channel: item.channel!,
+            ),
+          ),
         );
       }
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => _MovieDetailScreen(
-            title: item.name,
-            poster: item.cover,
-            category: item.category,
-            plot: details.plot,
-            genre: details.genre,
-            releaseDate: details.releaseDate,
-            rating: details.rating,
-            duration: details.duration,
-            country: details.country,
-            language: details.language,
-            originalLanguage: details.originalLanguage,
-            audioInfo: details.audioInfo,
-            translation: details.translation,
-            channel: details.toChannel(data.connection!),
-          ),
-        ),
-      );
-      return;
-    }
-
-    if (item.channel != null) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(
-          builder: (_) => _MovieDetailScreen(
-            title: item.name,
-            poster: item.cover,
-            category: item.category,
-            channel: item.channel!,
-          ),
-        ),
-      );
+    } finally {
+      _openingMovie = false;
     }
   }
 }
@@ -632,7 +676,7 @@ class _MovieCardState extends State<_MovieCard> {
               borderRadius: BorderRadius.circular(13),
               border: Border.all(
                 color: _focused
-                    ? const Color(0xFF58B9FF)
+                    ? const Color(0xFFD7B45A)
                     : Colors.white.withValues(alpha: .07),
                 width: _focused ? 2 : 1,
               ),
@@ -646,6 +690,7 @@ class _MovieCardState extends State<_MovieCard> {
                     fit: BoxFit.cover,
                     cacheWidth: 320,
                     cacheHeight: 480,
+                    priority: _focused ? 100 : 10,
                     prefetchExtent: 0,
                     fallback: const ColoredBox(
                       color: Color(0xFF111E29),
@@ -701,41 +746,62 @@ class _MovieCardState extends State<_MovieCard> {
 class _MovieData {
   final XtreamConnectionResult? connection;
   final List<_MovieItem> items;
-  const _MovieData(this.connection, this.items);
+  final List<String> categories;
+  final DateTime savedAt;
+
+  const _MovieData(
+    this.connection,
+    this.items,
+    this.categories,
+    this.savedAt,
+  );
 
   factory _MovieData.xtream(
     XtreamConnectionResult connection,
-    List<XtreamVodSummary> movies,
-  ) =>
-      _MovieData(
-        connection,
-        movies
-            .map(
-              (item) => _MovieItem(
-                name: item.name,
-                cover: _resolveArtwork(connection.streamServer, item.cover),
-                category: item.category,
-                summary: item,
-              ),
-            )
-            .toList(growable: false),
-      );
+    List<XtreamVodSummary> movies, {
+    List<String> categories = const <String>[],
+    DateTime? savedAt,
+  }) {
+    final items = movies
+        .map(
+          (item) => _MovieItem(
+            name: item.name,
+            cover: _resolveArtwork(connection.streamServer, item.cover),
+            category: item.category,
+            summary: item,
+          ),
+        )
+        .toList(growable: false);
+    final resolvedCategories =
+        categories.isEmpty ? _collectCategories(items) : categories;
+    return _MovieData(
+      connection,
+      List<_MovieItem>.unmodifiable(items),
+      List<String>.unmodifiable(resolvedCategories),
+      savedAt ?? DateTime.now(),
+    );
+  }
 
-  factory _MovieData.m3u(List<Channel> channels) => _MovieData(
-        null,
-        channels
-            .map(
-              (item) => _MovieItem(
-                name: item.name,
-                cover: item.logoUrl,
-                category: item.group,
-                channel: item,
-              ),
-            )
-            .toList(growable: false),
-      );
+  factory _MovieData.m3u(List<Channel> channels) {
+    final items = channels
+        .map(
+          (item) => _MovieItem(
+            name: item.name,
+            cover: item.logoUrl,
+            category: item.group,
+            channel: item,
+          ),
+        )
+        .toList(growable: false);
+    return _MovieData(
+      null,
+      List<_MovieItem>.unmodifiable(items),
+      List<String>.unmodifiable(_collectCategories(items)),
+      DateTime.now(),
+    );
+  }
 
-  List<String> get categories {
+  static List<String> _collectCategories(List<_MovieItem> items) {
     final seen = <String>{};
     final result = <String>[];
     for (final item in items) {

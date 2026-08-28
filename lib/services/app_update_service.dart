@@ -29,8 +29,8 @@ class AppUpdateService extends ChangeNotifier {
 
   static final AppUpdateService instance = AppUpdateService._();
 
-  static const int currentVersionCode = 13;
-  static const String currentVersionName = '1.2.1';
+  static const int currentVersionCode = 14;
+  static const String currentVersionName = '1.2.2';
   static final Uri _endpoint = Uri.parse(
     'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-update',
   );

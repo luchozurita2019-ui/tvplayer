@@ -4,9 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/playlist.dart';
+import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/app_update_service.dart';
+import '../services/device_performance_service.dart';
 import '../services/parental_control_service.dart';
+import '../services/xtream_fast_catalog_service.dart';
 import '../widgets/parental_lock_button.dart';
 import '../widgets/parental_unlock_dialog.dart';
 import 'parental_control_screen.dart';
@@ -134,6 +137,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                         eyebrow: 'CATÁLOGO',
                         title: 'PELÍCULAS',
                         icon: Icons.movie_outlined,
+                        onFocused: () => _prewarmMovies(active),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) =>
@@ -148,6 +152,7 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                         eyebrow: 'TEMPORADAS',
                         title: 'SERIES',
                         icon: Icons.video_library_outlined,
+                        onFocused: () => _prewarmSeries(active),
                         onTap: () => Navigator.of(context).push(
                           MaterialPageRoute(
                             builder: (_) =>
@@ -164,6 +169,20 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
           ),
         ),
       ),
+    );
+  }
+
+  void _prewarmMovies(Playlist playlist) {
+    if (playlist.sourceType != PlaylistSourceType.xtream) return;
+    unawaited(
+      XtreamFastCatalogService.instance.prewarmCachedMovies(playlist.source),
+    );
+  }
+
+  void _prewarmSeries(Playlist playlist) {
+    if (playlist.sourceType != PlaylistSourceType.xtream) return;
+    unawaited(
+      XtreamFastCatalogService.instance.prewarmCachedSeries(playlist.source),
     );
   }
 
@@ -338,6 +357,7 @@ class _SectionButton extends StatefulWidget {
   final String title;
   final IconData icon;
   final VoidCallback onTap;
+  final VoidCallback? onFocused;
   final bool autofocus;
 
   const _SectionButton({
@@ -345,6 +365,7 @@ class _SectionButton extends StatefulWidget {
     required this.title,
     required this.icon,
     required this.onTap,
+    this.onFocused,
     this.autofocus = false,
   });
 
@@ -353,32 +374,48 @@ class _SectionButton extends StatefulWidget {
 }
 
 class _SectionButtonState extends State<_SectionButton> {
+  static const Color _gold = Color(0xFFD7B45A);
   bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
+    final lowRam = DevicePerformanceService.instance.lowRam;
     return AnimatedScale(
-      scale: _focused ? 1.025 : 1,
-      duration: const Duration(milliseconds: 120),
+      scale: _focused ? (lowRam ? 1.012 : 1.022) : 1,
+      duration: Duration(milliseconds: lowRam ? 70 : 100),
+      curve: Curves.easeOut,
       child: Material(
-        color: _focused ? const Color(0xFF122A40) : const Color(0xFF0B1622),
-        borderRadius: BorderRadius.circular(18),
+        color: _focused ? const Color(0xFF252A2F) : const Color(0xFF0B1622),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: BorderSide(
+            color: _focused ? _gold : Colors.white10,
+            width: _focused ? 2 : 1,
+          ),
+        ),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(18),
-          onFocusChange: (value) => setState(() => _focused = value),
+          onFocusChange: (value) {
+            if (_focused != value) setState(() => _focused = value);
+            if (value) widget.onFocused?.call();
+          },
           onTap: widget.onTap,
           child: Padding(
             padding: const EdgeInsets.all(26),
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Icon(widget.icon, size: 34, color: const Color(0xFF58B9FF)),
+                Icon(
+                  widget.icon,
+                  size: 34,
+                  color: _focused ? _gold : Colors.white70,
+                ),
                 const Spacer(),
                 Text(
                   widget.eyebrow,
-                  style: const TextStyle(
-                    color: Color(0x73FFFFFF),
+                  style: TextStyle(
+                    color: _focused ? _gold : const Color(0x73FFFFFF),
                     fontSize: 11,
                     fontWeight: FontWeight.w800,
                     letterSpacing: 1.2,

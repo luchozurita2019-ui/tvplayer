@@ -6,11 +6,6 @@ import 'package:flutter/material.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/device_performance_service.dart';
 
-/// Artwork demand-driven by the virtualized GridView/ListView child lifecycle.
-///
-/// A card requests its image when Flutter actually builds that card. When the
-/// builder disposes it, its download interest is released. This avoids hundreds
-/// of per-card scroll listeners and RenderBox/global-coordinate calculations.
 class CachedArtworkImage extends StatefulWidget {
   final String? url;
   final BoxFit fit;
@@ -18,10 +13,8 @@ class CachedArtworkImage extends StatefulWidget {
   final bool allowNetwork;
   final int? cacheWidth;
   final int? cacheHeight;
+  final int priority;
   final ValueChanged<bool>? onAvailabilityChanged;
-
-  /// Kept for source compatibility. Prefetch is now controlled by the parent
-  /// GridView/ListView cache extent instead of every image measuring itself.
   final double prefetchExtent;
 
   const CachedArtworkImage({
@@ -32,6 +25,7 @@ class CachedArtworkImage extends StatefulWidget {
     this.allowNetwork = true,
     this.cacheWidth,
     this.cacheHeight,
+    this.priority = 0,
     this.onAvailabilityChanged,
     this.prefetchExtent = 96,
   });
@@ -64,6 +58,10 @@ class _CachedArtworkImageState extends State<CachedArtworkImage> {
       _releaseInterest();
       widget.onAvailabilityChanged?.call(false);
       _scheduleResolve();
+      return;
+    }
+    if (oldWidget.priority != widget.priority && _file == null) {
+      ArtworkCacheService.instance.promote(widget.url, widget.priority);
     }
   }
 
@@ -96,6 +94,7 @@ class _CachedArtworkImageState extends State<CachedArtworkImage> {
       rawUrl,
       allowNetwork: widget.allowNetwork,
       demandDriven: true,
+      priority: widget.priority,
     );
 
     if (!mounted || generation != _requestGeneration) return;

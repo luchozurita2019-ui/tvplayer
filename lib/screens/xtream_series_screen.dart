@@ -40,6 +40,9 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   String? _category;
   String _query = '';
   bool _searchOpen = false;
+  bool _openingSeries = false;
+  static String? _preparedKey;
+  static _SeriesData? _preparedData;
   Timer? _searchDebounce;
   CatalogIndex<_SeriesItem>? _catalogIndex;
   _SeriesData? _indexedData;
@@ -121,18 +124,43 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
 
   Future<_SeriesData> _loadInitial() async {
     if (widget.playlist.sourceType == PlaylistSourceType.xtream) {
+      final key = widget.playlist.source.trim();
+      final prepared = _preparedData;
+      if (!DevicePerformanceService.instance.lowRam &&
+          _preparedKey == key &&
+          prepared != null) {
+        if (DateTime.now().difference(prepared.savedAt) >= _cacheFreshFor) {
+          unawaited(_refreshXtream());
+        }
+        return prepared;
+      }
+
       final fast = XtreamFastCatalogService.instance;
       final cached = await fast.loadCachedSeries(widget.playlist.source);
       if (cached != null && cached.series.isNotEmpty) {
         if (DateTime.now().difference(cached.savedAt) >= _cacheFreshFor) {
           unawaited(_refreshXtream());
         }
-        return _SeriesData.xtream(cached.connection, cached.series);
+        final data = _SeriesData.xtream(
+          cached.connection,
+          cached.series,
+          categories: cached.categories,
+          savedAt: cached.savedAt,
+        );
+        _rememberPrepared(data);
+        return data;
       }
       try {
         final fresh = await fast.refreshSeries(widget.playlist.source);
         if (fresh.series.isNotEmpty) {
-          return _SeriesData.xtream(fresh.connection, fresh.series);
+          final data = _SeriesData.xtream(
+            fresh.connection,
+            fresh.series,
+            categories: fresh.categories,
+            savedAt: fresh.savedAt,
+          );
+          _rememberPrepared(data);
+          return data;
         }
       } catch (_) {}
       return _loadM3uFallback();
@@ -163,12 +191,21 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         widget.playlist.source,
       );
       if (!mounted || fresh.series.isEmpty) return;
-      setState(
-        () => _future = Future.value(
-          _SeriesData.xtream(fresh.connection, fresh.series),
-        ),
+      final data = _SeriesData.xtream(
+        fresh.connection,
+        fresh.series,
+        categories: fresh.categories,
+        savedAt: fresh.savedAt,
       );
+      _rememberPrepared(data);
+      setState(() => _future = Future.value(data));
     } catch (_) {}
+  }
+
+  void _rememberPrepared(_SeriesData data) {
+    if (DevicePerformanceService.instance.lowRam) return;
+    _preparedKey = widget.playlist.source.trim();
+    _preparedData = data;
   }
 
   Future<void> _refreshM3u() async {
@@ -284,6 +321,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                 return TvCatalogCategoryRow(
                   label: value ?? 'Todas',
                   selected: selected,
+                  primary: index == 0,
                   autofocus: !_searchOpen && index == 0,
                   onTap: () {
                     if (_searchOpen) _closeSearch();
@@ -361,39 +399,45 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   }
 
   Future<void> _openSeries(_SeriesData data, _SeriesItem item) async {
-    _SeriesDetailModel model;
-    if (item.summary != null && data.connection != null) {
-      try {
-        final details = await XtreamSeriesService.fetchDetails(
-          data.connection!,
-          item.summary!,
-        );
-        model = _SeriesDetailModel.fromXtream(data.connection!, details);
-      } catch (_) {
-        final fallback = await _findM3uSeriesFallback(
-          item,
-          data.connection!,
-        );
-        if (fallback == null) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text(
-                'El proveedor no devolvió episodios para esta serie.',
-              ),
-            ),
+    if (_openingSeries) return;
+    _openingSeries = true;
+    try {
+      _SeriesDetailModel model;
+      if (item.summary != null && data.connection != null) {
+        try {
+          final details = await XtreamSeriesService.fetchDetails(
+            data.connection!,
+            item.summary!,
           );
-          return;
+          model = _SeriesDetailModel.fromXtream(data.connection!, details);
+        } catch (_) {
+          final fallback = await _findM3uSeriesFallback(
+            item,
+            data.connection!,
+          );
+          if (fallback == null) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  'El proveedor no devolvió episodios para esta serie.',
+                ),
+              ),
+            );
+            return;
+          }
+          model = _SeriesDetailModel.fromM3u(fallback);
         }
-        model = _SeriesDetailModel.fromM3u(fallback);
+      } else {
+        model = _SeriesDetailModel.fromM3u(item);
       }
-    } else {
-      model = _SeriesDetailModel.fromM3u(item);
+      if (!mounted) return;
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => _SeriesDetailScreen(model: model)),
+      );
+    } finally {
+      _openingSeries = false;
     }
-    if (!mounted) return;
-    await Navigator.of(context).push(
-      MaterialPageRoute(builder: (_) => _SeriesDetailScreen(model: model)),
-    );
   }
 
   Future<_SeriesItem?> _findM3uSeriesFallback(
@@ -711,7 +755,7 @@ class _SeriesCardState extends State<_SeriesCard> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(13),
               border: Border.all(
-                color: _focused ? const Color(0xFF58B9FF) : Colors.white10,
+                color: _focused ? const Color(0xFFD7B45A) : Colors.white10,
                 width: _focused ? 2 : 1,
               ),
             ),
@@ -724,6 +768,7 @@ class _SeriesCardState extends State<_SeriesCard> {
                     fit: BoxFit.cover,
                     cacheWidth: 320,
                     cacheHeight: 480,
+                    priority: _focused ? 100 : 10,
                     prefetchExtent: 0,
                     fallback: const ColoredBox(
                       color: Color(0xFF111E29),
@@ -762,25 +807,41 @@ class _SeriesCardState extends State<_SeriesCard> {
 class _SeriesData {
   final XtreamConnectionResult? connection;
   final List<_SeriesItem> items;
-  const _SeriesData(this.connection, this.items);
+  final List<String> categories;
+  final DateTime savedAt;
+
+  const _SeriesData(
+    this.connection,
+    this.items,
+    this.categories,
+    this.savedAt,
+  );
 
   factory _SeriesData.xtream(
     XtreamConnectionResult connection,
-    List<XtreamSeriesSummary> series,
-  ) =>
-      _SeriesData(
-        connection,
-        series
-            .map(
-              (item) => _SeriesItem(
-                name: item.name,
-                cover: _resolveArtwork(connection.streamServer, item.cover),
-                category: item.category,
-                summary: item,
-              ),
-            )
-            .toList(growable: false),
-      );
+    List<XtreamSeriesSummary> series, {
+    List<String> categories = const <String>[],
+    DateTime? savedAt,
+  }) {
+    final items = series
+        .map(
+          (item) => _SeriesItem(
+            name: item.name,
+            cover: _resolveArtwork(connection.streamServer, item.cover),
+            category: item.category,
+            summary: item,
+          ),
+        )
+        .toList(growable: false);
+    final resolvedCategories =
+        categories.isEmpty ? _collectCategories(items) : categories;
+    return _SeriesData(
+      connection,
+      List<_SeriesItem>.unmodifiable(items),
+      List<String>.unmodifiable(resolvedCategories),
+      savedAt ?? DateTime.now(),
+    );
+  }
 
   factory _SeriesData.m3u(List<Channel> channels) {
     final byKey = <String, _SeriesItem>{};
@@ -799,10 +860,16 @@ class _SeriesData {
         existing.m3uEpisodes!.add(parsed);
       }
     }
-    return _SeriesData(null, byKey.values.toList(growable: false));
+    final items = byKey.values.toList(growable: false);
+    return _SeriesData(
+      null,
+      List<_SeriesItem>.unmodifiable(items),
+      List<String>.unmodifiable(_collectCategories(items)),
+      DateTime.now(),
+    );
   }
 
-  List<String> get categories {
+  static List<String> _collectCategories(List<_SeriesItem> items) {
     final seen = <String>{};
     final result = <String>[];
     for (final item in items) {

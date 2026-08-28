@@ -108,6 +108,7 @@ class ArtworkCacheService {
     String? rawUrl, {
     bool allowNetwork = true,
     bool demandDriven = false,
+    int priority = 0,
   }) async {
     final url = _validUrl(rawUrl);
     if (url == null) return null;
@@ -132,9 +133,10 @@ class ArtworkCacheService {
       url: url,
       generation: _generation,
       demandDriven: demandDriven,
+      priority: priority,
       completer: completer,
     );
-    _queue.add(request);
+    _enqueueByPriority(request);
     _inFlight[url] = completer.future;
     completer.future.whenComplete(() {
       if (identical(_inFlight[url], completer.future)) _inFlight.remove(url);
@@ -163,6 +165,36 @@ class ArtworkCacheService {
     if (request.demandDriven && (_interest[request.url] ?? 0) <= 0)
       return false;
     return true;
+  }
+
+  void promote(String? rawUrl, int priority) {
+    final url = _validUrl(rawUrl);
+    if (url == null || _queue.isEmpty || priority <= 0) return;
+    final items = _queue.toList(growable: false);
+    var changed = false;
+    for (final item in items) {
+      if (item.url == url && priority > item.priority) {
+        item.priority = priority;
+        changed = true;
+      }
+    }
+    if (!changed) return;
+    items.sort((a, b) => b.priority.compareTo(a.priority));
+    _queue
+      ..clear()
+      ..addAll(items);
+  }
+
+  void _enqueueByPriority(_ArtworkRequest request) {
+    if (_queue.isEmpty) {
+      _queue.addLast(request);
+      return;
+    }
+    final items = _queue.toList(growable: true)..add(request);
+    items.sort((a, b) => b.priority.compareTo(a.priority));
+    _queue
+      ..clear()
+      ..addAll(items);
   }
 
   void _drain() {
@@ -299,11 +331,13 @@ class _ArtworkRequest {
   final String url;
   final int generation;
   final bool demandDriven;
+  int priority;
   final Completer<File?> completer;
-  const _ArtworkRequest({
+  _ArtworkRequest({
     required this.url,
     required this.generation,
     required this.demandDriven,
+    required this.priority,
     required this.completer,
   });
 }
