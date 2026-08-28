@@ -101,6 +101,21 @@ jobs:
           test -x "$APKSIGNER" || { echo 'apksigner not found'; exit 1; }
           "$APKSIGNER" verify --verbose --print-certs artifact/TV-FULL-PRO.apk > artifact/SIGNATURE.txt
 
+      - name: Publish stable latest APK URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=tv-full-pro-latest
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifact/TV-FULL-PRO.apk --clobber
+          else
+            gh release create "$TAG" artifact/TV-FULL-PRO.apk \
+              --title "TV FULL PRO latest" \
+              --notes "Canal estable para actualización manual de TV FULL PRO."
+          fi
+
       - name: Remove signing material from runner workspace
         if: always()
         shell: bash
