@@ -108,8 +108,7 @@ class XtreamFastCatalogService {
   final Map<String, XtreamSeriesCatalogSnapshot> _seriesMemory =
       <String, XtreamSeriesCatalogSnapshot>{};
   final Map<String, Future<XtreamMovieCatalogSnapshot?>>
-      _pendingMovieCacheReads =
-      <String, Future<XtreamMovieCatalogSnapshot?>>{};
+      _pendingMovieCacheReads = <String, Future<XtreamMovieCatalogSnapshot?>>{};
   final Map<String, Future<XtreamSeriesCatalogSnapshot?>>
       _pendingSeriesCacheReads =
       <String, Future<XtreamSeriesCatalogSnapshot?>>{};
@@ -293,7 +292,8 @@ class XtreamFastCatalogService {
     }
   }
 
-  void _rememberSeriesSnapshot(String key, XtreamSeriesCatalogSnapshot snapshot) {
+  void _rememberSeriesSnapshot(
+      String key, XtreamSeriesCatalogSnapshot snapshot) {
     _seriesMemory.remove(key);
     _seriesMemory[key] = snapshot;
     while (_seriesMemory.length > 2) {
