@@ -29,7 +29,13 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   static const Duration _cacheFreshFor = Duration(minutes: 15);
 
   late Future<_SeriesData> _future;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'series-search');
+  final ScrollController _catalogScrollController = ScrollController();
+  final ScrollController _searchScrollController = ScrollController();
   String? _category;
+  String _query = '';
+  bool _searchOpen = false;
 
   @override
   void initState() {
@@ -40,8 +46,40 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    _catalogScrollController.dispose();
+    _searchScrollController.dispose();
     unawaited(ArtworkCacheService.instance.clearBrowsingSession());
     super.dispose();
+  }
+
+  void _openSearch() {
+    if (_searchOpen) return;
+    setState(() => _searchOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    if (!_searchOpen) return;
+    _searchFocus.unfocus();
+    _searchController.clear();
+    setState(() {
+      _query = '';
+      _searchOpen = false;
+    });
+  }
+
+  Future<bool> _handleBack() async {
+    if (!_searchOpen) return true;
+    if (_searchFocus.hasFocus) {
+      _searchFocus.unfocus();
+      return false;
+    }
+    _closeSearch();
+    return false;
   }
 
   Future<_SeriesData> _loadInitial() async {
@@ -110,52 +148,97 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF05090F),
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text('SERIES', style: TextStyle(fontWeight: FontWeight.w900)),
-            Text(
-              widget.playlist.name,
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
+    return WillPopScope(
+      onWillPop: _handleBack,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF05090F),
+        appBar: AppBar(
+          title: _searchOpen
+              ? TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocus,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar en todas las series…',
+                    border: InputBorder.none,
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                  onChanged: (value) => setState(() => _query = value),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'SERIES',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      widget.playlist.name,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+          actions: [
+            IconButton(
+              tooltip: _searchOpen ? 'Cerrar búsqueda' : 'Buscar series',
+              onPressed: _searchOpen ? _closeSearch : _openSearch,
+              icon: Icon(
+                _searchOpen ? Icons.close_rounded : Icons.search_rounded,
+              ),
             ),
+            const SizedBox(width: 10),
           ],
         ),
-      ),
-      body: FutureBuilder<_SeriesData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const _CenteredLoading(label: 'Cargando series…');
-          }
-          if (snapshot.hasError) {
-            return _CenteredError(
-              label: 'No se pudo cargar el catálogo de series.',
-              onRetry: () => setState(() => _future = _loadInitial()),
-            );
-          }
-          final data = snapshot.data!;
-          if (data.items.isEmpty) {
-            return _CenteredError(
-              label: 'Esta lista no contiene series disponibles.',
-              onRetry: () => setState(() => _future = _loadInitial()),
-            );
-          }
-          return _catalog(data);
-        },
+        body: FutureBuilder<_SeriesData>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const _CenteredLoading(label: 'Cargando series…');
+            }
+            if (snapshot.hasError) {
+              return _CenteredError(
+                label: 'No se pudo cargar el catálogo de series.',
+                onRetry: () => setState(() => _future = _loadInitial()),
+              );
+            }
+            final data = snapshot.data!;
+            if (data.items.isEmpty) {
+              return _CenteredError(
+                label: 'Esta lista no contiene series disponibles.',
+                onRetry: () => setState(() => _future = _loadInitial()),
+              );
+            }
+            return _catalog(data);
+          },
+        ),
       ),
     );
   }
 
   Widget _catalog(_SeriesData data) {
     final categories = data.categories;
-    final visible = _category == null
-        ? data.items
-        : data.items
-            .where((item) => item.category == _category)
-            .toList(growable: false);
+    final normalizedQuery = _query.trim().toLowerCase();
+    final List<_SeriesItem> visible;
+    if (_searchOpen) {
+      visible = normalizedQuery.isEmpty
+          ? data.items
+          : data.items.where((item) {
+              final name = item.name.toLowerCase();
+              final category = (item.category ?? '').toLowerCase();
+              return name.contains(normalizedQuery) ||
+                  category.contains(normalizedQuery);
+            }).toList(growable: false);
+    } else {
+      visible = _category == null
+          ? data.items
+          : data.items
+              .where((item) => item.category == _category)
+              .toList(growable: false);
+    }
     return Row(
       children: [
         SizedBox(
@@ -171,8 +254,11 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                 return TvCatalogCategoryRow(
                   label: value ?? 'Todas',
                   selected: selected,
-                  autofocus: index == 0,
-                  onTap: () => setState(() => _category = value),
+                  autofocus: !_searchOpen && index == 0,
+                  onTap: () {
+                    if (_searchOpen) _closeSearch();
+                    setState(() => _category = value);
+                  },
                 );
               },
             ),
@@ -186,7 +272,9 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
                 child: Text(
-                  '${_category ?? 'Todas'}  ·  ${visible.length}',
+                  _searchOpen
+                      ? 'Búsqueda global  ·  ${visible.length} series'
+                      : '${_category ?? 'Todas'}  ·  ${visible.length}',
                   style: const TextStyle(
                     color: Colors.white54,
                     fontWeight: FontWeight.w700,
@@ -194,28 +282,41 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                 ),
               ),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final columns = constraints.maxWidth >= 1000 ? 4 : 3;
-                    return GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(18, 0, 22, 24),
-                      scrollCacheExtent: const ScrollCacheExtent.pixels(90),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                        childAspectRatio: 2.65,
+                child: visible.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No se encontraron series.',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      )
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final columns =
+                              constraints.maxWidth >= 1000 ? 4 : 3;
+                          return GridView.builder(
+                            controller: _searchOpen
+                                ? _searchScrollController
+                                : _catalogScrollController,
+                            padding: const EdgeInsets.fromLTRB(18, 0, 22, 24),
+                            scrollCacheExtent:
+                                const ScrollCacheExtent.pixels(90),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              crossAxisSpacing: 10,
+                              mainAxisSpacing: 10,
+                              childAspectRatio: 2.65,
+                            ),
+                            itemCount: visible.length,
+                            itemBuilder: (context, index) => _SeriesCard(
+                              item: visible[index],
+                              autofocus: !_searchOpen && index == 0,
+                              onTap: () =>
+                                  unawaited(_openSeries(data, visible[index])),
+                            ),
+                          );
+                        },
                       ),
-                      itemCount: visible.length,
-                      itemBuilder: (context, index) => _SeriesCard(
-                        item: visible[index],
-                        autofocus: index == 0,
-                        onTap: () =>
-                            unawaited(_openSeries(data, visible[index])),
-                      ),
-                    );
-                  },
-                ),
               ),
             ],
           ),
