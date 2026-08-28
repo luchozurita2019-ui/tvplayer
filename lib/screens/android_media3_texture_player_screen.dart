@@ -58,9 +58,8 @@ class _AndroidMedia3TexturePlayerScreenState
   Map<String, String> get _headers =>
       _channel.resolvedHttpHeaders(_media3DefaultUserAgent);
 
-  List<_LiveAudioTrack> get _selectableAudioTracks => _audioTracks
-      .where((track) => track.supported)
-      .toList(growable: false);
+  List<_LiveAudioTrack> get _selectableAudioTracks =>
+      _audioTracks.where((track) => track.supported).toList(growable: false);
 
   bool get _hasMultipleAudioTracks => _selectableAudioTracks.length > 1;
 
@@ -312,7 +311,9 @@ class _AndroidMedia3TexturePlayerScreenState
                   title: Text(track.displayName(index + 1)),
                   subtitle: track.mimeType.isEmpty
                       ? null
-                      : Text(track.mimeType.replaceFirst('audio/', '').toUpperCase()),
+                      : Text(track.mimeType
+                          .replaceFirst('audio/', '')
+                          .toUpperCase()),
                   trailing: track.selected
                       ? const Icon(
                           Icons.check_circle_rounded,

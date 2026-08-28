@@ -291,8 +291,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                       )
                     : LayoutBuilder(
                         builder: (context, constraints) {
-                          final columns =
-                              constraints.maxWidth >= 1000 ? 4 : 3;
+                          final columns = constraints.maxWidth >= 1000 ? 4 : 3;
                           return GridView.builder(
                             controller: _searchOpen
                                 ? _searchScrollController

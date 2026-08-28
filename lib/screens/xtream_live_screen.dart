@@ -359,8 +359,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                             ? _searchScrollController
                             : _catalogScrollController,
                         padding: const EdgeInsets.fromLTRB(14, 0, 20, 20),
-                        scrollCacheExtent:
-                            const ScrollCacheExtent.pixels(80),
+                        scrollCacheExtent: const ScrollCacheExtent.pixels(80),
                         itemCount: visible.length,
                         itemBuilder: (context, index) {
                           final channel = visible[index];
