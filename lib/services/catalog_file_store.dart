@@ -11,6 +11,18 @@ class CatalogFileSnapshot {
   const CatalogFileSnapshot({required this.payload, required this.updatedAt});
 }
 
+class CatalogFileSource {
+  final File itemsFile;
+  final List<String> categories;
+  final DateTime updatedAt;
+
+  const CatalogFileSource({
+    required this.itemsFile,
+    required this.categories,
+    required this.updatedAt,
+  });
+}
+
 /// Persistencia de catálogos pesados fuera de SQLite.
 ///
 /// Cada servicio/sección mantiene generaciones independientes en Application
@@ -25,6 +37,39 @@ class CatalogFileStore {
 
   static const int _version = 1;
   Directory? _root;
+
+  Future<CatalogFileSource?> loadSource(
+    String serviceId,
+    String kind,
+  ) async {
+    final section = await _sectionDirectory(serviceId, kind);
+    if (!await section.exists()) return null;
+    final generation = await _resolveCurrentGeneration(section);
+    if (generation == null) return null;
+    try {
+      final metaRaw = jsonDecode(
+        await File('${generation.path}/meta.json').readAsString(),
+      );
+      if (metaRaw is! Map || metaRaw['version'] != _version) return null;
+      final updatedMillis =
+          int.tryParse(metaRaw['updatedAt']?.toString() ?? '');
+      if (updatedMillis == null || updatedMillis <= 0) return null;
+      final categoriesRaw = jsonDecode(
+        await File('${generation.path}/categories.json').readAsString(),
+      );
+      final itemsFile = File('${generation.path}/items.ndjson');
+      if (!await itemsFile.exists()) return null;
+      return CatalogFileSource(
+        itemsFile: itemsFile,
+        categories: categoriesRaw is List
+            ? categoriesRaw.map((e) => e.toString()).toList(growable: false)
+            : const <String>[],
+        updatedAt: DateTime.fromMillisecondsSinceEpoch(updatedMillis),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
 
   Future<CatalogFileSnapshot?> loadSnapshot(
     String serviceId,

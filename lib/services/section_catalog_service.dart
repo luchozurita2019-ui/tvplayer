@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import 'package:flutter/foundation.dart';
 
 import '../models/channel.dart';
@@ -40,9 +42,10 @@ class SectionCatalogService {
   ) async {
     final key = 'm3u_${kind.name}';
 
-    final fileSnapshot = await _catalogFiles.loadSnapshot(playlist.id, key);
-    if (fileSnapshot != null) {
-      return _decodeSnapshot(fileSnapshot.payload);
+    final fileSource = await _catalogFiles.loadSource(playlist.id, key);
+    if (fileSource != null) {
+      final decoded = await _decodeFileSource(fileSource);
+      if (decoded != null) return decoded;
     }
 
     final legacy = await _store.loadLegacySnapshot(playlist.id, key);
@@ -182,6 +185,37 @@ class SectionCatalogService {
     await Future.wait(writes);
     _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
     return result;
+  }
+
+  Future<SectionCatalogSnapshot?> _decodeFileSource(
+    CatalogFileSource source,
+  ) async {
+    final channels = <Channel>[];
+    try {
+      final lines = source.itemsFile
+          .openRead()
+          .transform(utf8.decoder)
+          .transform(const LineSplitter());
+      await for (final line in lines) {
+        final value = line.trim();
+        if (value.isEmpty) continue;
+        try {
+          final decoded = jsonDecode(value);
+          if (decoded is! Map) continue;
+          channels.add(Channel.fromJson(Map<String, dynamic>.from(decoded)));
+        } catch (_) {}
+      }
+    } catch (_) {
+      return null;
+    }
+    if (channels.isEmpty) return null;
+    return SectionCatalogSnapshot(
+      channels: List<Channel>.unmodifiable(channels),
+      categories: List<String>.unmodifiable(
+        source.categories.isEmpty ? _categories(channels) : source.categories,
+      ),
+      fromCache: true,
+    );
   }
 
   SectionCatalogSnapshot? _decodeSnapshot(dynamic raw) {

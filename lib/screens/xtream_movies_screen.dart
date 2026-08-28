@@ -9,6 +9,8 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/catalog_index.dart';
+import '../services/device_performance_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/section_catalog_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
@@ -38,6 +40,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   String? _category;
   String _query = '';
   bool _searchOpen = false;
+  Timer? _searchDebounce;
+  CatalogIndex<_MovieItem>? _catalogIndex;
+  _MovieData? _indexedData;
 
   @override
   void initState() {
@@ -51,6 +56,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   @override
   void dispose() {
     _parental.removeListener(_onParentalChanged);
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
     _catalogScrollController.dispose();
@@ -66,6 +72,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         _parental.isProtectedGroup(_category)) {
       _category = null;
     }
+    _catalogIndex = null;
+    _indexedData = null;
     setState(() {});
   }
 
@@ -79,12 +87,35 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   void _closeSearch() {
     if (!_searchOpen) return;
+    _searchDebounce?.cancel();
     _searchFocus.unfocus();
     _searchController.clear();
     setState(() {
       _query = '';
       _searchOpen = false;
     });
+  }
+
+  void _scheduleSearch(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 120), () {
+      if (mounted && value != _query) setState(() => _query = value);
+    });
+  }
+
+  CatalogIndex<_MovieItem> _catalogIndexFor(_MovieData data) {
+    final cached = _catalogIndex;
+    if (cached != null && identical(_indexedData, data)) return cached;
+    final built = CatalogIndex<_MovieItem>.build(
+      items: data.items,
+      categoryOrder: data.categories,
+      nameOf: (item) => item.name,
+      categoryOf: (item) => item.category,
+      include: (item) => _parental.canShowItem(name: item.name, group: item.category),
+    );
+    _indexedData = data;
+    _catalogIndex = built;
+    return built;
   }
 
   Future<_MovieData> _loadInitial() async {
@@ -177,7 +208,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                     border: InputBorder.none,
                     prefixIcon: Icon(Icons.search_rounded),
                   ),
-                  onChanged: (value) => setState(() => _query = value),
+                  onChanged: _scheduleSearch,
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -233,33 +264,11 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   }
 
   Widget _catalog(_MovieData data) {
-    final categories = _parental.visibleGroups(data.categories);
-    final allowed = data.items
-        .where(
-          (item) => _parental.canShowItem(
-            name: item.name,
-            group: item.category,
-          ),
-        )
-        .toList(growable: false);
-    final normalizedQuery = _query.trim().toLowerCase();
-    final List<_MovieItem> visible;
-    if (_searchOpen) {
-      visible = normalizedQuery.isEmpty
-          ? allowed
-          : allowed.where((item) {
-              final name = item.name.toLowerCase();
-              final category = (item.category ?? '').toLowerCase();
-              return name.contains(normalizedQuery) ||
-                  category.contains(normalizedQuery);
-            }).toList(growable: false);
-    } else {
-      visible = _category == null
-          ? allowed
-          : allowed
-              .where((item) => item.category == _category)
-              .toList(growable: false);
-    }
+    final index = _catalogIndexFor(data);
+    final categories = index.categories;
+    final visible = _searchOpen
+        ? index.search(_query)
+        : index.forCategory(_category);
 
     return Row(
       children: [
@@ -324,7 +333,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                                 : _catalogScrollController,
                             padding: const EdgeInsets.fromLTRB(20, 4, 24, 30),
                             scrollCacheExtent:
-                                const ScrollCacheExtent.pixels(120),
+                                DevicePerformanceService.instance.lowRam
+                                    ? const ScrollCacheExtent.pixels(48)
+                                    : const ScrollCacheExtent.pixels(120),
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: columns,
@@ -602,9 +613,10 @@ class _MovieCardState extends State<_MovieCard> {
 
   @override
   Widget build(BuildContext context) {
+    final lowRam = DevicePerformanceService.instance.lowRam;
     return AnimatedScale(
-      scale: _focused ? 1.035 : 1,
-      duration: const Duration(milliseconds: 120),
+      scale: _focused ? (lowRam ? 1.018 : 1.035) : 1,
+      duration: Duration(milliseconds: lowRam ? 70 : 120),
       curve: Curves.easeOut,
       child: Material(
         color: const Color(0xFF0B151F),

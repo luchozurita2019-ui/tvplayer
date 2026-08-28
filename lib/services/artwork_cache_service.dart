@@ -6,6 +6,8 @@ import 'dart:typed_data';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+import 'device_performance_service.dart';
+
 /// Caché de artwork de TV FULL PRO.
 ///
 /// Sólo descarga imágenes retenidas por widgets visibles. El disco conserva un
@@ -15,10 +17,16 @@ class ArtworkCacheService {
   ArtworkCacheService._();
   static final ArtworkCacheService instance = ArtworkCacheService._();
 
-  static const int _maxConcurrent = 3;
   static const int _maxArtworkBytes = 3 * 1024 * 1024;
-  static const int _maxCacheBytes = 64 * 1024 * 1024;
-  static const int _trimToBytes = 48 * 1024 * 1024;
+
+  int get _maxConcurrent =>
+      DevicePerformanceService.instance.lowRam ? 2 : 3;
+  int get _maxCacheBytes => DevicePerformanceService.instance.lowRam
+      ? 40 * 1024 * 1024
+      : 64 * 1024 * 1024;
+  int get _trimToBytes => DevicePerformanceService.instance.lowRam
+      ? 30 * 1024 * 1024
+      : 48 * 1024 * 1024;
   static const Duration _connectTimeout = Duration(seconds: 7);
   static const Duration _chunkTimeout = Duration(seconds: 6);
   static const String _userAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -42,6 +50,7 @@ class ArtworkCacheService {
   bool get pausedForPlayback => _pausedForPlayback;
 
   Future<void> switchProvider(String providerId) async {
+    await DevicePerformanceService.instance.init();
     _pausedForPlayback = false;
     _client ??= http.Client();
     await _ensureDirectory();
@@ -105,7 +114,6 @@ class ArtworkCacheService {
     if (url == null) return null;
     final known = _known[url];
     if (known != null && await known.exists()) {
-      unawaited(known.setLastModified(DateTime.now()).catchError((_) {}));
       return known;
     }
 
@@ -113,7 +121,6 @@ class ArtworkCacheService {
     final file = File('${directory.path}/${_fileName(url)}.img');
     if (await file.exists()) {
       _known[url] = file;
-      unawaited(file.setLastModified(DateTime.now()).catchError((_) {}));
       return file;
     }
     if (!allowNetwork || _pausedForPlayback) return null;

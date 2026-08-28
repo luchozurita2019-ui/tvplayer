@@ -9,6 +9,8 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/catalog_index.dart';
+import '../services/device_performance_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/remote_access_guard.dart';
 import '../services/section_catalog_service.dart';
@@ -39,6 +41,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   String _status = 'Cargando TV en vivo…';
   String _query = '';
   bool _searchOpen = false;
+  Timer? _searchDebounce;
+  CatalogIndex<Channel>? _catalogIndex;
+  _LiveData? _indexedData;
 
   @override
   void initState() {
@@ -52,6 +57,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   @override
   void dispose() {
     _parental.removeListener(_onParentalChanged);
+    _searchDebounce?.cancel();
     _searchController.dispose();
     _searchFocus.dispose();
     _catalogScrollController.dispose();
@@ -67,6 +73,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         _parental.isProtectedGroup(_category)) {
       _category = null;
     }
+    _catalogIndex = null;
+    _indexedData = null;
     setState(() {});
   }
 
@@ -80,12 +88,35 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   void _closeSearch() {
     if (!_searchOpen) return;
+    _searchDebounce?.cancel();
     _searchFocus.unfocus();
     _searchController.clear();
     setState(() {
       _query = '';
       _searchOpen = false;
     });
+  }
+
+  void _scheduleSearch(String value) {
+    _searchDebounce?.cancel();
+    _searchDebounce = Timer(const Duration(milliseconds: 120), () {
+      if (mounted && value != _query) setState(() => _query = value);
+    });
+  }
+
+  CatalogIndex<Channel> _catalogIndexFor(_LiveData data) {
+    final cached = _catalogIndex;
+    if (cached != null && identical(_indexedData, data)) return cached;
+    final built = CatalogIndex<Channel>.build(
+      items: data.channels,
+      categoryOrder: data.categories,
+      nameOf: (item) => item.name,
+      categoryOf: (item) => item.group,
+      include: (item) => _parental.canShowChannel(item),
+    );
+    _indexedData = data;
+    _catalogIndex = built;
+    return built;
   }
 
   Future<_LiveData> _loadInitial() async {
@@ -240,7 +271,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                     border: InputBorder.none,
                     prefixIcon: Icon(Icons.search_rounded),
                   ),
-                  onChanged: (value) => setState(() => _query = value),
+                  onChanged: _scheduleSearch,
                 )
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -296,27 +327,11 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   }
 
   Widget _buildCatalog(_LiveData data) {
-    final categories = _parental.visibleGroups(data.categories);
-    final allowed =
-        data.channels.where(_parental.canShowChannel).toList(growable: false);
-    final normalizedQuery = _query.trim().toLowerCase();
-    final List<Channel> visible;
-    if (_searchOpen) {
-      visible = normalizedQuery.isEmpty
-          ? allowed
-          : allowed.where((item) {
-              final name = item.name.toLowerCase();
-              final group = (item.group ?? '').toLowerCase();
-              return name.contains(normalizedQuery) ||
-                  group.contains(normalizedQuery);
-            }).toList(growable: false);
-    } else {
-      visible = _category == null
-          ? allowed
-          : allowed
-              .where((item) => item.group == _category)
-              .toList(growable: false);
-    }
+    final index = _catalogIndexFor(data);
+    final categories = index.categories;
+    final visible = _searchOpen
+        ? index.search(_query)
+        : index.forCategory(_category);
 
     return Row(
       children: [
@@ -374,7 +389,10 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                             ? _searchScrollController
                             : _catalogScrollController,
                         padding: const EdgeInsets.fromLTRB(14, 0, 20, 20),
-                        scrollCacheExtent: const ScrollCacheExtent.pixels(80),
+                        scrollCacheExtent:
+                            DevicePerformanceService.instance.lowRam
+                                ? const ScrollCacheExtent.pixels(36)
+                                : const ScrollCacheExtent.pixels(80),
                         itemCount: visible.length,
                         itemBuilder: (context, index) {
                           final channel = visible[index];

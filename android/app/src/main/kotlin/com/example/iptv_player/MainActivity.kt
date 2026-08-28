@@ -1,5 +1,7 @@
 package com.example.iptv_player
 
+import android.app.ActivityManager
+import android.content.Context
 import android.net.Uri
 import android.provider.Settings
 import android.view.Surface
@@ -73,15 +75,24 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
 
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, DEVICE_CHANNEL)
             .setMethodCallHandler { call, result ->
-                if (call.method == "getAndroidId") {
-                    result.success(
+                when (call.method) {
+                    "getAndroidId" -> result.success(
                         Settings.Secure.getString(
                             contentResolver,
                             Settings.Secure.ANDROID_ID,
                         )
                     )
-                } else {
-                    result.notImplemented()
+                    "getDeviceProfile" -> {
+                        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+                        result.success(
+                            mapOf(
+                                "lowRam" to manager.isLowRamDevice,
+                                "memoryClassMb" to manager.memoryClass,
+                                "largeMemoryClassMb" to manager.largeMemoryClass,
+                            )
+                        )
+                    }
+                    else -> result.notImplemented()
                 }
             }
 
