@@ -64,7 +64,7 @@ class CatalogIndex<T> {
 
   List<T> forCategory(String? category) {
     if (category == null) return all;
-    return _byCategory[category] ?? const <T>[];
+    return _byCategory[category] ?? List<T>.empty(growable: false);
   }
 
   List<T> search(String rawQuery) {
