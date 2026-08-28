@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../providers/iptv_provider.dart';
+import '../services/app_update_service.dart';
 import '../services/remote_access_guard.dart';
 import 'source_content_screen.dart';
 
@@ -25,6 +26,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<IptvProvider>();
       unawaited(provider.init());
+      unawaited(AppUpdateService.instance.checkOnce());
       _syncTimer = Timer.periodic(const Duration(seconds: 3), (_) {
         if (!mounted) return;
         final current = context.read<IptvProvider>();

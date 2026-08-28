@@ -9,6 +9,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/parental_control_service.dart';
 import '../services/remote_access_guard.dart';
 import '../services/section_catalog_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
@@ -29,6 +30,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   static const Duration _cacheFreshFor = Duration(minutes: 3);
 
   late Future<_LiveData> _future;
+  final ParentalControlService _parental = ParentalControlService.instance;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode(debugLabel: 'live-search');
   final ScrollController _catalogScrollController = ScrollController();
@@ -41,18 +43,31 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
+    unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
     _future = _loadInitial();
   }
 
   @override
   void dispose() {
+    _parental.removeListener(_onParentalChanged);
     _searchController.dispose();
     _searchFocus.dispose();
     _catalogScrollController.dispose();
     _searchScrollController.dispose();
     unawaited(ArtworkCacheService.instance.clearBrowsingSession());
     super.dispose();
+  }
+
+  void _onParentalChanged() {
+    if (!mounted) return;
+    if (_parental.isLocked &&
+        _category != null &&
+        _parental.isProtectedGroup(_category)) {
+      _category = null;
+    }
+    setState(() {});
   }
 
   void _openSearch() {
@@ -281,13 +296,16 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   }
 
   Widget _buildCatalog(_LiveData data) {
-    final categories = data.categories;
+    final categories = _parental.visibleGroups(data.categories);
+    final allowed = data.channels
+        .where(_parental.canShowChannel)
+        .toList(growable: false);
     final normalizedQuery = _query.trim().toLowerCase();
     final List<Channel> visible;
     if (_searchOpen) {
       visible = normalizedQuery.isEmpty
-          ? data.channels
-          : data.channels.where((item) {
+          ? allowed
+          : allowed.where((item) {
               final name = item.name.toLowerCase();
               final group = (item.group ?? '').toLowerCase();
               return name.contains(normalizedQuery) ||
@@ -295,8 +313,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
             }).toList(growable: false);
     } else {
       visible = _category == null
-          ? data.channels
-          : data.channels
+          ? allowed
+          : allowed
               .where((item) => item.group == _category)
               .toList(growable: false);
     }

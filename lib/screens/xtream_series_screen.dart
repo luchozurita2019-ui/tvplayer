@@ -9,6 +9,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/parental_control_service.dart';
 import '../services/section_catalog_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_series_service.dart';
@@ -29,6 +30,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   static const Duration _cacheFreshFor = Duration(minutes: 15);
 
   late Future<_SeriesData> _future;
+  final ParentalControlService _parental = ParentalControlService.instance;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode(debugLabel: 'series-search');
   final ScrollController _catalogScrollController = ScrollController();
@@ -40,18 +42,31 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
+    unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
     _future = _loadInitial();
   }
 
   @override
   void dispose() {
+    _parental.removeListener(_onParentalChanged);
     _searchController.dispose();
     _searchFocus.dispose();
     _catalogScrollController.dispose();
     _searchScrollController.dispose();
     unawaited(ArtworkCacheService.instance.clearBrowsingSession());
     super.dispose();
+  }
+
+  void _onParentalChanged() {
+    if (!mounted) return;
+    if (_parental.isLocked &&
+        _category != null &&
+        _parental.isProtectedGroup(_category)) {
+      _category = null;
+    }
+    setState(() {});
   }
 
   void _openSearch() {
@@ -218,13 +233,21 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   }
 
   Widget _catalog(_SeriesData data) {
-    final categories = data.categories;
+    final categories = _parental.visibleGroups(data.categories);
+    final allowed = data.items
+        .where(
+          (item) => _parental.canShowItem(
+            name: item.name,
+            group: item.category,
+          ),
+        )
+        .toList(growable: false);
     final normalizedQuery = _query.trim().toLowerCase();
     final List<_SeriesItem> visible;
     if (_searchOpen) {
       visible = normalizedQuery.isEmpty
-          ? data.items
-          : data.items.where((item) {
+          ? allowed
+          : allowed.where((item) {
               final name = item.name.toLowerCase();
               final category = (item.category ?? '').toLowerCase();
               return name.contains(normalizedQuery) ||
@@ -232,8 +255,8 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
             }).toList(growable: false);
     } else {
       visible = _category == null
-          ? data.items
-          : data.items
+          ? allowed
+          : allowed
               .where((item) => item.category == _category)
               .toList(growable: false);
     }
@@ -289,20 +312,24 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                       )
                     : LayoutBuilder(
                         builder: (context, constraints) {
-                          final columns = constraints.maxWidth >= 1000 ? 4 : 3;
+                          final columns = constraints.maxWidth >= 850
+                              ? 5
+                              : constraints.maxWidth >= 620
+                                  ? 4
+                                  : 3;
                           return GridView.builder(
                             controller: _searchOpen
                                 ? _searchScrollController
                                 : _catalogScrollController,
-                            padding: const EdgeInsets.fromLTRB(18, 0, 22, 24),
+                            padding: const EdgeInsets.fromLTRB(20, 4, 24, 30),
                             scrollCacheExtent:
-                                const ScrollCacheExtent.pixels(90),
+                                const ScrollCacheExtent.pixels(120),
                             gridDelegate:
                                 SliverGridDelegateWithFixedCrossAxisCount(
                               crossAxisCount: columns,
-                              crossAxisSpacing: 10,
-                              mainAxisSpacing: 10,
-                              childAspectRatio: 2.65,
+                              crossAxisSpacing: 18,
+                              mainAxisSpacing: 20,
+                              childAspectRatio: 0.62,
                             ),
                             itemCount: visible.length,
                             itemBuilder: (context, index) => _SeriesCard(
@@ -641,6 +668,7 @@ class _SeriesCard extends StatefulWidget {
   final _SeriesItem item;
   final bool autofocus;
   final VoidCallback onTap;
+
   const _SeriesCard({
     required this.item,
     required this.onTap,
@@ -653,75 +681,70 @@ class _SeriesCard extends StatefulWidget {
 
 class _SeriesCardState extends State<_SeriesCard> {
   bool _focused = false;
+
   @override
-  Widget build(BuildContext context) => Material(
-        color: _focused ? const Color(0xFF10283B) : const Color(0xFF0B151F),
-        borderRadius: BorderRadius.circular(11),
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _focused ? 1.035 : 1,
+      duration: const Duration(milliseconds: 120),
+      child: Material(
+        color: const Color(0xFF0B151F),
+        borderRadius: BorderRadius.circular(13),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(11),
           onFocusChange: (value) => setState(() => _focused = value),
           onTap: widget.onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Row(
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(
+                color: _focused ? const Color(0xFF58B9FF) : Colors.white10,
+                width: _focused ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  width: 58,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(7),
-                    child: CachedArtworkImage(
-                      url: widget.item.cover,
-                      fit: BoxFit.cover,
-                      cacheWidth: 116,
-                      cacheHeight: 174,
-                      prefetchExtent: 0,
-                      fallback: const ColoredBox(
-                        color: Color(0xFF111E29),
+                Expanded(
+                  child: CachedArtworkImage(
+                    url: widget.item.cover,
+                    fit: BoxFit.cover,
+                    cacheWidth: 320,
+                    cacheHeight: 480,
+                    prefetchExtent: 0,
+                    fallback: const ColoredBox(
+                      color: Color(0xFF111E29),
+                      child: Center(
                         child: Icon(
                           Icons.video_library_outlined,
+                          size: 42,
                           color: Colors.white30,
-                          size: 23,
                         ),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.item.name,
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w800,
-                        ),
-                      ),
-                      if ((widget.item.category ?? '').isNotEmpty) ...[
-                        const SizedBox(height: 5),
-                        Text(
-                          widget.item.category!,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white38,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
-                    ],
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                  child: Text(
+                    widget.item.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 14,
+                      height: 1.15,
+                      fontWeight: _focused ? FontWeight.w900 : FontWeight.w750,
+                    ),
                   ),
                 ),
               ],
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _SeriesData {

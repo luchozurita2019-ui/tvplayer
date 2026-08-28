@@ -9,6 +9,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/parental_control_service.dart';
 import '../services/section_catalog_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_service.dart';
@@ -29,6 +30,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   static const Duration _cacheFreshFor = Duration(minutes: 15);
 
   late Future<_MovieData> _future;
+  final ParentalControlService _parental = ParentalControlService.instance;
   final TextEditingController _searchController = TextEditingController();
   final FocusNode _searchFocus = FocusNode(debugLabel: 'movie-search');
   final ScrollController _catalogScrollController = ScrollController();
@@ -40,18 +42,31 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   @override
   void initState() {
     super.initState();
+    _parental.addListener(_onParentalChanged);
+    unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
     _future = _loadInitial();
   }
 
   @override
   void dispose() {
+    _parental.removeListener(_onParentalChanged);
     _searchController.dispose();
     _searchFocus.dispose();
     _catalogScrollController.dispose();
     _searchScrollController.dispose();
     unawaited(ArtworkCacheService.instance.clearBrowsingSession());
     super.dispose();
+  }
+
+  void _onParentalChanged() {
+    if (!mounted) return;
+    if (_parental.isLocked &&
+        _category != null &&
+        _parental.isProtectedGroup(_category)) {
+      _category = null;
+    }
+    setState(() {});
   }
 
   void _openSearch() {
@@ -218,13 +233,21 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   }
 
   Widget _catalog(_MovieData data) {
-    final categories = data.categories;
+    final categories = _parental.visibleGroups(data.categories);
+    final allowed = data.items
+        .where(
+          (item) => _parental.canShowItem(
+            name: item.name,
+            group: item.category,
+          ),
+        )
+        .toList(growable: false);
     final normalizedQuery = _query.trim().toLowerCase();
     final List<_MovieItem> visible;
     if (_searchOpen) {
       visible = normalizedQuery.isEmpty
-          ? data.items
-          : data.items.where((item) {
+          ? allowed
+          : allowed.where((item) {
               final name = item.name.toLowerCase();
               final category = (item.category ?? '').toLowerCase();
               return name.contains(normalizedQuery) ||
@@ -232,8 +255,8 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
             }).toList(growable: false);
     } else {
       visible = _category == null
-          ? data.items
-          : data.items
+          ? allowed
+          : allowed
               .where((item) => item.category == _category)
               .toList(growable: false);
     }

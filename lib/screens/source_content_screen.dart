@@ -5,19 +5,53 @@ import 'package:provider/provider.dart';
 
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
+import '../services/app_update_service.dart';
+import '../services/parental_control_service.dart';
+import '../widgets/parental_lock_button.dart';
+import '../widgets/parental_unlock_dialog.dart';
+import 'parental_control_screen.dart';
 import 'xtream_live_screen.dart';
 import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
 
-class SourceContentScreen extends StatelessWidget {
+class SourceContentScreen extends StatefulWidget {
   final Playlist playlist;
 
   const SourceContentScreen({super.key, required this.playlist});
 
   @override
+  State<SourceContentScreen> createState() => _SourceContentScreenState();
+}
+
+class _SourceContentScreenState extends State<SourceContentScreen> {
+  final ParentalControlService _parental = ParentalControlService.instance;
+  final AppUpdateService _updates = AppUpdateService.instance;
+
+  @override
+  void initState() {
+    super.initState();
+    _parental.addListener(_refresh);
+    _updates.addListener(_refresh);
+    unawaited(_parental.init());
+    unawaited(_updates.checkOnce());
+  }
+
+  @override
+  void dispose() {
+    _parental.removeListener(_refresh);
+    _updates.removeListener(_refresh);
+    super.dispose();
+  }
+
+  void _refresh() {
+    if (mounted) setState(() {});
+  }
+
+  @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
-    final active = provider.selectedPlaylist ?? playlist;
+    final active = provider.selectedPlaylist ?? widget.playlist;
+    final update = _updates.availableUpdate;
 
     return Scaffold(
       backgroundColor: const Color(0xFF05090F),
@@ -39,6 +73,12 @@ class SourceContentScreen extends StatelessWidget {
                       ),
                     ),
                   ),
+                  ParentalLockButton(
+                    unlocked: !_parental.enabled || _parental.isUnlocked,
+                    hiddenCategoryCount: 0,
+                    onPressed: () => unawaited(_handleParentalLock()),
+                  ),
+                  const SizedBox(width: 8),
                   if (provider.hasMultiplePlaylists)
                     OutlinedButton.icon(
                       onPressed: () => unawaited(_choosePlaylist(context)),
@@ -58,6 +98,13 @@ class SourceContentScreen extends StatelessWidget {
                   fontWeight: FontWeight.w600,
                 ),
               ),
+              if (update != null) ...[
+                const SizedBox(height: 14),
+                _UpdateBanner(
+                  versionName: update.versionName,
+                  onUpdate: () => unawaited(_openUpdate()),
+                ),
+              ],
               const Spacer(flex: 2),
               const Text(
                 '¿Qué querés ver?',
@@ -118,6 +165,45 @@ class SourceContentScreen extends StatelessWidget {
         ),
       ),
     );
+  }
+
+  Future<void> _handleParentalLock() async {
+    await _parental.init();
+    if (!mounted) return;
+
+    if (!_parental.pinConfigured || !_parental.enabled) {
+      await Navigator.of(context).push(
+        MaterialPageRoute(builder: (_) => const ParentalControlScreen()),
+      );
+      return;
+    }
+
+    if (_parental.isUnlocked) {
+      _parental.lockNow();
+      return;
+    }
+
+    await requestParentalUnlock(
+      context,
+      title: 'Desbloquear contenido para adultos',
+    );
+  }
+
+  Future<void> _openUpdate() async {
+    final opened = await _updates.openUpdate();
+    if (!mounted || opened) return;
+    final code = _updates.availableUpdate?.downloaderCode ?? '';
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            code.isEmpty
+                ? 'No se pudo abrir el enlace de actualización.'
+                : 'No se pudo abrir Downloader. Código: $code',
+          ),
+        ),
+      );
   }
 
   Future<void> _choosePlaylist(BuildContext context) async {
@@ -183,6 +269,68 @@ class SourceContentScreen extends StatelessWidget {
       ),
     );
     if (chosen != null) await provider.selectPlaylist(chosen);
+  }
+}
+
+
+class _UpdateBanner extends StatelessWidget {
+  final String versionName;
+  final VoidCallback onUpdate;
+
+  const _UpdateBanner({required this.versionName, required this.onUpdate});
+
+  @override
+  Widget build(BuildContext context) {
+    const red = Color(0xFFFF626B);
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+      decoration: BoxDecoration(
+        color: red.withValues(alpha: .075),
+        border: Border.all(color: red.withValues(alpha: .38)),
+        borderRadius: BorderRadius.circular(13),
+      ),
+      child: Row(
+        children: [
+          const Icon(Icons.system_update_alt_rounded, color: red, size: 22),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  'ACTUALIZACIÓN DISPONIBLE',
+                  style: TextStyle(
+                    color: red,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: .45,
+                  ),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  'Mejor rendimiento · versión $versionName',
+                  style: const TextStyle(color: Colors.white60, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          OutlinedButton(
+            onPressed: onUpdate,
+            style: OutlinedButton.styleFrom(
+              foregroundColor: red,
+              side: const BorderSide(color: red),
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+            ),
+            child: const Text(
+              'ACTUALIZAR',
+              style: TextStyle(fontWeight: FontWeight.w900),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

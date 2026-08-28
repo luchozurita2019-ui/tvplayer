@@ -5,11 +5,13 @@ import 'package:provider/provider.dart';
 
 import 'providers/iptv_provider.dart';
 import 'screens/home_screen.dart';
+import 'services/parental_control_service.dart';
 import 'services/remote_access_guard.dart';
 
-void main() {
+Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   MediaKit.ensureInitialized();
+  await ParentalControlService.instance.init();
   runApp(const TvFullProApp());
 }
 
