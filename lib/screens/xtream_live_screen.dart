@@ -73,16 +73,6 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     });
   }
 
-  Future<bool> _handleBack() async {
-    if (!_searchOpen) return true;
-    if (_searchFocus.hasFocus) {
-      _searchFocus.unfocus();
-      return false;
-    }
-    _closeSearch();
-    return false;
-  }
-
   Future<_LiveData> _loadInitial() async {
     if (widget.playlist.sourceType == PlaylistSourceType.xtream) {
       final service = XtreamLiveFastService.instance;
@@ -210,8 +200,16 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       return _BlockedCatalog(message: blocked);
     }
 
-    return WillPopScope(
-      onWillPop: _handleBack,
+    return PopScope<void>(
+      canPop: !_searchOpen,
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop || !_searchOpen) return;
+        if (_searchFocus.hasFocus) {
+          _searchFocus.unfocus();
+          return;
+        }
+        _closeSearch();
+      },
       child: Scaffold(
         backgroundColor: const Color(0xFF05090F),
         appBar: AppBar(
