@@ -29,8 +29,14 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   static const Duration _cacheFreshFor = Duration(minutes: 3);
 
   late Future<_LiveData> _future;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'live-search');
+  final ScrollController _catalogScrollController = ScrollController();
+  final ScrollController _searchScrollController = ScrollController();
   String? _category;
   String _status = 'Cargando TV en vivo…';
+  String _query = '';
+  bool _searchOpen = false;
 
   @override
   void initState() {
@@ -41,8 +47,40 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    _catalogScrollController.dispose();
+    _searchScrollController.dispose();
     unawaited(ArtworkCacheService.instance.clearBrowsingSession());
     super.dispose();
+  }
+
+  void _openSearch() {
+    if (_searchOpen) return;
+    setState(() => _searchOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    if (!_searchOpen) return;
+    _searchFocus.unfocus();
+    _searchController.clear();
+    setState(() {
+      _query = '';
+      _searchOpen = false;
+    });
+  }
+
+  Future<bool> _handleBack() async {
+    if (!_searchOpen) return true;
+    if (_searchFocus.hasFocus) {
+      _searchFocus.unfocus();
+      return false;
+    }
+    _closeSearch();
+    return false;
   }
 
   Future<_LiveData> _loadInitial() async {
@@ -172,56 +210,98 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       return _BlockedCatalog(message: blocked);
     }
 
-    return Scaffold(
-      backgroundColor: const Color(0xFF05090F),
-      appBar: AppBar(
-        titleSpacing: 24,
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'TV EN VIVO',
-              style: TextStyle(fontWeight: FontWeight.w900),
+    return WillPopScope(
+      onWillPop: _handleBack,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF05090F),
+        appBar: AppBar(
+          titleSpacing: 24,
+          title: _searchOpen
+              ? TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocus,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar en todos los canales…',
+                    border: InputBorder.none,
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                  onChanged: (value) => setState(() => _query = value),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'TV EN VIVO',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      widget.playlist.name,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+          actions: [
+            IconButton(
+              tooltip: _searchOpen ? 'Cerrar búsqueda' : 'Buscar canales',
+              onPressed: _searchOpen ? _closeSearch : _openSearch,
+              icon: Icon(
+                _searchOpen ? Icons.close_rounded : Icons.search_rounded,
+              ),
             ),
-            Text(
-              widget.playlist.name,
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
-            ),
+            const SizedBox(width: 10),
           ],
         ),
-      ),
-      body: FutureBuilder<_LiveData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return _Loading(message: _status);
-          }
-          if (snapshot.hasError) {
-            return _ErrorView(
-              message: 'No se pudo cargar la TV en vivo.',
-              onRetry: () => setState(() => _future = _loadInitial()),
-            );
-          }
-          final data = snapshot.data!;
-          if (data.channels.isEmpty) {
-            return _ErrorView(
-              message: 'Esta lista no contiene canales de TV en vivo.',
-              onRetry: () => setState(() => _future = _loadInitial()),
-            );
-          }
-          return _buildCatalog(data);
-        },
+        body: FutureBuilder<_LiveData>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return _Loading(message: _status);
+            }
+            if (snapshot.hasError) {
+              return _ErrorView(
+                message: 'No se pudo cargar la TV en vivo.',
+                onRetry: () => setState(() => _future = _loadInitial()),
+              );
+            }
+            final data = snapshot.data!;
+            if (data.channels.isEmpty) {
+              return _ErrorView(
+                message: 'Esta lista no contiene canales de TV en vivo.',
+                onRetry: () => setState(() => _future = _loadInitial()),
+              );
+            }
+            return _buildCatalog(data);
+          },
+        ),
       ),
     );
   }
 
   Widget _buildCatalog(_LiveData data) {
     final categories = data.categories;
-    final visible = _category == null
-        ? data.channels
-        : data.channels
-            .where((item) => item.group == _category)
-            .toList(growable: false);
+    final normalizedQuery = _query.trim().toLowerCase();
+    final List<Channel> visible;
+    if (_searchOpen) {
+      visible = normalizedQuery.isEmpty
+          ? data.channels
+          : data.channels.where((item) {
+              final name = item.name.toLowerCase();
+              final group = (item.group ?? '').toLowerCase();
+              return name.contains(normalizedQuery) ||
+                  group.contains(normalizedQuery);
+            }).toList(growable: false);
+    } else {
+      visible = _category == null
+          ? data.channels
+          : data.channels
+              .where((item) => item.group == _category)
+              .toList(growable: false);
+    }
 
     return Row(
       children: [
@@ -238,8 +318,11 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                 return _CategoryRow(
                   label: category ?? 'Todos',
                   selected: selected,
-                  autofocus: index == 0,
-                  onTap: () => setState(() => _category = category),
+                  autofocus: !_searchOpen && index == 0,
+                  onTap: () {
+                    if (_searchOpen) _closeSearch();
+                    setState(() => _category = category);
+                  },
                 );
               },
             ),
@@ -253,7 +336,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                 child: Text(
-                  '${_category ?? 'Todos'}  ·  ${visible.length} canales',
+                  _searchOpen
+                      ? 'Búsqueda global  ·  ${visible.length} canales'
+                      : '${_category ?? 'Todos'}  ·  ${visible.length} canales',
                   style: const TextStyle(
                     color: Colors.white60,
                     fontSize: 13,
@@ -262,19 +347,30 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                 ),
               ),
               Expanded(
-                child: ListView.builder(
-                  padding: const EdgeInsets.fromLTRB(14, 0, 20, 20),
-                  scrollCacheExtent: const ScrollCacheExtent.pixels(80),
-                  itemCount: visible.length,
-                  itemBuilder: (context, index) {
-                    final channel = visible[index];
-                    return _ChannelRow(
-                      channel: channel,
-                      autofocus: index == 0,
-                      onTap: () => _openPlayer(visible, index),
-                    );
-                  },
-                ),
+                child: visible.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No se encontraron canales.',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      )
+                    : ListView.builder(
+                        controller: _searchOpen
+                            ? _searchScrollController
+                            : _catalogScrollController,
+                        padding: const EdgeInsets.fromLTRB(14, 0, 20, 20),
+                        scrollCacheExtent:
+                            const ScrollCacheExtent.pixels(80),
+                        itemCount: visible.length,
+                        itemBuilder: (context, index) {
+                          final channel = visible[index];
+                          return _ChannelRow(
+                            channel: channel,
+                            autofocus: !_searchOpen && index == 0,
+                            onTap: () => _openPlayer(visible, index),
+                          );
+                        },
+                      ),
               ),
             ],
           ),
