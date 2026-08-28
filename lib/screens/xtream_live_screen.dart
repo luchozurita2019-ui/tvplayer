@@ -297,9 +297,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
 
   Widget _buildCatalog(_LiveData data) {
     final categories = _parental.visibleGroups(data.categories);
-    final allowed = data.channels
-        .where(_parental.canShowChannel)
-        .toList(growable: false);
+    final allowed =
+        data.channels.where(_parental.canShowChannel).toList(growable: false);
     final normalizedQuery = _query.trim().toLowerCase();
     final List<Channel> visible;
     if (_searchOpen) {

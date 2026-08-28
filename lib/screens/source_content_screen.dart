@@ -272,7 +272,6 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   }
 }
 
-
 class _UpdateBanner extends StatelessWidget {
   final String versionName;
   final VoidCallback onUpdate;
