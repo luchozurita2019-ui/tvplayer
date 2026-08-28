@@ -29,7 +29,13 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   static const Duration _cacheFreshFor = Duration(minutes: 15);
 
   late Future<_MovieData> _future;
+  final TextEditingController _searchController = TextEditingController();
+  final FocusNode _searchFocus = FocusNode(debugLabel: 'movie-search');
+  final ScrollController _catalogScrollController = ScrollController();
+  final ScrollController _searchScrollController = ScrollController();
   String? _category;
+  String _query = '';
+  bool _searchOpen = false;
 
   @override
   void initState() {
@@ -40,8 +46,40 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   @override
   void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    _catalogScrollController.dispose();
+    _searchScrollController.dispose();
     unawaited(ArtworkCacheService.instance.clearBrowsingSession());
     super.dispose();
+  }
+
+  void _openSearch() {
+    if (_searchOpen) return;
+    setState(() => _searchOpen = true);
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) _searchFocus.requestFocus();
+    });
+  }
+
+  void _closeSearch() {
+    if (!_searchOpen) return;
+    _searchFocus.unfocus();
+    _searchController.clear();
+    setState(() {
+      _query = '';
+      _searchOpen = false;
+    });
+  }
+
+  Future<bool> _handleBack() async {
+    if (!_searchOpen) return true;
+    if (_searchFocus.hasFocus) {
+      _searchFocus.unfocus();
+      return false;
+    }
+    _closeSearch();
+    return false;
   }
 
   Future<_MovieData> _loadInitial() async {
@@ -110,55 +148,98 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: const Color(0xFF05090F),
-      appBar: AppBar(
-        title: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'PELÍCULAS',
-              style: TextStyle(fontWeight: FontWeight.w900),
+    return WillPopScope(
+      onWillPop: _handleBack,
+      child: Scaffold(
+        backgroundColor: const Color(0xFF05090F),
+        appBar: AppBar(
+          title: _searchOpen
+              ? TextField(
+                  controller: _searchController,
+                  focusNode: _searchFocus,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  decoration: const InputDecoration(
+                    hintText: 'Buscar en todas las películas…',
+                    border: InputBorder.none,
+                    prefixIcon: Icon(Icons.search_rounded),
+                  ),
+                  onChanged: (value) => setState(() => _query = value),
+                )
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'PELÍCULAS',
+                      style: TextStyle(fontWeight: FontWeight.w900),
+                    ),
+                    Text(
+                      widget.playlist.name,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ],
+                ),
+          actions: [
+            IconButton(
+              tooltip: _searchOpen ? 'Cerrar búsqueda' : 'Buscar películas',
+              onPressed: _searchOpen ? _closeSearch : _openSearch,
+              icon: Icon(
+                _searchOpen ? Icons.close_rounded : Icons.search_rounded,
+              ),
             ),
-            Text(
-              widget.playlist.name,
-              style: const TextStyle(color: Colors.white54, fontSize: 12),
-            ),
+            const SizedBox(width: 10),
           ],
         ),
-      ),
-      body: FutureBuilder<_MovieData>(
-        future: _future,
-        builder: (context, snapshot) {
-          if (snapshot.connectionState != ConnectionState.done) {
-            return const _CenteredLoading(label: 'Cargando películas…');
-          }
-          if (snapshot.hasError) {
-            return _CenteredError(
-              label: 'No se pudo cargar el catálogo de películas.',
-              onRetry: () => setState(() => _future = _loadInitial()),
-            );
-          }
-          final data = snapshot.data!;
-          if (data.items.isEmpty) {
-            return _CenteredError(
-              label: 'Esta lista no contiene películas disponibles.',
-              onRetry: () => setState(() => _future = _loadInitial()),
-            );
-          }
-          return _catalog(data);
-        },
+        body: FutureBuilder<_MovieData>(
+          future: _future,
+          builder: (context, snapshot) {
+            if (snapshot.connectionState != ConnectionState.done) {
+              return const _CenteredLoading(label: 'Cargando películas…');
+            }
+            if (snapshot.hasError) {
+              return _CenteredError(
+                label: 'No se pudo cargar el catálogo de películas.',
+                onRetry: () => setState(() => _future = _loadInitial()),
+              );
+            }
+            final data = snapshot.data!;
+            if (data.items.isEmpty) {
+              return _CenteredError(
+                label: 'Esta lista no contiene películas disponibles.',
+                onRetry: () => setState(() => _future = _loadInitial()),
+              );
+            }
+            return _catalog(data);
+          },
+        ),
       ),
     );
   }
 
   Widget _catalog(_MovieData data) {
     final categories = data.categories;
-    final visible = _category == null
-        ? data.items
-        : data.items
-            .where((item) => item.category == _category)
-            .toList(growable: false);
+    final normalizedQuery = _query.trim().toLowerCase();
+    final List<_MovieItem> visible;
+    if (_searchOpen) {
+      visible = normalizedQuery.isEmpty
+          ? data.items
+          : data.items.where((item) {
+              final name = item.name.toLowerCase();
+              final category = (item.category ?? '').toLowerCase();
+              return name.contains(normalizedQuery) ||
+                  category.contains(normalizedQuery);
+            }).toList(growable: false);
+    } else {
+      visible = _category == null
+          ? data.items
+          : data.items
+              .where((item) => item.category == _category)
+              .toList(growable: false);
+    }
+
     return Row(
       children: [
         SizedBox(
@@ -174,8 +255,11 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                 return TvCatalogCategoryRow(
                   label: value ?? 'Todas',
                   selected: selected,
-                  autofocus: index == 0,
-                  onTap: () => setState(() => _category = value),
+                  autofocus: !_searchOpen && index == 0,
+                  onTap: () {
+                    if (_searchOpen) _closeSearch();
+                    setState(() => _category = value);
+                  },
                 );
               },
             ),
@@ -189,7 +273,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
               Padding(
                 padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
                 child: Text(
-                  '${_category ?? 'Todas'}  ·  ${visible.length}',
+                  _searchOpen
+                      ? 'Búsqueda global  ·  ${visible.length} películas'
+                      : '${_category ?? 'Todas'}  ·  ${visible.length}',
                   style: const TextStyle(
                     color: Colors.white54,
                     fontWeight: FontWeight.w700,
@@ -197,28 +283,41 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                 ),
               ),
               Expanded(
-                child: LayoutBuilder(
-                  builder: (context, constraints) {
-                    final columns = constraints.maxWidth >= 1000 ? 4 : 3;
-                    return GridView.builder(
-                      padding: const EdgeInsets.fromLTRB(18, 0, 22, 24),
-                      scrollCacheExtent: const ScrollCacheExtent.pixels(90),
-                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                        crossAxisCount: columns,
-                        crossAxisSpacing: 10,
-                        mainAxisSpacing: 10,
-                        childAspectRatio: 2.65,
+                child: visible.isEmpty
+                    ? const Center(
+                        child: Text(
+                          'No se encontraron películas.',
+                          style: TextStyle(color: Colors.white54),
+                        ),
+                      )
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          final columns =
+                              (constraints.maxWidth / 170).floor().clamp(3, 5);
+                          return GridView.builder(
+                            controller: _searchOpen
+                                ? _searchScrollController
+                                : _catalogScrollController,
+                            padding: const EdgeInsets.fromLTRB(20, 4, 24, 30),
+                            scrollCacheExtent:
+                                const ScrollCacheExtent.pixels(120),
+                            gridDelegate:
+                                SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: columns,
+                              crossAxisSpacing: 18,
+                              mainAxisSpacing: 20,
+                              childAspectRatio: 0.62,
+                            ),
+                            itemCount: visible.length,
+                            itemBuilder: (context, index) => _MovieCard(
+                              item: visible[index],
+                              autofocus: !_searchOpen && index == 0,
+                              onTap: () =>
+                                  unawaited(_openMovie(data, visible[index])),
+                            ),
+                          );
+                        },
                       ),
-                      itemCount: visible.length,
-                      itemBuilder: (context, index) => _MovieCard(
-                        item: visible[index],
-                        autofocus: index == 0,
-                        onTap: () =>
-                            unawaited(_openMovie(data, visible[index])),
-                      ),
-                    );
-                  },
-                ),
               ),
             ],
           ),
@@ -476,44 +575,57 @@ class _MovieCard extends StatefulWidget {
 
 class _MovieCardState extends State<_MovieCard> {
   bool _focused = false;
+
   @override
-  Widget build(BuildContext context) => Material(
-        color: _focused ? const Color(0xFF10283B) : const Color(0xFF0B151F),
-        borderRadius: BorderRadius.circular(11),
+  Widget build(BuildContext context) {
+    return AnimatedScale(
+      scale: _focused ? 1.035 : 1,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOut,
+      child: Material(
+        color: const Color(0xFF0B151F),
+        borderRadius: BorderRadius.circular(13),
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(11),
+          borderRadius: BorderRadius.circular(13),
           onFocusChange: (value) => setState(() => _focused = value),
           onTap: widget.onTap,
-          child: Padding(
-            padding: const EdgeInsets.all(8),
-            child: Row(
+          child: Container(
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(13),
+              border: Border.all(
+                color: _focused
+                    ? const Color(0xFF58B9FF)
+                    : Colors.white.withValues(alpha: .07),
+                width: _focused ? 2 : 1,
+              ),
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SizedBox(
-                  width: 58,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(7),
-                    child: CachedArtworkImage(
-                      url: widget.item.cover,
-                      fit: BoxFit.cover,
-                      cacheWidth: 116,
-                      cacheHeight: 174,
-                      prefetchExtent: 0,
-                      fallback: const ColoredBox(
-                        color: Color(0xFF111E29),
+                Expanded(
+                  child: CachedArtworkImage(
+                    url: widget.item.cover,
+                    fit: BoxFit.cover,
+                    cacheWidth: 320,
+                    cacheHeight: 480,
+                    prefetchExtent: 0,
+                    fallback: const ColoredBox(
+                      color: Color(0xFF111E29),
+                      child: Center(
                         child: Icon(
                           Icons.movie_outlined,
                           color: Colors.white30,
-                          size: 24,
+                          size: 42,
                         ),
                       ),
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 11),
                   child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
@@ -522,10 +634,11 @@ class _MovieCardState extends State<_MovieCard> {
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           fontSize: 14,
+                          height: 1.12,
                           fontWeight: FontWeight.w800,
                         ),
                       ),
-                      if ((widget.item.category ?? '').isNotEmpty) ...[
+                      if ((widget.item.category ?? '').trim().isNotEmpty) ...[
                         const SizedBox(height: 5),
                         Text(
                           widget.item.category!,
@@ -533,7 +646,7 @@ class _MovieCardState extends State<_MovieCard> {
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
                             color: Colors.white38,
-                            fontSize: 11,
+                            fontSize: 10.5,
                           ),
                         ),
                       ],
@@ -544,7 +657,9 @@ class _MovieCardState extends State<_MovieCard> {
             ),
           ),
         ),
-      );
+      ),
+    );
+  }
 }
 
 class _MovieData {
