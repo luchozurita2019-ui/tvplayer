@@ -1,0 +1,50 @@
+name: Apply TV FULL PRO +14 Refinement
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/scripts/apply_tv_full_refinement_v14.py'
+      - '.github/workflows/apply-tv-full-refinement-v14.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Apply UX and catalog refinement
+        run: python3 .github/scripts/apply_tv_full_refinement_v14.py
+
+      - name: Verify prepared source markers
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'version: 1.2.2+14' pubspec.yaml
+          grep -q 'currentVersionCode = 14' lib/services/app_update_service.dart
+          grep -q 'final bool primary' lib/widgets/tv_catalog_category_row.dart
+          grep -q 'void promote' lib/services/artwork_cache_service.dart
+          grep -q 'priority: _focused ? 100 : 20' lib/screens/xtream_live_screen.dart
+          grep -q '_openingMovie' lib/screens/xtream_movies_screen.dart
+          grep -q '_openingSeries' lib/screens/xtream_series_screen.dart
+          grep -q 'prewarmCachedMovies' lib/services/xtream_fast_catalog_service.dart
+          grep -q 'prewarmCachedSeries' lib/services/xtream_fast_catalog_service.dart
+          grep -q 'onFocused: () => _prewarmMovies' lib/screens/source_content_screen.dart
+
+      - name: Commit refined source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add pubspec.yaml lib
+          git commit -m "Refine TV FULL PRO focus logos navigation and catalog startup" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
