@@ -47,8 +47,8 @@ class AppUpdateService extends ChangeNotifier {
   Future<void> checkOnce() async {
     if (_checked || _checking) return;
 
-    // Se marca antes de salir a red: incluso si falla Internet, no repetimos la
-    // petición durante esta apertura de TV FULL PRO.
+    // Una sola consulta por apertura: se marca antes de salir a red y no se
+    // repite aunque falle Internet o el usuario navegue entre catálogos.
     _checked = true;
     _checking = true;
     try {
