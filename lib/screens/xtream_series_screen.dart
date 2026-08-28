@@ -734,7 +734,7 @@ class _SeriesCardState extends State<_SeriesCard> {
                     style: TextStyle(
                       fontSize: 14,
                       height: 1.15,
-                      fontWeight: _focused ? FontWeight.w900 : FontWeight.w750,
+                      fontWeight: _focused ? FontWeight.w900 : FontWeight.w800,
                     ),
                   ),
                 ),
