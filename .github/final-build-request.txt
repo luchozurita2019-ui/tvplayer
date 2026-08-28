@@ -1,4 +1,4 @@
-TV FULL PRO final release build requested after Hot Player-style Xtream LIVE pipeline validation.
-validated_run=32820883028
-version=1.1.8+10
-requested_at=2026-08-25T04:20:00-03:00
+TV FULL PRO final release build requested after LIVE audio, global search and movie poster UI validation.
+validated_run=33144202396
+version=1.1.9+11
+requested_at=2026-08-28T02:20:00-03:00
