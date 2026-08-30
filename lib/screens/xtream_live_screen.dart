@@ -19,6 +19,7 @@ import '../services/xtream_live_fast_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import '../widgets/tv_catalog_category_row.dart';
+import '../widgets/tv_full_premium_ui.dart';
 import 'player_screen.dart';
 
 class XtreamLiveScreen extends StatefulWidget {
@@ -259,8 +260,10 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         _closeSearch();
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF05090F),
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
+          backgroundColor: const Color(0xA3050910),
+          surfaceTintColor: Colors.transparent,
           titleSpacing: 24,
           title: _searchOpen
               ? TextField(
@@ -302,27 +305,30 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
             const SizedBox(width: 10),
           ],
         ),
-        body: FutureBuilder<_LiveData>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return _Loading(message: _status);
-            }
-            if (snapshot.hasError) {
-              return _ErrorView(
-                message: 'No se pudo cargar la TV en vivo.',
-                onRetry: () => setState(() => _future = _loadInitial()),
-              );
-            }
-            final data = snapshot.data!;
-            if (data.channels.isEmpty) {
-              return _ErrorView(
-                message: 'Esta lista no contiene canales de TV en vivo.',
-                onRetry: () => setState(() => _future = _loadInitial()),
-              );
-            }
-            return _buildCatalog(data);
-          },
+        body: TvFullPremiumBackground(
+          compact: true,
+          child: FutureBuilder<_LiveData>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return _Loading(message: _status);
+              }
+              if (snapshot.hasError) {
+                return _ErrorView(
+                  message: 'No se pudo cargar la TV en vivo.',
+                  onRetry: () => setState(() => _future = _loadInitial()),
+                );
+              }
+              final data = snapshot.data!;
+              if (data.channels.isEmpty) {
+                return _ErrorView(
+                  message: 'Esta lista no contiene canales de TV en vivo.',
+                  onRetry: () => setState(() => _future = _loadInitial()),
+                );
+              }
+              return _buildCatalog(data);
+            },
+          ),
         ),
       ),
     );
@@ -338,8 +344,17 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       children: [
         SizedBox(
           width: 220,
-          child: ColoredBox(
-            color: const Color(0xFF08111B),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xD9101928), Color(0xCC07101D)],
+              ),
+              border: Border(
+                right: BorderSide(color: tvFullBlue, width: .35),
+              ),
+            ),
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(10, 12, 10, 16),
               itemCount: categories.length + 1,
@@ -454,80 +469,91 @@ class _ChannelRowState extends State<_ChannelRow> {
 
   @override
   Widget build(BuildContext context) {
+    final lowRam = DevicePerformanceService.instance.lowRam;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Material(
-        color: _focused ? const Color(0xFF252A2F) : const Color(0xFF0A141E),
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(10),
-          side: BorderSide(
-            color: _focused ? const Color(0xFFD7B45A) : Colors.white10,
-            width: _focused ? 2 : 1,
+      padding: const EdgeInsets.symmetric(vertical: 4, horizontal: 1),
+      child: AnimatedScale(
+        scale: _focused ? (lowRam ? 1.012 : 1.025) : 1,
+        duration: Duration(milliseconds: lowRam ? 70 : 120),
+        curve: Curves.easeOutCubic,
+        child: AnimatedContainer(
+          duration: Duration(milliseconds: lowRam ? 70 : 120),
+          decoration: tvFullGlassDecoration(
+            focused: _focused,
+            radius: 12,
+            accent: tvFullCyan,
           ),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(10),
-          onFocusChange: (value) => setState(() => _focused = value),
-          onTap: widget.onTap,
-          child: SizedBox(
-            height: 58,
-            child: Row(
-              children: [
-                const SizedBox(width: 10),
-                SizedBox(
-                  width: 40,
-                  height: 40,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(8),
-                    child: CachedArtworkImage(
-                      url: widget.channel.logoUrl,
-                      fit: BoxFit.contain,
-                      cacheWidth: 80,
-                      cacheHeight: 80,
-                      priority: _focused ? 100 : 20,
-                      prefetchExtent: 0,
-                      fallback: Container(
-                        alignment: Alignment.center,
-                        color: Colors.white.withValues(alpha: .04),
-                        child: Text(
-                          _initials(widget.channel.name),
-                          style: const TextStyle(
-                            fontSize: 12,
-                            fontWeight: FontWeight.w900,
+          child: Material(
+            color: Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              autofocus: widget.autofocus,
+              borderRadius: BorderRadius.circular(12),
+              onFocusChange: (value) => setState(() => _focused = value),
+              onTap: widget.onTap,
+              child: SizedBox(
+                height: 60,
+                child: Row(
+                  children: [
+                    const SizedBox(width: 10),
+                    SizedBox(
+                      width: 42,
+                      height: 42,
+                      child: ClipRRect(
+                        borderRadius: BorderRadius.circular(9),
+                        child: CachedArtworkImage(
+                          url: widget.channel.logoUrl,
+                          fit: BoxFit.contain,
+                          cacheWidth: 84,
+                          cacheHeight: 84,
+                          priority: _focused ? 100 : 20,
+                          prefetchExtent: 0,
+                          fallback: Container(
+                            alignment: Alignment.center,
+                            color: Colors.white.withValues(alpha: .04),
+                            child: Text(
+                              _initials(widget.channel.name),
+                              style: const TextStyle(
+                                fontSize: 12,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
                           ),
                         ),
                       ),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Text(
-                    widget.channel.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 15,
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                if ((widget.channel.group ?? '').trim().isNotEmpty)
-                  Padding(
-                    padding: const EdgeInsets.only(right: 16),
-                    child: Text(
-                      widget.channel.group!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white38,
-                        fontSize: 11,
+                    const SizedBox(width: 13),
+                    Expanded(
+                      child: Text(
+                        widget.channel.name,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: TextStyle(
+                          fontSize: 15,
+                          fontWeight:
+                              _focused ? FontWeight.w900 : FontWeight.w700,
+                        ),
                       ),
                     ),
-                  ),
-              ],
+                    if ((widget.channel.group ?? '').trim().isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(right: 16),
+                        child: Text(
+                          widget.channel.group!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: TextStyle(
+                            color: _focused
+                                ? tvFullCyan.withValues(alpha: .75)
+                                : Colors.white38,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ),
+                  ],
+                ),
+              ),
             ),
           ),
         ),
@@ -611,21 +637,30 @@ class _BlockedCatalog extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF05090F),
-      body: Center(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            const Icon(Icons.lock_outline_rounded, size: 46),
-            const SizedBox(height: 14),
-            Text(message, textAlign: TextAlign.center),
-            const SizedBox(height: 16),
-            FilledButton(
-              autofocus: true,
-              onPressed: () => Navigator.of(context).maybePop(),
-              child: const Text('Volver'),
+      backgroundColor: Colors.transparent,
+      body: TvFullPremiumBackground(
+        compact: true,
+        child: Center(
+          child: Container(
+            constraints: const BoxConstraints(maxWidth: 540),
+            padding: const EdgeInsets.all(32),
+            decoration: tvFullGlassDecoration(radius: 20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Icon(Icons.lock_outline_rounded,
+                    size: 46, color: tvFullCyan),
+                const SizedBox(height: 14),
+                Text(message, textAlign: TextAlign.center),
+                const SizedBox(height: 16),
+                FilledButton(
+                  autofocus: true,
+                  onPressed: () => Navigator.of(context).maybePop(),
+                  child: const Text('Volver'),
+                ),
+              ],
             ),
-          ],
+          ),
         ),
       ),
     );

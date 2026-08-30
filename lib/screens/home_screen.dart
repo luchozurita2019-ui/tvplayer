@@ -7,6 +7,7 @@ import '../providers/iptv_provider.dart';
 import '../services/app_update_service.dart';
 import '../services/remote_access_guard.dart';
 import '../widgets/app_version_badge.dart';
+import '../widgets/tv_full_premium_ui.dart';
 import 'source_content_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -103,28 +104,47 @@ class _StartupView extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFF05090F),
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 620),
-            child: Padding(
-              padding: const EdgeInsets.all(40),
+      backgroundColor: Colors.transparent,
+      body: TvFullPremiumBackground(
+        child: SafeArea(
+          child: Center(
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 650),
+              margin: const EdgeInsets.all(34),
+              padding: const EdgeInsets.fromLTRB(46, 38, 46, 32),
+              decoration: tvFullGlassDecoration(
+                focused: false,
+                radius: 24,
+                accent: blocked ? const Color(0xFFFF6B78) : tvFullCyan,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    blocked
-                        ? Icons.lock_outline_rounded
-                        : Icons.live_tv_rounded,
-                    size: blocked ? 48 : 42,
-                    color: blocked ? Colors.white70 : const Color(0xFF58B9FF),
+                  Container(
+                    width: 76,
+                    height: 76,
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: (blocked ? const Color(0xFFFF6B78) : tvFullBlue)
+                          .withValues(alpha: .12),
+                      border: Border.all(
+                        color: (blocked ? const Color(0xFFFF6B78) : tvFullCyan)
+                            .withValues(alpha: .46),
+                      ),
+                    ),
+                    child: Icon(
+                      blocked
+                          ? Icons.lock_outline_rounded
+                          : Icons.live_tv_rounded,
+                      size: blocked ? 38 : 36,
+                      color: blocked ? const Color(0xFFFF8B94) : tvFullCyan,
+                    ),
                   ),
-                  const SizedBox(height: 14),
+                  const SizedBox(height: 18),
                   const Text(
                     'TV FULL PRO',
                     style: TextStyle(
-                      fontSize: 36,
+                      fontSize: 38,
                       fontWeight: FontWeight.w900,
                       letterSpacing: 1.2,
                     ),
@@ -159,6 +179,7 @@ class _StartupView extends StatelessWidget {
                       deviceCode!,
                       textAlign: TextAlign.center,
                       style: const TextStyle(
+                        color: tvFullCyan,
                         fontSize: 28,
                         fontWeight: FontWeight.w900,
                       ),
@@ -169,7 +190,10 @@ class _StartupView extends StatelessWidget {
                     const SizedBox(
                       width: 34,
                       height: 34,
-                      child: CircularProgressIndicator(strokeWidth: 3),
+                      child: CircularProgressIndicator(
+                        strokeWidth: 3,
+                        color: tvFullCyan,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 20),

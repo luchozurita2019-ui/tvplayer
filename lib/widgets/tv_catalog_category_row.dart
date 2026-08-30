@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'tv_full_premium_ui.dart';
+
 class TvCatalogCategoryRow extends StatefulWidget {
   final String label;
   final bool selected;
@@ -21,48 +23,73 @@ class TvCatalogCategoryRow extends StatefulWidget {
 }
 
 class _TvCatalogCategoryRowState extends State<TvCatalogCategoryRow> {
-  static const Color _gold = Color(0xFFD7B45A);
   bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
     final highlighted = _focused || widget.selected;
-    final borderColor = _focused
-        ? _gold
-        : widget.primary
-            ? const Color(0x66D7B45A)
-            : widget.selected
-                ? const Color(0x88D7B45A)
-                : Colors.transparent;
-
-    final row = Material(
-      color: highlighted ? const Color(0xFF252A2F) : Colors.transparent,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(9),
-        side: BorderSide(
-          color: borderColor,
-          width: _focused ? 2 : 1,
+    final scale = _focused ? 1.035 : 1.0;
+    final row = AnimatedScale(
+      scale: scale,
+      duration: const Duration(milliseconds: 120),
+      curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 120),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(11),
+          gradient: highlighted
+              ? LinearGradient(
+                  colors: [
+                    tvFullBlue.withValues(alpha: _focused ? .20 : .11),
+                    tvFullViolet.withValues(alpha: _focused ? .13 : .07),
+                    const Color(0xB80B1422),
+                  ],
+                )
+              : null,
+          border: Border.all(
+            color: _focused
+                ? tvFullCyan
+                : widget.selected
+                    ? tvFullBlue.withValues(alpha: .58)
+                    : Colors.transparent,
+            width: _focused ? 1.8 : 1,
+          ),
+          boxShadow: _focused
+              ? [
+                  BoxShadow(
+                    color: tvFullCyan.withValues(alpha: .16),
+                    blurRadius: 13,
+                  ),
+                ]
+              : const [],
         ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        autofocus: widget.autofocus,
-        onFocusChange: (value) => setState(() => _focused = value),
-        onTap: widget.onTap,
-        child: SizedBox(
-          height: 44,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                widget.label,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: TextStyle(
-                  color: _focused ? _gold : Colors.white,
-                  fontSize: 14,
-                  fontWeight: highlighted ? FontWeight.w800 : FontWeight.w600,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(11),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            autofocus: widget.autofocus,
+            onFocusChange: (value) => setState(() => _focused = value),
+            onTap: widget.onTap,
+            child: SizedBox(
+              height: 44,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 13),
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: Text(
+                    widget.label,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: _focused
+                          ? Colors.white
+                          : Colors.white.withValues(alpha: .86),
+                      fontSize: 14,
+                      fontWeight:
+                          highlighted ? FontWeight.w800 : FontWeight.w600,
+                    ),
+                  ),
                 ),
               ),
             ),
@@ -79,7 +106,11 @@ class _TvCatalogCategoryRowState extends State<TvCatalogCategoryRow> {
               children: [
                 row,
                 const SizedBox(height: 7),
-                const Divider(height: 1, thickness: 1, color: Colors.white10),
+                Divider(
+                  height: 1,
+                  thickness: 1,
+                  color: tvFullBlue.withValues(alpha: .16),
+                ),
               ],
             )
           : row,

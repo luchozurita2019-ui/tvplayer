@@ -18,6 +18,7 @@ import '../services/xtream_service.dart';
 import '../services/xtream_vod_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import '../widgets/tv_catalog_category_row.dart';
+import '../widgets/tv_full_premium_ui.dart';
 import 'player_screen.dart';
 
 class XtreamMoviesScreen extends StatefulWidget {
@@ -233,8 +234,10 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         _closeSearch();
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF05090F),
+        backgroundColor: Colors.transparent,
         appBar: AppBar(
+          backgroundColor: const Color(0xA3050910),
+          surfaceTintColor: Colors.transparent,
           title: _searchOpen
               ? TextField(
                   controller: _searchController,
@@ -275,27 +278,30 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
             const SizedBox(width: 10),
           ],
         ),
-        body: FutureBuilder<_MovieData>(
-          future: _future,
-          builder: (context, snapshot) {
-            if (snapshot.connectionState != ConnectionState.done) {
-              return const _CenteredLoading(label: 'Cargando películas…');
-            }
-            if (snapshot.hasError) {
-              return _CenteredError(
-                label: 'No se pudo cargar el catálogo de películas.',
-                onRetry: () => setState(() => _future = _loadInitial()),
-              );
-            }
-            final data = snapshot.data!;
-            if (data.items.isEmpty) {
-              return _CenteredError(
-                label: 'Esta lista no contiene películas disponibles.',
-                onRetry: () => setState(() => _future = _loadInitial()),
-              );
-            }
-            return _catalog(data);
-          },
+        body: TvFullPremiumBackground(
+          compact: true,
+          child: FutureBuilder<_MovieData>(
+            future: _future,
+            builder: (context, snapshot) {
+              if (snapshot.connectionState != ConnectionState.done) {
+                return const _CenteredLoading(label: 'Cargando películas…');
+              }
+              if (snapshot.hasError) {
+                return _CenteredError(
+                  label: 'No se pudo cargar el catálogo de películas.',
+                  onRetry: () => setState(() => _future = _loadInitial()),
+                );
+              }
+              final data = snapshot.data!;
+              if (data.items.isEmpty) {
+                return _CenteredError(
+                  label: 'Esta lista no contiene películas disponibles.',
+                  onRetry: () => setState(() => _future = _loadInitial()),
+                );
+              }
+              return _catalog(data);
+            },
+          ),
         ),
       ),
     );
@@ -311,8 +317,17 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
       children: [
         SizedBox(
           width: 250,
-          child: ColoredBox(
-            color: const Color(0xFF08111B),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: const LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [Color(0xD9101928), Color(0xCC07101D)],
+              ),
+              border: Border(
+                right: BorderSide(color: tvFullBlue, width: .35),
+              ),
+            ),
             child: ListView.builder(
               padding: const EdgeInsets.fromLTRB(12, 16, 12, 20),
               itemCount: categories.length + 1,
@@ -516,107 +531,114 @@ class _MovieDetailScreen extends StatelessWidget {
       if ((country ?? '').trim().isNotEmpty) country!.trim(),
     ];
     return Scaffold(
-      backgroundColor: const Color(0xFF05090F),
-      appBar: AppBar(title: const Text('Película')),
-      body: Padding(
-        padding: const EdgeInsets.fromLTRB(44, 28, 44, 34),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-              width: 178,
-              height: 260,
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(14),
-                child: CachedArtworkImage(
-                  url: poster,
-                  fit: BoxFit.cover,
-                  cacheWidth: 356,
-                  cacheHeight: 520,
-                  prefetchExtent: 0,
-                  fallback: Container(
-                    color: const Color(0xFF101B25),
-                    alignment: Alignment.center,
-                    child: const Icon(
-                      Icons.movie_outlined,
-                      size: 48,
-                      color: Colors.white30,
+      backgroundColor: Colors.transparent,
+      appBar: AppBar(
+        backgroundColor: const Color(0xA3050910),
+        surfaceTintColor: Colors.transparent,
+        title: const Text('Película'),
+      ),
+      body: TvFullPremiumBackground(
+        compact: true,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(44, 28, 44, 34),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              SizedBox(
+                width: 178,
+                height: 260,
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(14),
+                  child: CachedArtworkImage(
+                    url: poster,
+                    fit: BoxFit.cover,
+                    cacheWidth: 356,
+                    cacheHeight: 520,
+                    prefetchExtent: 0,
+                    fallback: Container(
+                      color: const Color(0xFF101B25),
+                      alignment: Alignment.center,
+                      child: const Icon(
+                        Icons.movie_outlined,
+                        size: 48,
+                        color: Colors.white30,
+                      ),
                     ),
                   ),
                 ),
               ),
-            ),
-            const SizedBox(width: 32),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 32,
-                      height: 1.08,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  if (metadata.isNotEmpty) ...[
-                    const SizedBox(height: 12),
+              const SizedBox(width: 32),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
                     Text(
-                      metadata.join('  ·  '),
+                      title,
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 15,
-                        fontWeight: FontWeight.w600,
+                        fontSize: 32,
+                        height: 1.08,
+                        fontWeight: FontWeight.w900,
                       ),
                     ),
-                  ],
-                  if (languageDetails.isNotEmpty) ...[
-                    const SizedBox(height: 8),
+                    if (metadata.isNotEmpty) ...[
+                      const SizedBox(height: 12),
+                      Text(
+                        metadata.join('  ·  '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 15,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    if (languageDetails.isNotEmpty) ...[
+                      const SizedBox(height: 8),
+                      Text(
+                        languageDetails.join('  ·  '),
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Color(0x75FFFFFF),
+                          fontSize: 13,
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                    ],
+                    const SizedBox(height: 16),
                     Text(
-                      languageDetails.join('  ·  '),
-                      maxLines: 2,
+                      (plot ?? '').trim().isEmpty
+                          ? 'Sin descripción disponible.'
+                          : plot!.trim(),
+                      maxLines: 4,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
-                        color: Color(0x75FFFFFF),
-                        fontSize: 13,
-                        fontWeight: FontWeight.w600,
+                        color: Colors.white70,
+                        fontSize: 16,
+                        height: 1.45,
+                      ),
+                    ),
+                    const SizedBox(height: 24),
+                    FilledButton.icon(
+                      autofocus: true,
+                      onPressed: () => _play(context),
+                      icon: const Icon(Icons.play_arrow_rounded, size: 26),
+                      label: const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 4),
+                        child: Text(
+                          'REPRODUCIR',
+                          style: TextStyle(fontWeight: FontWeight.w900),
+                        ),
                       ),
                     ),
                   ],
-                  const SizedBox(height: 16),
-                  Text(
-                    (plot ?? '').trim().isEmpty
-                        ? 'Sin descripción disponible.'
-                        : plot!.trim(),
-                    maxLines: 4,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white70,
-                      fontSize: 16,
-                      height: 1.45,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-                  FilledButton.icon(
-                    autofocus: true,
-                    onPressed: () => _play(context),
-                    icon: const Icon(Icons.play_arrow_rounded, size: 26),
-                    label: const Padding(
-                      padding: EdgeInsets.symmetric(vertical: 4),
-                      child: Text(
-                        'REPRODUCIR',
-                        style: TextStyle(fontWeight: FontWeight.w900),
-                      ),
-                    ),
-                  ),
-                ],
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -659,28 +681,25 @@ class _MovieCardState extends State<_MovieCard> {
   Widget build(BuildContext context) {
     final lowRam = DevicePerformanceService.instance.lowRam;
     return AnimatedScale(
-      scale: _focused ? (lowRam ? 1.018 : 1.035) : 1,
-      duration: Duration(milliseconds: lowRam ? 70 : 120),
-      curve: Curves.easeOut,
-      child: Material(
-        color: const Color(0xFF0B151F),
-        borderRadius: BorderRadius.circular(13),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          autofocus: widget.autofocus,
-          borderRadius: BorderRadius.circular(13),
-          onFocusChange: (value) => setState(() => _focused = value),
-          onTap: widget.onTap,
-          child: Container(
-            decoration: BoxDecoration(
-              borderRadius: BorderRadius.circular(13),
-              border: Border.all(
-                color: _focused
-                    ? const Color(0xFFD7B45A)
-                    : Colors.white.withValues(alpha: .07),
-                width: _focused ? 2 : 1,
-              ),
-            ),
+      scale: _focused ? (lowRam ? 1.025 : 1.055) : 1,
+      duration: Duration(milliseconds: lowRam ? 80 : 140),
+      curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: Duration(milliseconds: lowRam ? 80 : 140),
+        decoration: tvFullGlassDecoration(
+          focused: _focused,
+          radius: 15,
+          accent: tvFullViolet,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(15),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            autofocus: widget.autofocus,
+            borderRadius: BorderRadius.circular(15),
+            onFocusChange: (value) => setState(() => _focused = value),
+            onTap: widget.onTap,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
@@ -705,7 +724,7 @@ class _MovieCardState extends State<_MovieCard> {
                   ),
                 ),
                 Padding(
-                  padding: const EdgeInsets.fromLTRB(10, 10, 10, 11),
+                  padding: const EdgeInsets.fromLTRB(11, 10, 11, 12),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
@@ -713,10 +732,11 @@ class _MovieCardState extends State<_MovieCard> {
                         widget.item.name,
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(
+                        style: TextStyle(
                           fontSize: 14,
                           height: 1.12,
-                          fontWeight: FontWeight.w800,
+                          fontWeight:
+                              _focused ? FontWeight.w900 : FontWeight.w800,
                         ),
                       ),
                       if ((widget.item.category ?? '').trim().isNotEmpty) ...[
@@ -725,8 +745,10 @@ class _MovieCardState extends State<_MovieCard> {
                           widget.item.category!,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
-                            color: Colors.white38,
+                          style: TextStyle(
+                            color: _focused
+                                ? tvFullCyan.withValues(alpha: .72)
+                                : Colors.white38,
                             fontSize: 10.5,
                           ),
                         ),
