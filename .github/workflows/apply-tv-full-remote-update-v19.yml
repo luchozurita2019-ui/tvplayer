@@ -1,0 +1,74 @@
+name: Apply TV FULL PRO Remote Update v19
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/apply-remote-update-v19.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply v19 fixes
+        run: python3 .github/scripts/apply_tv_full_remote_update_v19.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format Dart source
+        run: dart format lib
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Compile Android debug validation
+        run: flutter build apk --debug --dart-define=TV_FULL_ANDROID_TV=true --target-platform android-arm,android-arm64
+
+      - name: Verify requested fixes and playback guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'version: 1.2.7+19' pubspec.yaml
+          grep -q "Flecha abajo: lista de canales" lib/screens/android_media3_texture_player_screen.dart
+          grep -q "if (_channelListVisible)" lib/screens/android_media3_texture_player_screen.dart
+          grep -q "Timer.periodic(const Duration(minutes: 5)" lib/screens/source_content_screen.dart
+          grep -q "didChangeAppLifecycleState" lib/screens/source_content_screen.dart
+          grep -q "Clipboard.setData" lib/screens/source_content_screen.dart
+          grep -q "Código para Downloader" lib/screens/source_content_screen.dart
+          grep -q 'LIVE_STARTUP_DEADLINE_MS = 4500L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'LIVE_RECOVERY_DEADLINE_MS = 3000L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'AndroidMedia3TexturePlayerScreen' lib/screens/player_screen.dart
+
+      - name: Commit v19 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib pubspec.yaml pubspec.lock
+          git commit -m "TV FULL PRO 1.2.7+19: fix live error navigation and updater" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
