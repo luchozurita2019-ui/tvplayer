@@ -1,0 +1,2 @@
+TV FULL PRO 1.3.0+22
+Adaptive Live Engine: learn channel stability locally, use learned startup buffer profile, adaptive LIVE offset, bandwidth/rebuffer telemetry, and adaptive retry budget with LOW_RAM limits.
