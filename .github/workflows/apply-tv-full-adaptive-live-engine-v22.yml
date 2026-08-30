@@ -1,0 +1,82 @@
+name: Apply TV FULL PRO Adaptive Live Engine v22
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/apply-adaptive-live-engine-v22.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+          fetch-depth: 0
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply adaptive live engine v22
+        run: python3 .github/scripts/apply_tv_full_adaptive_live_engine_v22.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format Dart source
+        run: dart format lib
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Compile Android debug validation
+        run: flutter build apk --debug --dart-define=TV_FULL_ANDROID_TV=true --target-platform android-arm,android-arm64
+
+      - name: Verify adaptive engine guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'version: 1.3.0+22' pubspec.yaml
+          grep -q 'TvFullAdaptiveLiveProfileStore' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'getLiveAdaptiveLevel' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'onBandwidthEstimate' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'setTargetOffsetMs' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'liveSessionRebuffers >= 6' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'protectionLevel' android/app/src/main/kotlin/com/example/iptv_player/TvFullLiveLoadErrorPolicy.kt
+          grep -q 'channel_' android/app/src/main/kotlin/com/example/iptv_player/TvFullAdaptiveLiveProfileStore.kt
+          grep -q "'bufferForPlayback': 1000" lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'lowRamMax = <int>\[12000, 14000, 16000, 18000\]' lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'LIVE_STARTUP_DEADLINE_MS = 4500L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'LIVE_BUFFER_STALL_MS = 6500L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+
+      - name: Commit adaptive live engine v22
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt \
+                  android/app/src/main/kotlin/com/example/iptv_player/TvFullLiveLoadErrorPolicy.kt \
+                  android/app/src/main/kotlin/com/example/iptv_player/TvFullAdaptiveLiveProfileStore.kt \
+                  lib/screens/android_media3_texture_player_screen.dart \
+                  pubspec.yaml pubspec.lock
+          git commit -m "TV FULL PRO 1.3.0+22: add adaptive per-channel live engine" || true
+          git pull --rebase origin android-tv-full-pro-clean-source
+          git push origin HEAD:android-tv-full-pro-clean-source
