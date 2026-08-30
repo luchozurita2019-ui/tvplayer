@@ -34,7 +34,9 @@ jobs:
           cache: true
 
       - name: Apply premium neon interface
-        run: python .github/scripts/apply_tv_full_premium_ui_v17.py
+        run: |
+          python .github/scripts/apply_tv_full_premium_ui_v17.py
+          python .github/scripts/fix_tv_full_premium_ui_v17.py
 
       - name: Resolve dependencies
         run: flutter pub get
