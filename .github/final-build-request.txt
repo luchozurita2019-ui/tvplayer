@@ -1,6 +1,6 @@
-TV FULL PRO final release build requested after LIVE zapping optimization: persistent player reuse, reduced LIVE startup buffer, 4.5s startup deadline, bounded recovery, controlled Wi-Fi lock, DNS fallback preservation and existing multi-audio/multi-subtitle compatibility retained.
-validated_run=33283797699
-validation_result=flutter analyze clean; Android debug compile success; architecture checks success
-version=1.2.3+15
+TV FULL PRO final release build requested after automatic installed-version identification: visible version/build stamp on main/startup screens and update checker now reads the real installed version instead of hardcoded values. LIVE/VOD playback code remains unchanged from 1.2.3+15.
+validated_run=33285233748
+validation_result=flutter analyze clean; Android debug compile success; version architecture checks success
+version=1.2.4+16
 signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-29T21:45:00-03:00
+requested_at=2026-08-29T22:18:00-03:00
