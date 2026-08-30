@@ -1,6 +1,6 @@
-TV FULL PRO final release build requested after automatic installed-version identification: visible version/build stamp on main/startup screens and update checker now reads the real installed version instead of hardcoded values. LIVE/VOD playback code remains unchanged from 1.2.3+15.
-validated_run=33285233748
-validation_result=flutter analyze clean; Android debug compile success; version architecture checks success
-version=1.2.4+16
+TV FULL PRO final release build requested after premium neon interface across Home, LIVE, Movies and Series: shared cinematic navy/black background, blue/violet accents, remote focus zoom/glow, premium catalog rows/cards, clock/date on Home and version identification preserved. Playback engine and LIVE optimizations remain unchanged.
+validated_run=33290922802
+validation_result=flutter analyze clean; Android debug compile success; premium UI checks success; LIVE/audio/subtitle playback guardrails success
+version=1.2.5+17
 signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-29T22:18:00-03:00
+requested_at=2026-08-30T00:49:00-03:00
