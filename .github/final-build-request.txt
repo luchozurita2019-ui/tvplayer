@@ -1,5 +1,6 @@
-TV FULL PRO final release build requested after gold focus/category refinement, prioritized visible artwork, duplicate navigation guards and bounded in-memory Xtream catalog startup optimization.
-validated_run=33155768272
-validation_result=flutter analyze clean; Android TV debug compile success
-version=1.2.2+14
-requested_at=2026-08-28T05:37:00-03:00
+TV FULL PRO final release build requested after LIVE zapping optimization: persistent player reuse, reduced LIVE startup buffer, 4.5s startup deadline, bounded recovery, controlled Wi-Fi lock, DNS fallback preservation and existing multi-audio/multi-subtitle compatibility retained.
+validated_run=33283797699
+validation_result=flutter analyze clean; Android debug compile success; architecture checks success
+version=1.2.3+15
+signing=persistent TV FULL PRO release keystore (same signature as previous releases)
+requested_at=2026-08-29T21:45:00-03:00
