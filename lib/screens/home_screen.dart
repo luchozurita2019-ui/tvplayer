@@ -6,6 +6,7 @@ import 'package:provider/provider.dart';
 import '../providers/iptv_provider.dart';
 import '../services/app_update_service.dart';
 import '../services/remote_access_guard.dart';
+import '../widgets/app_version_badge.dart';
 import 'source_content_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -171,6 +172,8 @@ class _StartupView extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 3),
                     ),
                   ],
+                  const SizedBox(height: 20),
+                  const AppVersionBadge(),
                 ],
               ),
             ),

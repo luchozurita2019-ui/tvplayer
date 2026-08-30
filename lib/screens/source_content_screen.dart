@@ -10,6 +10,7 @@ import '../services/app_update_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
+import '../widgets/app_version_badge.dart';
 import '../widgets/parental_lock_button.dart';
 import '../widgets/parental_unlock_dialog.dart';
 import 'parental_control_screen.dart';
@@ -165,6 +166,10 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
                 ),
               ),
               const Spacer(),
+              const Align(
+                alignment: Alignment.centerRight,
+                child: AppVersionBadge(),
+              ),
             ],
           ),
         ),

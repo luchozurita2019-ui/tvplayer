@@ -4,6 +4,7 @@ import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
 import android.net.wifi.WifiManager
+import android.os.Build
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -96,6 +97,21 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                             Settings.Secure.ANDROID_ID,
                         )
                     )
+                    "getAppVersion" -> {
+                        val info = packageManager.getPackageInfo(packageName, 0)
+                        @Suppress("DEPRECATION")
+                        val code = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                            info.longVersionCode
+                        } else {
+                            info.versionCode.toLong()
+                        }
+                        result.success(
+                            mapOf(
+                                "versionName" to (info.versionName ?: ""),
+                                "versionCode" to code,
+                            )
+                        )
+                    }
                     "getDeviceProfile" -> {
                         val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                         result.success(

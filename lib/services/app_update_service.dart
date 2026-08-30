@@ -5,6 +5,8 @@ import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
+import 'app_version_service.dart';
+
 class AppUpdateInfo {
   final int versionCode;
   final String versionName;
@@ -29,8 +31,6 @@ class AppUpdateService extends ChangeNotifier {
 
   static final AppUpdateService instance = AppUpdateService._();
 
-  static const int currentVersionCode = 14;
-  static const String currentVersionName = '1.2.2';
   static final Uri _endpoint = Uri.parse(
     'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-update',
   );
@@ -52,6 +52,7 @@ class AppUpdateService extends ChangeNotifier {
     _checked = true;
     _checking = true;
     try {
+      final installed = await AppVersionService.instance.current;
       final response = await http.get(_endpoint).timeout(
             const Duration(seconds: 4),
           );
@@ -69,7 +70,7 @@ class AppUpdateService extends ChangeNotifier {
           (uri.host == 'aftv.news' || uri.host == 'www.aftv.news');
 
       if (enabled &&
-          versionCode > currentVersionCode &&
+          versionCode > installed.versionCode &&
           versionName.isNotEmpty &&
           validUrl) {
         _availableUpdate = AppUpdateInfo(
