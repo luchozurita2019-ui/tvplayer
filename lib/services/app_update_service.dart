@@ -37,6 +37,7 @@ class AppUpdateService extends ChangeNotifier {
 
   bool _checked = false;
   bool _checking = false;
+  DateTime? _nextAllowedCheckAt;
   AppUpdateInfo? _availableUpdate;
 
   bool get checked => _checked;
@@ -44,13 +45,16 @@ class AppUpdateService extends ChangeNotifier {
   AppUpdateInfo? get availableUpdate => _availableUpdate;
   bool get hasUpdate => _availableUpdate != null;
 
-  Future<void> checkOnce() async {
-    if (_checked || _checking) return;
+  Future<void> checkOnce({bool force = false}) async {
+    if (_checking) return;
+    final now = DateTime.now();
+    final next = _nextAllowedCheckAt;
+    if (!force && next != null && now.isBefore(next)) return;
 
-    // Una sola consulta por apertura: se marca antes de salir a red y no se
-    // repite aunque falle Internet o el usuario navegue entre catálogos.
-    _checked = true;
+    // Si la red falla, se permite otro intento a los 30 s. Una respuesta válida
+    // se vuelve a consultar a los 5 min para detectar updates sin reiniciar la TV.
     _checking = true;
+    _nextAllowedCheckAt = now.add(const Duration(seconds: 30));
     try {
       final installed = await AppVersionService.instance.current;
       final response = await http.get(_endpoint).timeout(
@@ -69,6 +73,8 @@ class AppUpdateService extends ChangeNotifier {
           (uri.scheme == 'http' || uri.scheme == 'https') &&
           (uri.host == 'aftv.news' || uri.host == 'www.aftv.news');
 
+      _checked = true;
+      _nextAllowedCheckAt = DateTime.now().add(const Duration(minutes: 5));
       if (enabled &&
           versionCode > installed.versionCode &&
           versionName.isNotEmpty &&
@@ -78,9 +84,11 @@ class AppUpdateService extends ChangeNotifier {
           versionName: versionName,
           downloaderUrl: downloaderUrl,
         );
+      } else {
+        _availableUpdate = null;
       }
     } catch (_) {
-      // La comprobación de actualización nunca debe molestar ni bloquear la TV.
+      // Nunca bloquea la TV; el próximo intento queda habilitado rápidamente.
     } finally {
       _checking = false;
       notifyListeners();

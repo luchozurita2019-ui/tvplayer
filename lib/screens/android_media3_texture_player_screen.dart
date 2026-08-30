@@ -38,6 +38,9 @@ class _AndroidMedia3TexturePlayerScreenState
   final FocusNode _channelListFocus = FocusNode(
     debugLabel: 'tvfull-pro-live-selected-channel',
   );
+  final FocusNode _retryFocus = FocusNode(debugLabel: 'tvfull-pro-live-retry');
+  final FocusNode _errorChannelListFocus =
+      FocusNode(debugLabel: 'tvfull-pro-live-error-channel-list');
   final ScrollController _channelScrollController = ScrollController();
   StreamSubscription<dynamic>? _eventSub;
   Timer? _overlayTimer;
@@ -258,6 +261,9 @@ class _AndroidMedia3TexturePlayerScreenState
       _channelListVisible = false;
       _audioTracks = const <_LiveAudioTrack>[];
     });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _retryFocus.canRequestFocus) _retryFocus.requestFocus();
+    });
   }
 
   void _showOverlay() {
@@ -417,6 +423,30 @@ class _AndroidMedia3TexturePlayerScreenState
     final isBack =
         key == LogicalKeyboardKey.goBack || key == LogicalKeyboardKey.escape;
 
+    if (_friendlyError != null) {
+      if (isBack) return KeyEventResult.ignored;
+      if (key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowUp) {
+        _retryFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowRight ||
+          key == LogicalKeyboardKey.arrowDown) {
+        _errorChannelListFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter) {
+        if (_errorChannelListFocus.hasFocus) {
+          _openChannelList();
+        } else {
+          unawaited(_prepareCurrent());
+        }
+        return KeyEventResult.handled;
+      }
+    }
+
     if (_channelListVisible) {
       if (isBack) {
         _closeChannelList();
@@ -471,6 +501,8 @@ class _AndroidMedia3TexturePlayerScreenState
     _eventSub?.cancel();
     _channelScrollController.dispose();
     _channelListFocus.dispose();
+    _retryFocus.dispose();
+    _errorChannelListFocus.dispose();
     _rootFocus.dispose();
     unawaited(_player.invokeMethod<void>('dispose'));
     super.dispose();
@@ -727,15 +759,20 @@ class _AndroidMedia3TexturePlayerScreenState
               Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  FilledButton(
+                  _LiveErrorButton(
+                    focusNode: _retryFocus,
                     autofocus: true,
-                    onPressed: () => unawaited(_prepareCurrent()),
-                    child: const Text('Reintentar'),
+                    filled: true,
+                    label: 'Reintentar',
+                    icon: Icons.refresh_rounded,
+                    onTap: () => unawaited(_prepareCurrent()),
                   ),
                   const SizedBox(width: 12),
-                  OutlinedButton(
-                    onPressed: _openChannelList,
-                    child: const Text('Lista de canales'),
+                  _LiveErrorButton(
+                    focusNode: _errorChannelListFocus,
+                    label: 'Lista de canales',
+                    icon: Icons.list_rounded,
+                    onTap: _openChannelList,
                   ),
                 ],
               ),
@@ -743,6 +780,91 @@ class _AndroidMedia3TexturePlayerScreenState
           ),
         ),
       );
+}
+
+class _LiveErrorButton extends StatefulWidget {
+  final FocusNode focusNode;
+  final String label;
+  final IconData icon;
+  final VoidCallback onTap;
+  final bool autofocus;
+  final bool filled;
+
+  const _LiveErrorButton({
+    required this.focusNode,
+    required this.label,
+    required this.icon,
+    required this.onTap,
+    this.autofocus = false,
+    this.filled = false,
+  });
+
+  @override
+  State<_LiveErrorButton> createState() => _LiveErrorButtonState();
+}
+
+class _LiveErrorButtonState extends State<_LiveErrorButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    const accent = Color(0xFF58B9FF);
+    return AnimatedScale(
+      scale: _focused ? 1.07 : 1,
+      duration: const Duration(milliseconds: 130),
+      curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 130),
+        decoration: BoxDecoration(
+          color: widget.filled
+              ? const Color(0xFF1677FF).withValues(alpha: _focused ? .42 : .28)
+              : const Color(0xFF101A26),
+          borderRadius: BorderRadius.circular(11),
+          border: Border.all(
+            color: _focused ? accent : Colors.white24,
+            width: _focused ? 2 : 1,
+          ),
+          boxShadow: _focused
+              ? [
+                  BoxShadow(
+                    color: accent.withValues(alpha: .28),
+                    blurRadius: 18,
+                    spreadRadius: 1,
+                  ),
+                ]
+              : const [],
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(11),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            focusNode: widget.focusNode,
+            autofocus: widget.autofocus,
+            onFocusChange: (value) => setState(() => _focused = value),
+            onTap: widget.onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(widget.icon,
+                      size: 19, color: _focused ? accent : Colors.white70),
+                  const SizedBox(width: 8),
+                  Text(
+                    widget.label,
+                    style: TextStyle(
+                      fontWeight: _focused ? FontWeight.w900 : FontWeight.w700,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
 }
 
 class _LiveAudioTrack {

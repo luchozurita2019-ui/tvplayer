@@ -81,9 +81,20 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     setState(() {});
   }
 
+  void _resetScroll(ScrollController controller) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !controller.hasClients) return;
+      controller.jumpTo(0);
+    });
+  }
+
+  void _resetCatalogScroll() => _resetScroll(_catalogScrollController);
+  void _resetSearchScroll() => _resetScroll(_searchScrollController);
+
   void _openSearch() {
     if (_searchOpen) return;
     setState(() => _searchOpen = true);
+    _resetSearchScroll();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _searchFocus.requestFocus();
     });
@@ -98,12 +109,16 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       _query = '';
       _searchOpen = false;
     });
+    _resetCatalogScroll();
   }
 
   void _scheduleSearch(String value) {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 120), () {
-      if (mounted && value != _query) setState(() => _query = value);
+      if (mounted && value != _query) {
+        setState(() => _query = value);
+        _resetSearchScroll();
+      }
     });
   }
 
@@ -369,6 +384,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                   onTap: () {
                     if (_searchOpen) _closeSearch();
                     setState(() => _category = category);
+                    _resetCatalogScroll();
                   },
                 );
               },
@@ -402,6 +418,11 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                         ),
                       )
                     : ListView.builder(
+                        key: ValueKey<String>(
+                          _searchOpen
+                              ? 'live-search:$_query'
+                              : 'live-category:${_category ?? 'all'}',
+                        ),
                         controller: _searchOpen
                             ? _searchScrollController
                             : _catalogScrollController,

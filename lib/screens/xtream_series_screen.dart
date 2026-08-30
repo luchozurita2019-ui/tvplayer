@@ -81,9 +81,20 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     setState(() {});
   }
 
+  void _resetScroll(ScrollController controller) {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !controller.hasClients) return;
+      controller.jumpTo(0);
+    });
+  }
+
+  void _resetCatalogScroll() => _resetScroll(_catalogScrollController);
+  void _resetSearchScroll() => _resetScroll(_searchScrollController);
+
   void _openSearch() {
     if (_searchOpen) return;
     setState(() => _searchOpen = true);
+    _resetSearchScroll();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _searchFocus.requestFocus();
     });
@@ -98,12 +109,16 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
       _query = '';
       _searchOpen = false;
     });
+    _resetCatalogScroll();
   }
 
   void _scheduleSearch(String value) {
     _searchDebounce?.cancel();
     _searchDebounce = Timer(const Duration(milliseconds: 120), () {
-      if (mounted && value != _query) setState(() => _query = value);
+      if (mounted && value != _query) {
+        setState(() => _query = value);
+        _resetSearchScroll();
+      }
     });
   }
 
@@ -341,6 +356,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                   onTap: () {
                     if (_searchOpen) _closeSearch();
                     setState(() => _category = value);
+                    _resetCatalogScroll();
                   },
                 );
               },
@@ -380,6 +396,11 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                                   ? 4
                                   : 3;
                           return GridView.builder(
+                            key: ValueKey<String>(
+                              _searchOpen
+                                  ? 'series-search:$_query'
+                                  : 'series-category:${_category ?? 'all'}',
+                            ),
                             controller: _searchOpen
                                 ? _searchScrollController
                                 : _catalogScrollController,
@@ -660,6 +681,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                           ),
                           Expanded(
                             child: ListView.builder(
+                              key: ValueKey<int>(_season),
                               itemCount: episodes.length,
                               itemBuilder: (context, index) {
                                 final episode = episodes[index];
@@ -667,45 +689,9 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                                   padding: const EdgeInsets.symmetric(
                                     vertical: 3,
                                   ),
-                                  child: ListTile(
+                                  child: _EpisodeFocusTile(
+                                    episode: episode,
                                     autofocus: index == 0,
-                                    focusColor: const Color(0xFF12324A),
-                                    minTileHeight: 58,
-                                    shape: RoundedRectangleBorder(
-                                      borderRadius: BorderRadius.circular(10),
-                                    ),
-                                    tileColor: const Color(0xFF0B151F),
-                                    leading: SizedBox(
-                                      width: 42,
-                                      child: Text(
-                                        episode.number > 0
-                                            ? 'E${episode.number.toString().padLeft(2, '0')}'
-                                            : '▶',
-                                        style: const TextStyle(
-                                          color: Color(0xFF58B9FF),
-                                          fontWeight: FontWeight.w900,
-                                        ),
-                                      ),
-                                    ),
-                                    title: Text(
-                                      episode.title,
-                                      maxLines: 1,
-                                      overflow: TextOverflow.ellipsis,
-                                      style: const TextStyle(
-                                        fontWeight: FontWeight.w700,
-                                      ),
-                                    ),
-                                    subtitle: (episode.duration ?? '').isEmpty
-                                        ? null
-                                        : Text(
-                                            episode.duration!,
-                                            style: const TextStyle(
-                                              color: Colors.white38,
-                                            ),
-                                          ),
-                                    trailing: const Icon(
-                                      Icons.play_arrow_rounded,
-                                    ),
                                     onTap: () =>
                                         _play(context, episode.channel),
                                   ),
@@ -736,6 +722,107 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
           initialIndex: 0,
           settings: provider.playbackSettings,
           isLiveContent: false,
+        ),
+      ),
+    );
+  }
+}
+
+class _EpisodeFocusTile extends StatefulWidget {
+  final _EpisodeItem episode;
+  final bool autofocus;
+  final VoidCallback onTap;
+
+  const _EpisodeFocusTile({
+    required this.episode,
+    required this.onTap,
+    this.autofocus = false,
+  });
+
+  @override
+  State<_EpisodeFocusTile> createState() => _EpisodeFocusTileState();
+}
+
+class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final lowRam = DevicePerformanceService.instance.lowRam;
+    return AnimatedScale(
+      scale: _focused ? (lowRam ? 1.018 : 1.035) : 1,
+      duration: Duration(milliseconds: lowRam ? 80 : 130),
+      curve: Curves.easeOutCubic,
+      child: AnimatedContainer(
+        duration: Duration(milliseconds: lowRam ? 80 : 130),
+        decoration: tvFullGlassDecoration(
+          focused: _focused,
+          radius: 12,
+          accent: tvFullCyan,
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(12),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            autofocus: widget.autofocus,
+            onFocusChange: (value) => setState(() => _focused = value),
+            onTap: widget.onTap,
+            child: SizedBox(
+              height: 60,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 14),
+                child: Row(
+                  children: [
+                    SizedBox(
+                      width: 46,
+                      child: Text(
+                        widget.episode.number > 0
+                            ? 'E${widget.episode.number.toString().padLeft(2, '0')}'
+                            : '▶',
+                        style: TextStyle(
+                          color:
+                              _focused ? tvFullCyan : const Color(0xFF58B9FF),
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                    ),
+                    Expanded(
+                      child: Column(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            widget.episode.title,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontWeight:
+                                  _focused ? FontWeight.w900 : FontWeight.w700,
+                            ),
+                          ),
+                          if ((widget.episode.duration ?? '').isNotEmpty) ...[
+                            const SizedBox(height: 3),
+                            Text(
+                              widget.episode.duration!,
+                              style: const TextStyle(
+                                color: Colors.white38,
+                                fontSize: 12,
+                              ),
+                            ),
+                          ],
+                        ],
+                      ),
+                    ),
+                    Icon(
+                      Icons.play_arrow_rounded,
+                      color: _focused ? tvFullCyan : Colors.white54,
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
         ),
       ),
     );

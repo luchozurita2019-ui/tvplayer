@@ -39,6 +39,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
         if (current.playlists.isEmpty || _tick % 10 == 0) {
           unawaited(current.syncRemoteServices());
         }
+        if (_tick % 100 == 0) {
+          unawaited(AppUpdateService.instance.checkOnce());
+        }
       });
     });
   }
@@ -48,6 +51,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     if (state != AppLifecycleState.resumed || !mounted) return;
     final provider = context.read<IptvProvider>();
     if (!provider.remoteSyncing) unawaited(provider.syncRemoteServices());
+    unawaited(AppUpdateService.instance.checkOnce());
   }
 
   @override
