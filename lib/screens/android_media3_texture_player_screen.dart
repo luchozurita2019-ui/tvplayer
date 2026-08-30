@@ -39,8 +39,6 @@ class _AndroidMedia3TexturePlayerScreenState
     debugLabel: 'tvfull-pro-live-selected-channel',
   );
   final FocusNode _retryFocus = FocusNode(debugLabel: 'tvfull-pro-live-retry');
-  final FocusNode _errorChannelListFocus =
-      FocusNode(debugLabel: 'tvfull-pro-live-error-channel-list');
   final ScrollController _channelScrollController = ScrollController();
   StreamSubscription<dynamic>? _eventSub;
   Timer? _overlayTimer;
@@ -423,36 +421,35 @@ class _AndroidMedia3TexturePlayerScreenState
     final isBack =
         key == LogicalKeyboardKey.goBack || key == LogicalKeyboardKey.escape;
 
-    if (_friendlyError != null) {
-      if (isBack) return KeyEventResult.ignored;
-      if (key == LogicalKeyboardKey.arrowLeft ||
-          key == LogicalKeyboardKey.arrowUp) {
-        _retryFocus.requestFocus();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.arrowRight ||
-          key == LogicalKeyboardKey.arrowDown) {
-        _errorChannelListFocus.requestFocus();
-        return KeyEventResult.handled;
-      }
-      if (key == LogicalKeyboardKey.select ||
-          key == LogicalKeyboardKey.enter ||
-          key == LogicalKeyboardKey.numpadEnter) {
-        if (_errorChannelListFocus.hasFocus) {
-          _openChannelList();
-        } else {
-          unawaited(_prepareCurrent());
-        }
-        return KeyEventResult.handled;
-      }
-    }
-
+    // La lista abierta tiene prioridad total, incluso si el canal anterior
+    // dejó un error visible. Así el D-pad vuelve a navegar los canales normal.
     if (_channelListVisible) {
       if (isBack) {
         _closeChannelList();
         return KeyEventResult.handled;
       }
       return KeyEventResult.ignored;
+    }
+
+    if (_friendlyError != null) {
+      if (isBack) return KeyEventResult.ignored;
+      if (key == LogicalKeyboardKey.arrowDown) {
+        _openChannelList();
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.select ||
+          key == LogicalKeyboardKey.enter ||
+          key == LogicalKeyboardKey.numpadEnter) {
+        unawaited(_prepareCurrent());
+        return KeyEventResult.handled;
+      }
+      if (key == LogicalKeyboardKey.arrowLeft ||
+          key == LogicalKeyboardKey.arrowRight ||
+          key == LogicalKeyboardKey.arrowUp) {
+        _retryFocus.requestFocus();
+        return KeyEventResult.handled;
+      }
+      return KeyEventResult.handled;
     }
 
     if (isBack && _overlayVisible) {
@@ -502,7 +499,6 @@ class _AndroidMedia3TexturePlayerScreenState
     _channelScrollController.dispose();
     _channelListFocus.dispose();
     _retryFocus.dispose();
-    _errorChannelListFocus.dispose();
     _rootFocus.dispose();
     unawaited(_player.invokeMethod<void>('dispose'));
     super.dispose();
@@ -756,23 +752,24 @@ class _AndroidMedia3TexturePlayerScreenState
                 style: TextStyle(color: Colors.white54),
               ),
               const SizedBox(height: 18),
-              Row(
+              _LiveErrorButton(
+                focusNode: _retryFocus,
+                autofocus: true,
+                filled: true,
+                label: 'Reintentar',
+                icon: Icons.refresh_rounded,
+                onTap: () => unawaited(_prepareCurrent()),
+              ),
+              const SizedBox(height: 14),
+              const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  _LiveErrorButton(
-                    focusNode: _retryFocus,
-                    autofocus: true,
-                    filled: true,
-                    label: 'Reintentar',
-                    icon: Icons.refresh_rounded,
-                    onTap: () => unawaited(_prepareCurrent()),
-                  ),
-                  const SizedBox(width: 12),
-                  _LiveErrorButton(
-                    focusNode: _errorChannelListFocus,
-                    label: 'Lista de canales',
-                    icon: Icons.list_rounded,
-                    onTap: _openChannelList,
+                  Icon(Icons.keyboard_arrow_down_rounded,
+                      size: 20, color: Colors.white54),
+                  SizedBox(width: 5),
+                  Text(
+                    'Flecha abajo: lista de canales',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
                   ),
                 ],
               ),

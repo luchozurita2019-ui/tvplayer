@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
 
 import '../models/playlist.dart';
@@ -28,21 +29,36 @@ class SourceContentScreen extends StatefulWidget {
   State<SourceContentScreen> createState() => _SourceContentScreenState();
 }
 
-class _SourceContentScreenState extends State<SourceContentScreen> {
+class _SourceContentScreenState extends State<SourceContentScreen>
+    with WidgetsBindingObserver {
   final ParentalControlService _parental = ParentalControlService.instance;
   final AppUpdateService _updates = AppUpdateService.instance;
+  Timer? _updatePollTimer;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _parental.addListener(_refresh);
     _updates.addListener(_refresh);
     unawaited(_parental.init());
-    unawaited(_updates.checkOnce());
+    unawaited(_updates.checkOnce(force: true));
+    _updatePollTimer = Timer.periodic(const Duration(minutes: 5), (_) {
+      unawaited(_updates.checkOnce(force: true));
+    });
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      unawaited(_updates.checkOnce(force: true));
+    }
   }
 
   @override
   void dispose() {
+    _updatePollTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
     _parental.removeListener(_refresh);
     _updates.removeListener(_refresh);
     super.dispose();
@@ -283,20 +299,89 @@ class _SourceContentScreenState extends State<SourceContentScreen> {
   }
 
   Future<void> _openUpdate() async {
-    final opened = await _updates.openUpdate();
-    if (!mounted || opened) return;
-    final code = _updates.availableUpdate?.downloaderCode ?? '';
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        SnackBar(
-          content: Text(
-            code.isEmpty
-                ? 'No se pudo abrir el enlace de actualización.'
-                : 'No se pudo abrir Downloader. Código: $code',
+    final update = _updates.availableUpdate;
+    final code = update?.downloaderCode ?? '';
+    if (code.isEmpty) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+              content: Text('No hay un código de actualización válido.')),
+        );
+      return;
+    }
+
+    await Clipboard.setData(ClipboardData(text: code));
+    if (!mounted) return;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: const Color(0xFF0C141E),
+        title: const Row(
+          children: [
+            Icon(Icons.system_update_alt_rounded, color: Color(0xFF58B9FF)),
+            SizedBox(width: 10),
+            Text('Actualizar TV FULL PRO'),
+          ],
+        ),
+        content: SizedBox(
+          width: 460,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Nueva versión ${update?.versionName ?? ''}',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Código para Downloader',
+                style: TextStyle(fontSize: 13, color: Colors.white54),
+              ),
+              const SizedBox(height: 6),
+              SelectableText(
+                code,
+                style: const TextStyle(
+                  fontSize: 34,
+                  fontWeight: FontWeight.w900,
+                  letterSpacing: 3,
+                  color: Color(0xFF58B9FF),
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'El código ya quedó copiado. Abrí Downloader e ingresalo. '
+                'TV FULL PRO ya no envía el enlace directamente a Downloader, '
+                'evitando que la aplicación se abra y se cierre sola.',
+                style: TextStyle(color: Colors.white60, height: 1.35),
+              ),
+            ],
           ),
         ),
-      );
+        actions: [
+          TextButton.icon(
+            onPressed: () async {
+              await Clipboard.setData(ClipboardData(text: code));
+              if (dialogContext.mounted) {
+                ScaffoldMessenger.of(dialogContext)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                      const SnackBar(content: Text('Código copiado.')));
+              }
+            },
+            icon: const Icon(Icons.copy_rounded),
+            label: const Text('Copiar código'),
+          ),
+          FilledButton(
+            autofocus: true,
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('Entendido'),
+          ),
+        ],
+      ),
+    );
   }
 
   Future<void> _choosePlaylist(BuildContext context) async {
