@@ -3,6 +3,9 @@ package com.example.iptv_player
 import android.app.ActivityManager
 import android.content.Context
 import android.net.Uri
+import android.net.wifi.WifiManager
+import android.os.Handler
+import android.os.Looper
 import android.provider.Settings
 import android.view.Surface
 import android.view.WindowManager
@@ -46,6 +49,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         private const val EVENT_CHANNEL = "tvfull/media3_texture_events"
         private const val DEVICE_CHANNEL = "tvfull/device_identity"
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
+        private const val LIVE_STARTUP_DEADLINE_MS = 4500L
+        private const val LIVE_RECOVERY_DEADLINE_MS = 3000L
+        private const val MAX_LIVE_ENDED_RECOVERIES = 1
     }
 
     private var player: ExoPlayer? = null
@@ -58,6 +64,14 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var isLive = false
     private var endedRecoveries = 0
     private var dnsFallbackActive = false
+    private var wifiLock: WifiManager.WifiLock? = null
+    private var playbackGeneration = 0L
+    private var startupDeadline: Runnable? = null
+    private val mainHandler = Handler(Looper.getMainLooper())
+    private var normalMediaSourceFactory: DefaultMediaSourceFactory? = null
+    private var normalMediaSourceKey: String? = null
+    private var fallbackMediaSourceFactory: DefaultMediaSourceFactory? = null
+    private var fallbackMediaSourceKey: String? = null
 
     private val fallbackDns by lazy { TvFullFallbackDns() }
     private val fallbackHttpClient by lazy {
@@ -149,12 +163,13 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
 
                 "play" -> {
                     player?.play()
-                    applyKeepScreenOn()
+                    applyPlaybackGuards()
                     result.success(null)
                 }
 
                 "pause" -> {
                     player?.pause()
+                    releasePlaybackGuards()
                     result.success(null)
                 }
 
@@ -247,9 +262,58 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
     }
 
+    @Suppress("DEPRECATION")
+    private fun acquireWifiLock() {
+        if (!isLive) return
+        try {
+            val lock = wifiLock ?: run {
+                val manager = applicationContext.getSystemService(Context.WIFI_SERVICE) as WifiManager
+                manager.createWifiLock(
+                    WifiManager.WIFI_MODE_FULL_HIGH_PERF,
+                    "$packageName:tvfull-live",
+                ).also {
+                    it.setReferenceCounted(false)
+                    wifiLock = it
+                }
+            }
+            if (!lock.isHeld) lock.acquire()
+        } catch (_: Throwable) {
+            // La reproducción no debe fallar si un fabricante limita WifiLock.
+        }
+    }
+
+    private fun releaseWifiLock() {
+        try {
+            val lock = wifiLock
+            if (lock != null && lock.isHeld) lock.release()
+        } catch (_: Throwable) {
+            // Ignorar ROMs que invaliden el lock al cambiar de estado de red.
+        }
+    }
+
+    private fun applyPlaybackGuards() {
+        applyKeepScreenOn()
+        acquireWifiLock()
+    }
+
+    private fun releasePlaybackGuards() {
+        releaseWifiLock()
+        clearKeepScreenOn()
+    }
+
     override fun onResume() {
         super.onResume()
-        if (player != null) applyKeepScreenOn()
+        val exo = player
+        if (exo?.playWhenReady == true &&
+            (exo.playbackState == Player.STATE_BUFFERING || exo.playbackState == Player.STATE_READY)
+        ) {
+            applyPlaybackGuards()
+        }
+    }
+
+    override fun onPause() {
+        releasePlaybackGuards()
+        super.onPause()
     }
 
     private fun initializePlayer(
@@ -262,7 +326,6 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         retainBackBufferFromKeyframe: Boolean,
     ): Long {
         disposePlayer()
-        applyKeepScreenOn()
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(minBuffer, maxBuffer, playBuffer, rebuffer)
             .setBackBuffer(backBuffer.coerceAtLeast(0), retainBackBufferFromKeyframe)
@@ -297,12 +360,16 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         userAgent: String,
         positionMs: Long,
     ) {
+        playbackGeneration++
+        val generation = playbackGeneration
+        cancelStartupDeadline()
         currentUrl = url
         currentHeaders = headers.toMap()
         currentUserAgent = userAgent
         endedRecoveries = 0
         dnsFallbackActive = false
         prepareSource(url, headers, userAgent, positionMs, useFallbackDns = false)
+        if (isLive) scheduleStartupDeadline(generation, LIVE_STARTUP_DEADLINE_MS)
     }
 
     private fun prepareSource(
@@ -313,34 +380,93 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         useFallbackDns: Boolean,
     ) {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
-        applyKeepScreenOn()
-        exo.stop()
-        exo.clearMediaItems()
+        applyPlaybackGuards()
 
-        val mediaSourceFactory = if (useFallbackDns) {
-            val okHttpFactory = OkHttpDataSource.Factory(fallbackHttpClient)
-                .setUserAgent(userAgent)
-            if (headers.isNotEmpty()) {
-                okHttpFactory.setDefaultRequestProperties(headers)
-            }
-            DefaultMediaSourceFactory(okHttpFactory)
-        } else {
-            val httpFactory = DefaultHttpDataSource.Factory()
-                .setUserAgent(userAgent)
-                .setAllowCrossProtocolRedirects(true)
-            if (headers.isNotEmpty()) {
-                httpFactory.setDefaultRequestProperties(headers)
-            }
-            DefaultMediaSourceFactory(httpFactory)
-        }
-
-        val source = mediaSourceFactory.createMediaSource(
+        val factory = mediaSourceFactory(headers, userAgent, useFallbackDns)
+        val source = factory.createMediaSource(
             MediaItem.Builder().setUri(Uri.parse(url)).build()
         )
+
+        // setMediaSource reemplaza la señal anterior en la misma instancia de
+        // ExoPlayer. Evitamos stop + clearMediaItems para que el zapping no
+        // reconstruya innecesariamente el pipeline/surface de video.
         exo.setMediaSource(source)
         if (positionMs > 0L) exo.seekTo(positionMs)
         exo.prepare()
         exo.playWhenReady = true
+    }
+
+    private fun mediaSourceFactory(
+        headers: Map<String, String>,
+        userAgent: String,
+        useFallbackDns: Boolean,
+    ): DefaultMediaSourceFactory {
+        val key = sourceFactoryKey(headers, userAgent)
+        if (useFallbackDns) {
+            val cached = fallbackMediaSourceFactory
+            if (cached != null && fallbackMediaSourceKey == key) return cached
+            val okHttpFactory = OkHttpDataSource.Factory(fallbackHttpClient)
+                .setUserAgent(userAgent)
+            if (headers.isNotEmpty()) okHttpFactory.setDefaultRequestProperties(headers)
+            return DefaultMediaSourceFactory(okHttpFactory).also {
+                fallbackMediaSourceFactory = it
+                fallbackMediaSourceKey = key
+            }
+        }
+
+        val cached = normalMediaSourceFactory
+        if (cached != null && normalMediaSourceKey == key) return cached
+        val httpFactory = DefaultHttpDataSource.Factory()
+            .setUserAgent(userAgent)
+            .setAllowCrossProtocolRedirects(true)
+            .setConnectTimeoutMs(if (isLive) 3500 else 12000)
+            .setReadTimeoutMs(if (isLive) 6000 else 30000)
+        if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
+        return DefaultMediaSourceFactory(httpFactory).also {
+            normalMediaSourceFactory = it
+            normalMediaSourceKey = key
+        }
+    }
+
+    private fun sourceFactoryKey(headers: Map<String, String>, userAgent: String): String =
+        buildString {
+            append(if (isLive) "live" else "vod")
+            append('|')
+            append(userAgent)
+            headers.entries
+                .sortedBy { it.key.lowercase(Locale.US) }
+                .forEach {
+                    append('|')
+                    append(it.key.lowercase(Locale.US))
+                    append('=')
+                    append(it.value)
+                }
+        }
+
+    private fun scheduleStartupDeadline(generation: Long, delayMs: Long) {
+        cancelStartupDeadline()
+        val task = Runnable {
+            if (!isLive || generation != playbackGeneration) return@Runnable
+            val exo = player ?: return@Runnable
+            if (exo.playbackState == Player.STATE_READY) return@Runnable
+            exo.stop()
+            releasePlaybackGuards()
+            eventSink?.success(
+                mapOf(
+                    "eventType" to "videoError",
+                    "errorCode" to "TVFULL_STARTUP_DEADLINE",
+                    "errorCodeName" to "TVFULL_STARTUP_DEADLINE",
+                    "error" to "La señal no respondió",
+                )
+            )
+        }
+        startupDeadline = task
+        mainHandler.postDelayed(task, delayMs)
+    }
+
+    private fun cancelStartupDeadline() {
+        startupDeadline?.let(mainHandler::removeCallbacks)
+        startupDeadline = null
     }
 
     private fun selectTrack(
@@ -408,26 +534,36 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     override fun onPlaybackStateChanged(playbackState: Int) {
         when (playbackState) {
             Player.STATE_BUFFERING -> {
-                applyKeepScreenOn()
+                if (player?.playWhenReady == true) applyPlaybackGuards()
                 eventSink?.success(mapOf("eventType" to "bufferingStart"))
             }
 
             Player.STATE_READY -> {
-                applyKeepScreenOn()
-                endedRecoveries = 0
+                cancelStartupDeadline()
+                if (player?.playWhenReady == true) {
+                    applyPlaybackGuards()
+                } else {
+                    releasePlaybackGuards()
+                }
                 eventSink?.success(mapOf("eventType" to "prepared"))
                 eventSink?.success(mapOf("eventType" to "bufferingEnd"))
                 sendTracks()
             }
 
             Player.STATE_ENDED -> {
+                cancelStartupDeadline()
                 val exo = player
-                if (isLive && currentUrl != null && exo != null && endedRecoveries < 5) {
+                if (isLive && currentUrl != null && exo != null &&
+                    endedRecoveries < MAX_LIVE_ENDED_RECOVERIES
+                ) {
                     endedRecoveries++
+                    applyPlaybackGuards()
                     exo.seekToDefaultPosition()
                     exo.prepare()
                     exo.play()
+                    scheduleStartupDeadline(playbackGeneration, LIVE_RECOVERY_DEADLINE_MS)
                 } else {
+                    releasePlaybackGuards()
                     eventSink?.success(mapOf("eventType" to "completed"))
                 }
             }
@@ -471,20 +607,32 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                     )
                     return
                 } catch (_: Throwable) {
-                    // If the fallback path itself cannot be prepared, return the
-                    // original Media3 error below instead of looping.
+                    // El deadline total de LIVE sigue vigente; no encadenamos
+                    // resoluciones/reintentos adicionales.
                 }
             }
         }
 
+        cancelStartupDeadline()
+        releasePlaybackGuards()
+        val fastIo = isFastIoError(error)
         eventSink?.success(
             mapOf(
                 "eventType" to "videoError",
                 "errorCode" to error.errorCode,
-                "errorCodeName" to error.errorCodeName,
-                "error" to (error.message ?: "error de reproducción"),
+                "errorCodeName" to if (fastIo) "TVFULL_FAST_IO" else error.errorCodeName,
+                "error" to if (fastIo) "La señal no respondió" else
+                    (error.message ?: "error de reproducción"),
             )
         )
+    }
+
+    private fun isFastIoError(error: PlaybackException): Boolean {
+        val name = error.errorCodeName.lowercase(Locale.US)
+        return name.contains("_io_") ||
+            name.contains("network") ||
+            name.contains("timeout") ||
+            name.contains("bad_http_status")
     }
 
     private fun hasUnknownHost(error: Throwable): Boolean {
@@ -524,6 +672,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     }
 
     private fun disposePlayer() {
+        playbackGeneration++
+        cancelStartupDeadline()
+        releasePlaybackGuards()
         player?.removeListener(this)
         player?.removeAnalyticsListener(this)
         player?.stop()
@@ -539,7 +690,10 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         currentUserAgent = DEFAULT_UA
         endedRecoveries = 0
         dnsFallbackActive = false
-        clearKeepScreenOn()
+        normalMediaSourceFactory = null
+        normalMediaSourceKey = null
+        fallbackMediaSourceFactory = null
+        fallbackMediaSourceKey = null
     }
 
     override fun onDestroy() {

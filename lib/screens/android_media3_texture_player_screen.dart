@@ -83,10 +83,10 @@ class _AndroidMedia3TexturePlayerScreenState
   Future<void> _initialize() async {
     try {
       final id = await _player.invokeMethod<int>('initialize', {
-        'minBuffer': 3500,
-        'maxBuffer': 12000,
-        'bufferForPlayback': 1500,
-        'bufferForPlaybackAfterRebuffer': 800,
+        'minBuffer': 2500,
+        'maxBuffer': 8000,
+        'bufferForPlayback': 1000,
+        'bufferForPlaybackAfterRebuffer': 1200,
       });
       if (!mounted) return;
       setState(() => _textureId = id);
