@@ -1,0 +1,75 @@
+name: Apply TV FULL PRO Live Session Guardian v21
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/apply-live-session-guardian-v21.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply live session guardian v21
+        run: python3 .github/scripts/apply_tv_full_live_session_guardian_v21.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format Dart source
+        run: dart format lib
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Compile Android debug validation
+        run: flutter build apk --debug --dart-define=TV_FULL_ANDROID_TV=true --target-platform android-arm,android-arm64
+
+      - name: Verify session guardian and playback guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'version: 1.2.9+21' pubspec.yaml
+          grep -q 'TvFullLiveLoadErrorPolicy' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'retryOnConnectionFailure(true)' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'ConnectionPool(8, 5, TimeUnit.MINUTES)' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'setLoadErrorHandlingPolicy(liveLoadErrorPolicy)' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'C.DATA_TYPE_MEDIA_PROGRESSIVE_LIVE -> 6' android/app/src/main/kotlin/com/example/iptv_player/TvFullLiveLoadErrorPolicy.kt
+          grep -q '401, 403, 404, 410' android/app/src/main/kotlin/com/example/iptv_player/TvFullLiveLoadErrorPolicy.kt
+          grep -q 'LIVE_STARTUP_DEADLINE_MS = 4500L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'LIVE_BUFFER_STALL_MS = 6500L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q "'maxBuffer': lowRam ? 12000 : 15000" lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'AndroidMedia3TexturePlayerScreen' lib/screens/player_screen.dart
+
+      - name: Commit live session guardian v21
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt pubspec.yaml pubspec.lock
+          git commit -m "TV FULL PRO 1.2.9+21: add persistent live session guardian" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
