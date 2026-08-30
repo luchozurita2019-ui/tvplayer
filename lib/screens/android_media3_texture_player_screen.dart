@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
+import '../services/device_performance_service.dart';
 import '../widgets/cached_artwork_image.dart';
 
 const String _media3DefaultUserAgent =
@@ -83,11 +84,15 @@ class _AndroidMedia3TexturePlayerScreenState
 
   Future<void> _initialize() async {
     try {
+      final lowRam = DevicePerformanceService.instance.lowRam;
       final id = await _player.invokeMethod<int>('initialize', {
-        'minBuffer': 2500,
-        'maxBuffer': 8000,
+        // Arranque rápido, pero con reserva suficiente para servidores que
+        // entregan segmentos de forma irregular. LOW_RAM usa una ventana
+        // ligeramente menor para no castigar TVs modestos.
+        'minBuffer': lowRam ? 4000 : 5000,
+        'maxBuffer': lowRam ? 12000 : 15000,
         'bufferForPlayback': 1000,
-        'bufferForPlaybackAfterRebuffer': 1200,
+        'bufferForPlaybackAfterRebuffer': lowRam ? 2200 : 2500,
       });
       if (!mounted) return;
       setState(() => _textureId = id);
@@ -189,6 +194,12 @@ class _AndroidMedia3TexturePlayerScreenState
         _finishWithError(
           'Canal no disponible',
           'STREAM_ENDED · La señal terminó inesperadamente.',
+        );
+        break;
+      case 'liveRecovery':
+        debugPrint(
+          'TV FULL PRO LIVE recovery: ${event['reason']} '
+          'attempt=${event['attempt']}',
         );
         break;
       case 'codecError':

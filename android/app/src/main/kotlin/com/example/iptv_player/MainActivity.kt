@@ -51,8 +51,12 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         private const val DEVICE_CHANNEL = "tvfull/device_identity"
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
         private const val LIVE_STARTUP_DEADLINE_MS = 4500L
-        private const val LIVE_RECOVERY_DEADLINE_MS = 3000L
-        private const val MAX_LIVE_ENDED_RECOVERIES = 1
+        private const val LIVE_RECOVERY_DEADLINE_MS = 4500L
+        private const val LIVE_BUFFER_HEALTH_INTERVAL_MS = 2500L
+        private const val LIVE_BUFFER_STALL_MS = 6500L
+        private const val LIVE_STABLE_RESET_MS = 30000L
+        private const val MAX_LIVE_ENDED_RECOVERIES = 2
+        private const val MAX_LIVE_STALL_RECOVERIES = 2
     }
 
     private var player: ExoPlayer? = null
@@ -68,6 +72,12 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var playbackGeneration = 0L
     private var startupDeadline: Runnable? = null
+    private var liveBufferHealthCheck: Runnable? = null
+    private var liveStabilityReset: Runnable? = null
+    private var liveEverReady = false
+    private var liveBufferLastProgressAtMs = 0L
+    private var liveBufferLastPositionMs = 0L
+    private var liveStallRecoveries = 0
     private val mainHandler = Handler(Looper.getMainLooper())
     private var normalMediaSourceFactory: DefaultMediaSourceFactory? = null
     private var normalMediaSourceKey: String? = null
@@ -379,10 +389,16 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         playbackGeneration++
         val generation = playbackGeneration
         cancelStartupDeadline()
+        cancelLiveBufferHealthCheck()
+        cancelLiveStabilityReset()
         currentUrl = url
         currentHeaders = headers.toMap()
         currentUserAgent = userAgent
         endedRecoveries = 0
+        liveStallRecoveries = 0
+        liveEverReady = false
+        liveBufferLastProgressAtMs = 0L
+        liveBufferLastPositionMs = 0L
         dnsFallbackActive = false
         prepareSource(url, headers, userAgent, positionMs, useFallbackDns = false)
         if (isLive) scheduleStartupDeadline(generation, LIVE_STARTUP_DEADLINE_MS)
@@ -435,8 +451,11 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(userAgent)
             .setAllowCrossProtocolRedirects(true)
-            .setConnectTimeoutMs(if (isLive) 3500 else 12000)
-            .setReadTimeoutMs(if (isLive) 6000 else 30000)
+            // LIVE conserva conexión rápida para detectar hosts muertos, pero
+            // permite más tiempo de lectura una vez conectado. Esto protege
+            // contra servidores que entregan segmentos con jitter.
+            .setConnectTimeoutMs(if (isLive) 4000 else 12000)
+            .setReadTimeoutMs(if (isLive) 10000 else 30000)
         if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
         return DefaultMediaSourceFactory(httpFactory).also {
             normalMediaSourceFactory = it
@@ -483,6 +502,107 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private fun cancelStartupDeadline() {
         startupDeadline?.let(mainHandler::removeCallbacks)
         startupDeadline = null
+    }
+
+    private fun cancelLiveBufferHealthCheck() {
+        liveBufferHealthCheck?.let(mainHandler::removeCallbacks)
+        liveBufferHealthCheck = null
+    }
+
+    private fun cancelLiveStabilityReset() {
+        liveStabilityReset?.let(mainHandler::removeCallbacks)
+        liveStabilityReset = null
+    }
+
+    private fun scheduleLiveStabilityReset(generation: Long) {
+        cancelLiveStabilityReset()
+        if (!isLive || !liveEverReady) return
+        val task = Runnable {
+            if (!isLive || generation != playbackGeneration) return@Runnable
+            val exo = player ?: return@Runnable
+            if (exo.playbackState != Player.STATE_READY) return@Runnable
+            // Tras 30 s continuos de reproducción sana permitimos nuevamente
+            // recuperaciones futuras. Evita loops rápidos, pero no penaliza una
+            // señal que tiene un microcorte aislado mucho más tarde.
+            endedRecoveries = 0
+            liveStallRecoveries = 0
+        }
+        liveStabilityReset = task
+        mainHandler.postDelayed(task, LIVE_STABLE_RESET_MS)
+    }
+
+    private fun scheduleLiveBufferHealthCheck(generation: Long) {
+        cancelLiveBufferHealthCheck()
+        if (!isLive || !liveEverReady || generation != playbackGeneration) return
+        val exo = player ?: return
+        if (exo.playbackState != Player.STATE_BUFFERING) return
+
+        val now = System.currentTimeMillis()
+        val buffered = exo.bufferedPosition.coerceAtLeast(0L)
+        if (liveBufferLastProgressAtMs == 0L) {
+            liveBufferLastProgressAtMs = now
+            liveBufferLastPositionMs = buffered
+        }
+
+        val task = Runnable {
+            if (!isLive || generation != playbackGeneration) return@Runnable
+            val current = player ?: return@Runnable
+            if (current.playbackState != Player.STATE_BUFFERING) return@Runnable
+
+            val checkNow = System.currentTimeMillis()
+            val currentBuffered = current.bufferedPosition.coerceAtLeast(0L)
+            if (currentBuffered > liveBufferLastPositionMs + 250L) {
+                // Siguen llegando datos: dejamos que Media3 reconstruya reserva
+                // sin interrumpir un servidor lento que todavía está vivo.
+                liveBufferLastPositionMs = currentBuffered
+                liveBufferLastProgressAtMs = checkNow
+                scheduleLiveBufferHealthCheck(generation)
+                return@Runnable
+            }
+
+            val silentFor = checkNow - liveBufferLastProgressAtMs
+            if (silentFor >= LIVE_BUFFER_STALL_MS &&
+                liveStallRecoveries < MAX_LIVE_STALL_RECOVERIES
+            ) {
+                val url = currentUrl ?: return@Runnable
+                liveStallRecoveries++
+                cancelLiveBufferHealthCheck()
+                cancelLiveStabilityReset()
+                try {
+                    // Soft reconnect: reemplaza solo la fuente en el MISMO
+                    // ExoPlayer/Surface. No reconstruye el reproductor ni la UI.
+                    prepareSource(
+                        url,
+                        currentHeaders,
+                        currentUserAgent,
+                        0L,
+                        useFallbackDns = dnsFallbackActive,
+                    )
+                    scheduleStartupDeadline(generation, LIVE_RECOVERY_DEADLINE_MS)
+                    eventSink?.success(
+                        mapOf(
+                            "eventType" to "liveRecovery",
+                            "reason" to "buffering_stall",
+                            "attempt" to liveStallRecoveries,
+                        )
+                    )
+                } catch (error: Throwable) {
+                    releasePlaybackGuards()
+                    eventSink?.success(
+                        mapOf(
+                            "eventType" to "videoError",
+                            "errorCodeName" to "TVFULL_STALL_RECOVERY_FAILED",
+                            "error" to (error.message ?: "Falló la recuperación LIVE"),
+                        )
+                    )
+                }
+                return@Runnable
+            }
+
+            scheduleLiveBufferHealthCheck(generation)
+        }
+        liveBufferHealthCheck = task
+        mainHandler.postDelayed(task, LIVE_BUFFER_HEALTH_INTERVAL_MS)
     }
 
     private fun selectTrack(
@@ -551,11 +671,25 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         when (playbackState) {
             Player.STATE_BUFFERING -> {
                 if (player?.playWhenReady == true) applyPlaybackGuards()
+                cancelLiveStabilityReset()
+                if (isLive && liveEverReady) {
+                    if (liveBufferLastProgressAtMs == 0L) {
+                        liveBufferLastProgressAtMs = System.currentTimeMillis()
+                        liveBufferLastPositionMs =
+                            (player?.bufferedPosition ?: 0L).coerceAtLeast(0L)
+                    }
+                    scheduleLiveBufferHealthCheck(playbackGeneration)
+                }
                 eventSink?.success(mapOf("eventType" to "bufferingStart"))
             }
 
             Player.STATE_READY -> {
                 cancelStartupDeadline()
+                cancelLiveBufferHealthCheck()
+                liveEverReady = liveEverReady || isLive
+                liveBufferLastProgressAtMs = 0L
+                liveBufferLastPositionMs = 0L
+                if (isLive) scheduleLiveStabilityReset(playbackGeneration)
                 if (player?.playWhenReady == true) {
                     applyPlaybackGuards()
                 } else {
@@ -568,6 +702,8 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
 
             Player.STATE_ENDED -> {
                 cancelStartupDeadline()
+                cancelLiveBufferHealthCheck()
+                cancelLiveStabilityReset()
                 val exo = player
                 if (isLive && currentUrl != null && exo != null &&
                     endedRecoveries < MAX_LIVE_ENDED_RECOVERIES
@@ -578,6 +714,13 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                     exo.prepare()
                     exo.play()
                     scheduleStartupDeadline(playbackGeneration, LIVE_RECOVERY_DEADLINE_MS)
+                    eventSink?.success(
+                        mapOf(
+                            "eventType" to "liveRecovery",
+                            "reason" to "unexpected_end",
+                            "attempt" to endedRecoveries,
+                        )
+                    )
                 } else {
                     releasePlaybackGuards()
                     eventSink?.success(mapOf("eventType" to "completed"))
@@ -602,6 +745,8 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     }
 
     override fun onPlayerError(error: PlaybackException) {
+        cancelLiveBufferHealthCheck()
+        cancelLiveStabilityReset()
         if (!dnsFallbackActive && hasUnknownHost(error)) {
             val url = currentUrl
             if (url != null) {
@@ -690,6 +835,8 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private fun disposePlayer() {
         playbackGeneration++
         cancelStartupDeadline()
+        cancelLiveBufferHealthCheck()
+        cancelLiveStabilityReset()
         releasePlaybackGuards()
         player?.removeListener(this)
         player?.removeAnalyticsListener(this)
@@ -705,6 +852,10 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         currentHeaders = emptyMap()
         currentUserAgent = DEFAULT_UA
         endedRecoveries = 0
+        liveStallRecoveries = 0
+        liveEverReady = false
+        liveBufferLastProgressAtMs = 0L
+        liveBufferLastPositionMs = 0L
         dnsFallbackActive = false
         normalMediaSourceFactory = null
         normalMediaSourceKey = null
