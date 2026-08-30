@@ -38,6 +38,7 @@ import java.net.UnknownHostException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
+import okhttp3.ConnectionPool
 import okhttp3.Dns
 import okhttp3.HttpUrl.Companion.toHttpUrl
 import okhttp3.OkHttpClient
@@ -85,11 +86,24 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var fallbackMediaSourceKey: String? = null
 
     private val fallbackDns by lazy { TvFullFallbackDns() }
+    private val liveLoadErrorPolicy by lazy { TvFullLiveLoadErrorPolicy() }
+    private val liveHttpClient by lazy {
+        OkHttpClient.Builder()
+            .connectTimeout(4, TimeUnit.SECONDS)
+            .readTimeout(10, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .connectionPool(ConnectionPool(8, 5, TimeUnit.MINUTES))
+            .followRedirects(true)
+            .followSslRedirects(true)
+            .build()
+    }
     private val fallbackHttpClient by lazy {
         OkHttpClient.Builder()
             .dns(fallbackDns)
             .connectTimeout(12, TimeUnit.SECONDS)
             .readTimeout(35, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(true)
+            .connectionPool(ConnectionPool(4, 5, TimeUnit.MINUTES))
             .followRedirects(true)
             .followSslRedirects(true)
             .build()
@@ -440,7 +454,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
             val okHttpFactory = OkHttpDataSource.Factory(fallbackHttpClient)
                 .setUserAgent(userAgent)
             if (headers.isNotEmpty()) okHttpFactory.setDefaultRequestProperties(headers)
-            return DefaultMediaSourceFactory(okHttpFactory).also {
+            val mediaFactory = DefaultMediaSourceFactory(okHttpFactory)
+            if (isLive) mediaFactory.setLoadErrorHandlingPolicy(liveLoadErrorPolicy)
+            return mediaFactory.also {
                 fallbackMediaSourceFactory = it
                 fallbackMediaSourceKey = key
             }
@@ -448,14 +464,28 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
 
         val cached = normalMediaSourceFactory
         if (cached != null && normalMediaSourceKey == key) return cached
+
+        // LIVE usa un único OkHttpClient por sesión. Esto conserva sockets/TLS
+        // entre manifiestos y segmentos y deja que OkHttp recupere fallos de
+        // conexión antes de escalar el error al reproductor completo.
+        if (isLive) {
+            val okHttpFactory = OkHttpDataSource.Factory(liveHttpClient)
+                .setUserAgent(userAgent)
+            if (headers.isNotEmpty()) okHttpFactory.setDefaultRequestProperties(headers)
+            return DefaultMediaSourceFactory(okHttpFactory)
+                .setLoadErrorHandlingPolicy(liveLoadErrorPolicy)
+                .also {
+                    normalMediaSourceFactory = it
+                    normalMediaSourceKey = key
+                }
+        }
+
+        // VOD conserva su ruta anterior: esta versión toca únicamente LIVE.
         val httpFactory = DefaultHttpDataSource.Factory()
             .setUserAgent(userAgent)
             .setAllowCrossProtocolRedirects(true)
-            // LIVE conserva conexión rápida para detectar hosts muertos, pero
-            // permite más tiempo de lectura una vez conectado. Esto protege
-            // contra servidores que entregan segmentos con jitter.
-            .setConnectTimeoutMs(if (isLive) 4000 else 12000)
-            .setReadTimeoutMs(if (isLive) 10000 else 30000)
+            .setConnectTimeoutMs(12000)
+            .setReadTimeoutMs(30000)
         if (headers.isNotEmpty()) httpFactory.setDefaultRequestProperties(headers)
         return DefaultMediaSourceFactory(httpFactory).also {
             normalMediaSourceFactory = it
