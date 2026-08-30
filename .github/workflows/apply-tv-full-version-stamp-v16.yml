@@ -1,0 +1,81 @@
+name: Apply TV FULL PRO Version Stamp v16
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/apply-version-stamp-v16.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply automatic version stamp
+        run: python .github/scripts/apply_tv_full_version_stamp_v16.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format Dart source
+        run: dart format lib
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Compile Android debug APK
+        run: >-
+          flutter build apk --debug
+          --dart-define=TV_FULL_ANDROID_TV=true
+          --target-platform android-arm64
+
+      - name: Verify version architecture
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'version: 1.2.4+16' pubspec.yaml
+          grep -q 'getAppVersion' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'AppVersionService.instance.current' lib/services/app_update_service.dart
+          grep -q 'installed.versionCode' lib/services/app_update_service.dart
+          grep -q 'AppVersionBadge' lib/screens/source_content_screen.dart
+          grep -q 'AppVersionBadge' lib/screens/home_screen.dart
+          git diff --check
+
+      - name: Commit version identification source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            pubspec.yaml \
+            android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt \
+            lib/services/app_version_service.dart \
+            lib/services/app_update_service.dart \
+            lib/widgets/app_version_badge.dart \
+            lib/screens/home_screen.dart \
+            lib/screens/source_content_screen.dart
+          git commit -m "TV FULL PRO 1.2.4+16: show installed version" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
