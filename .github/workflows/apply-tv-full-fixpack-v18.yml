@@ -1,0 +1,88 @@
+name: Apply TV FULL PRO Fixpack v18
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/apply-fixpack-v18.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply v18 fixes
+        run: python .github/scripts/apply_tv_full_fixpack_v18.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format Dart source
+        run: dart format lib
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Compile Android debug validation
+        run: >-
+          flutter build apk --debug
+          --dart-define=TV_FULL_ANDROID_TV=true
+          --target-platform android-arm64
+
+      - name: Verify requested fixes and playback guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'version: 1.2.6+18' pubspec.yaml
+          grep -q 'Duration(minutes: 5)' lib/services/app_update_service.dart
+          grep -q '_tick % 100 == 0' lib/screens/home_screen.dart
+          grep -q '_EpisodeFocusTile' lib/screens/xtream_series_screen.dart
+          grep -q 'ValueKey<int>(_season)' lib/screens/xtream_series_screen.dart
+          grep -q '_retryFocus.requestFocus' lib/screens/android_media3_texture_player_screen.dart
+          grep -q '_LiveErrorButton' lib/screens/android_media3_texture_player_screen.dart
+          grep -q '_resetCatalogScroll' lib/screens/xtream_live_screen.dart
+          grep -q '_resetCatalogScroll' lib/screens/xtream_movies_screen.dart
+          grep -q '_resetCatalogScroll' lib/screens/xtream_series_screen.dart
+          grep -q 'LIVE_STARTUP_DEADLINE_MS = 4500L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'setAudioTrack' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'setSubtitleTrack' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          git diff --check
+
+      - name: Commit v18 source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            pubspec.yaml \
+            lib/services/app_update_service.dart \
+            lib/screens/home_screen.dart \
+            lib/screens/android_media3_texture_player_screen.dart \
+            lib/screens/xtream_live_screen.dart \
+            lib/screens/xtream_movies_screen.dart \
+            lib/screens/xtream_series_screen.dart
+          git commit -m "TV FULL PRO 1.2.6+18: fix remote focus scroll and updates" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
