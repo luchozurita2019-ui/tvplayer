@@ -1,7 +1,7 @@
-TV FULL PRO final release build requested after v21 LIVE Session Guardian: preserve the v20 fast-start/stability profile, use a shared OkHttp LIVE connection pool with retryOnConnectionFailure, apply Media3 request/segment-level LoadErrorHandlingPolicy before whole-stream recovery, retry transient manifest/media/5xx/429 failures with bounded backoff, fail fast on 401/403/404/410, preserve 4.5s initial dead-channel deadline, 6.5s stall watchdog, same ExoPlayer/Surface soft recovery, LOW_RAM profile, DNS fallback, multi-audio, updater and D-pad fixes. VOD/Series route remains unchanged.
-validated_run=33312143390
-validation_result=flutter analyze success; Android debug compile success; LIVE session guardian and architecture guardrails success
-source_commit=4b0f8a64f10a5fadd804349ad43b8de23c1a9ad3
-version=1.2.9+21
+TV FULL PRO final release build requested after v22 Adaptive Live Engine: preserve fast 1s initial playback target and 4.5s dead-channel deadline, learn per-channel stability locally, hash channel URLs before persistence, use LOW_RAM-aware learned startup buffer profiles, adapt HLS/live target offset by channel protection level, measure bandwidth and rebuffer events through Media3 analytics, escalate retry protection only for unstable channels, relax learned protection after repeated stable 30s windows, keep persistent OkHttp session guardian, bounded segment retries, DNS fallback, same ExoPlayer/Surface, multi-audio, updater and D-pad fixes. VOD/Series architecture remains unchanged.
+validated_run=33338183844
+validation_result=flutter analyze success; Android debug compile success; adaptive LIVE engine and playback guardrails success
+source_commit=24662863de86e1764e68c2551aa21cb4511af58d
+version=1.3.0+22
 signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-30T09:46:00-03:00
+requested_at=2026-08-30T19:15:00-03:00
