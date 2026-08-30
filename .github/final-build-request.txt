@@ -1,6 +1,6 @@
-TV FULL PRO final release build requested after v18 fixpack: series episode focus/zoom, reliable LIVE retry with remote ENTER/OK, update rechecks every five minutes with retry after network failure, and catalog/search scroll reset across LIVE, Movies and Series. Background and playback engine remain unchanged.
-validated_run=33292701684
-validation_result=flutter analyze success; Android debug compile success; requested focus/retry/update/scroll guardrails success
-version=1.2.6+18
+TV FULL PRO final release build requested after v19 corrections: restore direct DOWN-to-channel-list behavior during LIVE errors, give open channel drawer priority over error key handling, keep ENTER/OK on Retry, poll updates every five minutes and recheck on app resume, and replace the unstable aftv.news external launch with a visible/copyable Downloader short code. Playback engine remains unchanged.
+validated_run=33294067229
+validation_result=flutter analyze success; Android debug compile success; requested remote/update guardrails success
+version=1.2.7+19
 signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-30T17:36:00-03:00
+requested_at=2026-08-30T02:15:00-03:00
