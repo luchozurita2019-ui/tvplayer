@@ -1,0 +1,1 @@
+TV FULL PRO 1.2.7+19: restore DOWN-to-channel-list behavior during LIVE errors and make updater polling/resume checks reliable. Stop sending aftv.news directly into Downloader; show and copy the short Downloader code instead.
