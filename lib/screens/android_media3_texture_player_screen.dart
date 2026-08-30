@@ -85,14 +85,34 @@ class _AndroidMedia3TexturePlayerScreenState
   Future<void> _initialize() async {
     try {
       final lowRam = DevicePerformanceService.instance.lowRam;
+      var adaptiveLevel = 0;
+      if (widget.playlist.isNotEmpty) {
+        try {
+          adaptiveLevel =
+              await _player.invokeMethod<int>('getLiveAdaptiveLevel', {
+                    'url': _channel.url,
+                  }) ??
+                  0;
+        } on PlatformException {
+          adaptiveLevel = 0;
+        }
+      }
+      final level = adaptiveLevel.clamp(0, 3).toInt();
+      final normalMin = <int>[5000, 6000, 7000, 8000][level];
+      final normalMax = <int>[15000, 19000, 23000, 28000][level];
+      final normalRebuffer = <int>[2500, 3000, 3500, 4000][level];
+      final lowRamMin = <int>[4000, 4500, 5000, 5500][level];
+      final lowRamMax = <int>[12000, 14000, 16000, 18000][level];
+      final lowRamRebuffer = <int>[2200, 2500, 2800, 3000][level];
       final id = await _player.invokeMethod<int>('initialize', {
-        // Arranque rápido, pero con reserva suficiente para servidores que
-        // entregan segmentos de forma irregular. LOW_RAM usa una ventana
-        // ligeramente menor para no castigar TVs modestos.
-        'minBuffer': lowRam ? 4000 : 5000,
-        'maxBuffer': lowRam ? 12000 : 15000,
+        // Perfil aprendido por canal: la primera imagen sigue arrancando con
+        // 1 s, pero canales problemáticos reciben más reserva de forma local.
+        // LOW_RAM mantiene límites estrictos para no castigar hardware modesto.
+        'minBuffer': lowRam ? lowRamMin : normalMin,
+        'maxBuffer': lowRam ? lowRamMax : normalMax,
         'bufferForPlayback': 1000,
-        'bufferForPlaybackAfterRebuffer': lowRam ? 2200 : 2500,
+        'bufferForPlaybackAfterRebuffer':
+            lowRam ? lowRamRebuffer : normalRebuffer,
       });
       if (!mounted) return;
       setState(() => _textureId = id);
@@ -200,6 +220,13 @@ class _AndroidMedia3TexturePlayerScreenState
         debugPrint(
           'TV FULL PRO LIVE recovery: ${event['reason']} '
           'attempt=${event['attempt']}',
+        );
+        break;
+      case 'adaptiveProfile':
+        debugPrint(
+          'TV FULL PRO LIVE adaptive level=${event['level']} '
+          'reason=${event['reason']} rebuffers=${event['rebufferCount']} '
+          'bandwidth=${event['bandwidthEstimate']} bitrate=${event['videoBitrate']}',
         );
         break;
       case 'codecError':

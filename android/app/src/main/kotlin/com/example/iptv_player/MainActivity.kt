@@ -79,6 +79,12 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var liveBufferLastProgressAtMs = 0L
     private var liveBufferLastPositionMs = 0L
     private var liveStallRecoveries = 0
+    private var currentAdaptiveLevel = 0
+    private var liveSessionRebuffers = 0
+    private var liveStableWindows = 0
+    private var liveReadySinceMs = 0L
+    private var lastBandwidthEstimate = 0L
+    private val adaptiveProfiles by lazy { TvFullAdaptiveLiveProfileStore(this) }
     private val mainHandler = Handler(Looper.getMainLooper())
     private var normalMediaSourceFactory: DefaultMediaSourceFactory? = null
     private var normalMediaSourceKey: String? = null
@@ -174,6 +180,11 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     ) {
         try {
             when (call.method) {
+                "getLiveAdaptiveLevel" -> {
+                    val url = call.argument<String>("url") ?: ""
+                    result.success(if (url.isBlank()) 0 else adaptiveProfiles.loadLevel(url))
+                }
+
                 "initialize" -> result.success(
                     initializePlayer(
                         flutterEngine,
@@ -408,12 +419,19 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         currentUrl = url
         currentHeaders = headers.toMap()
         currentUserAgent = userAgent
+        currentAdaptiveLevel = if (isLive) adaptiveProfiles.loadLevel(url) else 0
+        liveLoadErrorPolicy.protectionLevel = currentAdaptiveLevel
         endedRecoveries = 0
         liveStallRecoveries = 0
+        liveSessionRebuffers = 0
+        liveStableWindows = 0
+        liveReadySinceMs = 0L
+        lastBandwidthEstimate = 0L
         liveEverReady = false
         liveBufferLastProgressAtMs = 0L
         liveBufferLastPositionMs = 0L
         dnsFallbackActive = false
+        emitAdaptiveProfile("loaded")
         prepareSource(url, headers, userAgent, positionMs, useFallbackDns = false)
         if (isLive) scheduleStartupDeadline(generation, LIVE_STARTUP_DEADLINE_MS)
     }
@@ -429,9 +447,18 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         applyPlaybackGuards()
 
         val factory = mediaSourceFactory(headers, userAgent, useFallbackDns)
-        val source = factory.createMediaSource(
-            MediaItem.Builder().setUri(Uri.parse(url)).build()
-        )
+        val itemBuilder = MediaItem.Builder().setUri(Uri.parse(url))
+        if (isLive) {
+            val targetOffset = adaptiveTargetOffsetMs(currentAdaptiveLevel)
+            itemBuilder.setLiveConfiguration(
+                MediaItem.LiveConfiguration.Builder()
+                    .setTargetOffsetMs(targetOffset)
+                    .setMinOffsetMs((targetOffset - 2500L).coerceAtLeast(2000L))
+                    .setMaxOffsetMs(targetOffset + 5000L)
+                    .build()
+            )
+        }
+        val source = factory.createMediaSource(itemBuilder.build())
 
         // setMediaSource reemplaza la señal anterior en la misma instancia de
         // ExoPlayer. Evitamos stop + clearMediaItems para que el zapping no
@@ -552,10 +579,20 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
             val exo = player ?: return@Runnable
             if (exo.playbackState != Player.STATE_READY) return@Runnable
             // Tras 30 s continuos de reproducción sana permitimos nuevamente
-            // recuperaciones futuras. Evita loops rápidos, pero no penaliza una
-            // señal que tiene un microcorte aislado mucho más tarde.
+            // recuperaciones futuras. Además acumulamos ventanas sanas para que
+            // un canal pueda volver gradualmente a un perfil menos conservador.
             endedRecoveries = 0
             liveStallRecoveries = 0
+            liveStableWindows++
+            if (liveStableWindows >= 6 && currentAdaptiveLevel > 0) {
+                currentAdaptiveLevel--
+                adaptiveProfiles.saveLevel(currentUrl.orEmpty(), currentAdaptiveLevel)
+                liveLoadErrorPolicy.protectionLevel = currentAdaptiveLevel
+                liveStableWindows = 0
+                liveSessionRebuffers = 0
+                emitAdaptiveProfile("stable_relax")
+            }
+            scheduleLiveStabilityReset(generation)
         }
         liveStabilityReset = task
         mainHandler.postDelayed(task, LIVE_STABLE_RESET_MS)
@@ -635,6 +672,81 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         mainHandler.postDelayed(task, LIVE_BUFFER_HEALTH_INTERVAL_MS)
     }
 
+
+    private fun adaptiveTargetOffsetMs(level: Int): Long {
+        val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
+        val lowRam = manager.isLowRamDevice
+        return when (level.coerceIn(0, 3)) {
+            0 -> 4500L
+            1 -> 7000L
+            2 -> 10000L
+            else -> if (lowRam) 11000L else 14000L
+        }
+    }
+
+    private fun selectedVideoBitrate(): Int {
+        val tracks = player?.currentTracks ?: return 0
+        for (group in tracks.groups) {
+            if (group.type != C.TRACK_TYPE_VIDEO) continue
+            for (trackIndex in 0 until group.length) {
+                if (!group.isTrackSelected(trackIndex)) continue
+                val bitrate = group.getTrackFormat(trackIndex).bitrate
+                if (bitrate > 0) return bitrate
+            }
+        }
+        return 0
+    }
+
+    private fun evaluateAdaptiveProfile(reason: String) {
+        if (!isLive) return
+        val url = currentUrl ?: return
+        var desired = currentAdaptiveLevel
+
+        desired = when {
+            liveSessionRebuffers >= 6 -> maxOf(desired, 3)
+            liveSessionRebuffers >= 4 -> maxOf(desired, 2)
+            liveSessionRebuffers >= 2 -> maxOf(desired, 1)
+            else -> desired
+        }
+
+        val videoBitrate = selectedVideoBitrate()
+        val estimate = lastBandwidthEstimate
+        val readyLongEnough = liveReadySinceMs > 0L &&
+            System.currentTimeMillis() - liveReadySinceMs >= 12000L
+        if (readyLongEnough && videoBitrate > 0 && estimate > 0L) {
+            val headroom = estimate.toDouble() / videoBitrate.toDouble()
+            desired = when {
+                headroom < 1.10 -> maxOf(desired, 3)
+                headroom < 1.30 -> maxOf(desired, 2)
+                headroom < 1.60 -> maxOf(desired, 1)
+                else -> desired
+            }
+        }
+
+        desired = desired.coerceIn(0, 3)
+        if (desired <= currentAdaptiveLevel) return
+        currentAdaptiveLevel = desired
+        adaptiveProfiles.saveLevel(url, desired)
+        liveLoadErrorPolicy.protectionLevel = desired
+        liveStableWindows = 0
+        emitAdaptiveProfile(reason)
+    }
+
+    private fun emitAdaptiveProfile(reason: String) {
+        if (!isLive || currentUrl.isNullOrBlank()) return
+        eventSink?.success(
+            mapOf(
+                "eventType" to "adaptiveProfile",
+                "level" to currentAdaptiveLevel,
+                "reason" to reason,
+                "rebufferCount" to liveSessionRebuffers,
+                "bandwidthEstimate" to lastBandwidthEstimate,
+                "videoBitrate" to selectedVideoBitrate(),
+                "targetLiveOffsetMs" to adaptiveTargetOffsetMs(currentAdaptiveLevel),
+            )
+        )
+    }
+
     private fun selectTrack(
         trackType: Int,
         groupIndex: Int?,
@@ -703,6 +815,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 if (player?.playWhenReady == true) applyPlaybackGuards()
                 cancelLiveStabilityReset()
                 if (isLive && liveEverReady) {
+                    liveStableWindows = 0
+                    liveSessionRebuffers++
+                    evaluateAdaptiveProfile("rebuffer")
                     if (liveBufferLastProgressAtMs == 0L) {
                         liveBufferLastProgressAtMs = System.currentTimeMillis()
                         liveBufferLastPositionMs =
@@ -717,6 +832,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 cancelStartupDeadline()
                 cancelLiveBufferHealthCheck()
                 liveEverReady = liveEverReady || isLive
+                if (isLive && liveReadySinceMs == 0L) {
+                    liveReadySinceMs = System.currentTimeMillis()
+                }
                 liveBufferLastProgressAtMs = 0L
                 liveBufferLastPositionMs = 0L
                 if (isLive) scheduleLiveStabilityReset(playbackGeneration)
@@ -836,6 +954,18 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         return false
     }
 
+
+    override fun onBandwidthEstimate(
+        eventTime: AnalyticsListener.EventTime,
+        totalLoadTimeMs: Int,
+        totalBytesLoaded: Long,
+        bitrateEstimate: Long,
+    ) {
+        if (!isLive || bitrateEstimate <= 0L) return
+        lastBandwidthEstimate = bitrateEstimate
+        evaluateAdaptiveProfile("bandwidth")
+    }
+
     override fun onVideoCodecError(
         eventTime: AnalyticsListener.EventTime,
         videoCodecError: Exception,
@@ -883,6 +1013,11 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         currentUserAgent = DEFAULT_UA
         endedRecoveries = 0
         liveStallRecoveries = 0
+        currentAdaptiveLevel = 0
+        liveSessionRebuffers = 0
+        liveStableWindows = 0
+        liveReadySinceMs = 0L
+        lastBandwidthEstimate = 0L
         liveEverReady = false
         liveBufferLastProgressAtMs = 0L
         liveBufferLastPositionMs = 0L

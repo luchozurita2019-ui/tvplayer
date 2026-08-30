@@ -6,19 +6,19 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 
-/**
- * Segment/request-level recovery for LIVE playback.
- *
- * The player should not tear down the whole channel because one HLS segment,
- * manifest refresh or progressive read had a short network hiccup. Permanent
- * authorization/not-found responses still fail immediately.
- */
+/** Segment/request recovery whose retry budget follows the learned channel profile. */
 @UnstableApi
 class TvFullLiveLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
-    override fun getMinimumLoadableRetryCount(dataType: Int): Int = when (dataType) {
-        C.DATA_TYPE_MEDIA_PROGRESSIVE_LIVE -> 6
-        C.DATA_TYPE_MEDIA, C.DATA_TYPE_MANIFEST -> 4
-        else -> super.getMinimumLoadableRetryCount(dataType)
+    @Volatile
+    var protectionLevel: Int = 0
+
+    override fun getMinimumLoadableRetryCount(dataType: Int): Int {
+        val level = protectionLevel.coerceIn(0, 3)
+        return when (dataType) {
+            C.DATA_TYPE_MEDIA_PROGRESSIVE_LIVE -> 6 + level
+            C.DATA_TYPE_MEDIA, C.DATA_TYPE_MANIFEST -> 4 + level
+            else -> super.getMinimumLoadableRetryCount(dataType)
+        }
     }
 
     override fun getRetryDelayMsFor(
@@ -33,7 +33,7 @@ class TvFullLiveLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
                     1 -> 250L
                     2 -> 600L
                     3 -> 1200L
-                    else -> 2000L
+                    else -> (1500L + protectionLevel * 250L).coerceAtMost(2500L)
                 }
             }
         }
