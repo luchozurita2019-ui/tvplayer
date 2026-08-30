@@ -1,7 +1,7 @@
-TV FULL PRO final release build requested after v20 LIVE stability tuning: preserve fast startup, increase LIVE reserve to 5-15s on normal TVs and 4-12s on LOW_RAM, keep 1s initial playback target, raise rebuffer reserve to 2.5s/2.2s, use 4s connect and 10s read timeout for unstable servers, add bounded buffering-stall soft recovery in the same ExoPlayer/Surface, allow two unexpected-END recoveries, and reset recovery budget only after 30s stable playback. Initial dead-channel deadline remains 4.5s. VOD/Series architecture and updater/navigation fixes remain unchanged.
-validated_run=33295637072
-validation_result=flutter analyze success; Android debug compile success; LIVE stability profile and architecture guardrails success
-source_commit=8902fc5ddddf58a06fe96c83cb78877fd8fdae63
-version=1.2.8+20
+TV FULL PRO final release build requested after v21 LIVE Session Guardian: preserve the v20 fast-start/stability profile, use a shared OkHttp LIVE connection pool with retryOnConnectionFailure, apply Media3 request/segment-level LoadErrorHandlingPolicy before whole-stream recovery, retry transient manifest/media/5xx/429 failures with bounded backoff, fail fast on 401/403/404/410, preserve 4.5s initial dead-channel deadline, 6.5s stall watchdog, same ExoPlayer/Surface soft recovery, LOW_RAM profile, DNS fallback, multi-audio, updater and D-pad fixes. VOD/Series route remains unchanged.
+validated_run=33312143390
+validation_result=flutter analyze success; Android debug compile success; LIVE session guardian and architecture guardrails success
+source_commit=4b0f8a64f10a5fadd804349ad43b8de23c1a9ad3
+version=1.2.9+21
 signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-30T03:00:00-03:00
+requested_at=2026-08-30T09:46:00-03:00
