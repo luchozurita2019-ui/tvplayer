@@ -1,0 +1,86 @@
+name: Apply TV FULL PRO Premium UI v17
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/apply-premium-ui-v17.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply premium neon interface
+        run: python .github/scripts/apply_tv_full_premium_ui_v17.py
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format Dart source
+        run: dart format lib
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Compile Android debug APK
+        run: >-
+          flutter build apk --debug
+          --dart-define=TV_FULL_ANDROID_TV=true
+          --target-platform android-arm64
+
+      - name: Verify premium UI and playback guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'version: 1.2.5+17' pubspec.yaml
+          grep -q 'TvFullPremiumBackground' lib/screens/source_content_screen.dart
+          grep -q 'TvFullClock' lib/screens/source_content_screen.dart
+          grep -q '1.065' lib/screens/source_content_screen.dart
+          grep -q 'tvFullGlassDecoration' lib/screens/xtream_live_screen.dart
+          grep -q 'tvFullGlassDecoration' lib/screens/xtream_movies_screen.dart
+          grep -q 'tvFullGlassDecoration' lib/screens/xtream_series_screen.dart
+          grep -q 'LIVE_STARTUP_DEADLINE_MS = 4500L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'setAudioTrack' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'setSubtitleTrack' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          git diff --check
+
+      - name: Commit premium UI source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            pubspec.yaml \
+            lib/screens/home_screen.dart \
+            lib/screens/source_content_screen.dart \
+            lib/screens/xtream_live_screen.dart \
+            lib/screens/xtream_movies_screen.dart \
+            lib/screens/xtream_series_screen.dart \
+            lib/widgets/tv_catalog_category_row.dart \
+            lib/widgets/tv_full_premium_ui.dart
+          git commit -m "TV FULL PRO 1.2.5+17: premium neon interface" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
