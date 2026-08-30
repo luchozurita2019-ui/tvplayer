@@ -1,6 +1,6 @@
-TV FULL PRO final release build requested after premium neon interface across Home, LIVE, Movies and Series: shared cinematic navy/black background, blue/violet accents, remote focus zoom/glow, premium catalog rows/cards, clock/date on Home and version identification preserved. Playback engine and LIVE optimizations remain unchanged.
-validated_run=33290922802
-validation_result=flutter analyze clean; Android debug compile success; premium UI checks success; LIVE/audio/subtitle playback guardrails success
-version=1.2.5+17
+TV FULL PRO final release build requested after v18 fixpack: series episode focus/zoom, reliable LIVE retry with remote ENTER/OK, update rechecks every five minutes with retry after network failure, and catalog/search scroll reset across LIVE, Movies and Series. Background and playback engine remain unchanged.
+validated_run=33292701684
+validation_result=flutter analyze success; Android debug compile success; requested focus/retry/update/scroll guardrails success
+version=1.2.6+18
 signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-30T00:49:00-03:00
+requested_at=2026-08-30T17:36:00-03:00
