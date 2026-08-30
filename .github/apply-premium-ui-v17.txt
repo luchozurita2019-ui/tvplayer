@@ -2,5 +2,5 @@ TV FULL PRO premium UI update request
 version=1.2.5+17
 source=1.2.4+16
 scope=home+live+movies+series+details+focus-zoom+neon-background
-attempt=2
-requested_at=2026-08-30T00:42:00-03:00
+attempt=3
+requested_at=2026-08-30T00:44:00-03:00
