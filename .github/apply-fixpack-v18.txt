@@ -1,0 +1,5 @@
+TV FULL PRO fixpack request
+version=1.2.6+18
+source=1.2.5+17
+scope=series-focus+live-retry+update-recheck+catalog-scroll-reset
+requested_at=2026-08-30T17:00:00-03:00
