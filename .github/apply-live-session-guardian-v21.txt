@@ -1,2 +1,3 @@
 TV FULL PRO 1.2.9+21
 Persistent LIVE session guardian: shared OkHttp connection pool, segment/request-level retry policy, permanent HTTP fail-fast, existing fast startup and stall watchdog preserved.
+retry=2
