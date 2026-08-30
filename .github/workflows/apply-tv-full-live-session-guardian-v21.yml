@@ -72,4 +72,6 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt pubspec.yaml pubspec.lock
           git commit -m "TV FULL PRO 1.2.9+21: add persistent live session guardian" || true
+          git fetch origin android-tv-full-pro-clean-source
+          git rebase origin/android-tv-full-pro-clean-source
           git push origin HEAD:android-tv-full-pro-clean-source
