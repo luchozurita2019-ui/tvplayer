@@ -1,6 +1,7 @@
-TV FULL PRO final release build requested after v19 corrections: restore direct DOWN-to-channel-list behavior during LIVE errors, give open channel drawer priority over error key handling, keep ENTER/OK on Retry, poll updates every five minutes and recheck on app resume, and replace the unstable aftv.news external launch with a visible/copyable Downloader short code. Playback engine remains unchanged.
-validated_run=33294067229
-validation_result=flutter analyze success; Android debug compile success; requested remote/update guardrails success
-version=1.2.7+19
+TV FULL PRO final release build requested after v20 LIVE stability tuning: preserve fast startup, increase LIVE reserve to 5-15s on normal TVs and 4-12s on LOW_RAM, keep 1s initial playback target, raise rebuffer reserve to 2.5s/2.2s, use 4s connect and 10s read timeout for unstable servers, add bounded buffering-stall soft recovery in the same ExoPlayer/Surface, allow two unexpected-END recoveries, and reset recovery budget only after 30s stable playback. Initial dead-channel deadline remains 4.5s. VOD/Series architecture and updater/navigation fixes remain unchanged.
+validated_run=33295637072
+validation_result=flutter analyze success; Android debug compile success; LIVE stability profile and architecture guardrails success
+source_commit=8902fc5ddddf58a06fe96c83cb78877fd8fdae63
+version=1.2.8+20
 signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-30T02:15:00-03:00
+requested_at=2026-08-30T03:00:00-03:00
