@@ -48,46 +48,52 @@ jobs:
       - name: Add automatic service expiry warnings
         run: python3 .github/scripts/apply_panel_service_expiry_v9.py
 
-      - name: Validate panel JavaScript
+      - name: Validate panel JavaScript and guardrails
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
-          text=Path('panel/index.html').read_text(encoding='utf-8')
-          m=re.search(r'<script type="module">(.*?)</script>', text, re.S)
-          if not m:
+
+          path = Path('panel/index.html')
+          text = path.read_text(encoding='utf-8')
+          module = re.search(r'<script type="module">(.*?)</script>', text, re.S)
+          if not module:
               raise SystemExit('module script not found in panel/index.html')
-          Path('/tmp/panel.mjs').write_text(m.group(1), encoding='utf-8')
+          Path('/tmp/panel.mjs').write_text(module.group(1), encoding='utf-8')
+
+          required = {
+              'customer deletion': 'data-action="delete-customer"',
+              'service validation action': 'data-action="validate-service"',
+              'service validation backend': 'tvf-service-validate',
+              'service save validation': 'Validar y guardar',
+              'expiry helper': 'function serviceExpiryInfo(service)',
+              'expiry warning copy': 'Las listas que vencen dentro de 7 días',
+              'automatic expiry copy': 'se completa automáticamente',
+              'expired row style': 'service-row-expired',
+              'payment access column': 'access_status',
+              'payment selector': 'access_state',
+              'payment due copy': 'Falta de pago',
+              'device payment badge': 'deviceStatusBadge',
+              'updates route': 'data-route="updates"',
+              'updates renderer': 'function renderUpdates',
+              'update backend': 'tvf-update',
+              'update control': 'Mostrar actualización',
+          }
+          missing = [label for label, marker in required.items() if marker not in text]
+          if missing:
+              raise SystemExit('Missing panel guardrails: ' + ', '.join(missing))
+
+          forbidden = {
+              'playlist validator navigation': 'Validador de listas',
+              'TiviMate route': 'data-route="tivimate"',
+          }
+          present = [label for label, marker in forbidden.items() if marker in text]
+          if present:
+              raise SystemExit('Forbidden panel modules present: ' + ', '.join(present))
+          if Path('panel/validator.html').exists():
+              raise SystemExit('validator.html must not be deployed')
           PY
           node --check /tmp/panel.mjs
-          grep -q 'data-action="delete-customer"' panel/index.html
-          grep -q 'data-action="validate-service"' panel/index.html
-          grep -q 'tvf-service-validate' panel/index.html
-          grep -q 'Validar y guardar' panel/index.html
-          grep -q 'function serviceExpiryInfo(service)' panel/index.html
-          grep -q 'Las listas que vencen dentro de 7 días' panel/index.html
-          grep -q 'se completa automáticamente' panel/index.html
-          grep -q 'service-row-expired' panel/index.html
-          grep -q 'access_status' panel/index.html
-          grep -q 'access_state' panel/index.html
-          grep -q 'Falta de pago' panel/index.html
-          grep -q 'deviceStatusBadge' panel/index.html
-          grep -q 'data-route="updates"' panel/index.html
-          grep -q 'function renderUpdates' panel/index.html
-          grep -q 'tvf-update' panel/index.html
-          grep -q 'Mostrar actualización' panel/index.html
-          if grep -q 'Validador de listas' panel/index.html; then
-            echo 'Playlist validator must not be deployed'
-            exit 1
-          fi
-          if [ -e panel/validator.html ]; then
-            echo 'validator.html must not be deployed'
-            exit 1
-          fi
-          if grep -q 'data-route="tivimate"' panel/index.html; then
-            echo 'TiviMate route must not be deployed'
-            exit 1
-          fi
 
       - name: Configure GitHub Pages
         uses: actions/configure-pages@v5
