@@ -10,6 +10,7 @@ on:
       - '.github/scripts/apply_panel_service_validation_v5.py'
       - '.github/scripts/apply_panel_payment_status_v6.py'
       - '.github/scripts/apply_panel_update_v8.py'
+      - '.github/scripts/apply_panel_playlist_validator_v1.py'
       - '.github/workflows/deploy-tv-full-panel.yml'
   workflow_dispatch:
 
@@ -44,18 +45,23 @@ jobs:
       - name: Add TV FULL PRO update control
         run: python3 .github/scripts/apply_panel_update_v8.py
 
+      - name: Add playlist validator navigation
+        run: python3 .github/scripts/apply_panel_playlist_validator_v1.py
+
       - name: Validate panel JavaScript
         run: |
           python3 - <<'PY'
           from pathlib import Path
           import re
-          text=Path('panel/index.html').read_text(encoding='utf-8')
-          m=re.search(r'<script type="module">(.*?)</script>', text, re.S)
-          if not m:
-              raise SystemExit('module script not found')
-          Path('/tmp/panel.mjs').write_text(m.group(1), encoding='utf-8')
+          for source, target in [('panel/index.html','/tmp/panel.mjs'), ('panel/validator.html','/tmp/validator.mjs')]:
+              text=Path(source).read_text(encoding='utf-8')
+              m=re.search(r'<script type="module">(.*?)</script>', text, re.S)
+              if not m:
+                  raise SystemExit(f'module script not found in {source}')
+              Path(target).write_text(m.group(1), encoding='utf-8')
           PY
           node --check /tmp/panel.mjs
+          node --check /tmp/validator.mjs
           grep -q 'data-action="delete-customer"' panel/index.html
           grep -q 'data-action="validate-service"' panel/index.html
           grep -q 'tvf-service-validate' panel/index.html
@@ -68,6 +74,10 @@ jobs:
           grep -q 'function renderUpdates' panel/index.html
           grep -q 'tvf-update' panel/index.html
           grep -q 'Mostrar actualización' panel/index.html
+          grep -q 'Validador de listas' panel/index.html
+          grep -q 'tvf-playlist-validator' panel/validator.html
+          grep -q 'Exportar solo OK' panel/validator.html
+          grep -q 'Escanear desde el inicio' panel/validator.html
           if grep -q 'data-route="tivimate"' panel/index.html; then
             echo 'TiviMate route must not be deployed'
             exit 1
