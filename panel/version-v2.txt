@@ -1,1 +1,1 @@
-TV FULL PRO Panel V2 - delete controls, device codes, masked sync preview, correct auth redirect.
+TV FULL PRO Panel V9 - automatic provider expiry, red expiring-service warnings, playlist validator removed.
