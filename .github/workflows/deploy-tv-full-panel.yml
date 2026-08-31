@@ -42,11 +42,11 @@ jobs:
       - name: Enable payment status
         run: python3 .github/scripts/apply_panel_payment_status_v6.py
 
-      - name: Add TV FULL PRO update control
-        run: python3 .github/scripts/apply_panel_update_v8.py
-
       - name: Add automatic service expiry warnings
         run: python3 .github/scripts/apply_panel_service_expiry_v9.py
+
+      - name: Add TV FULL PRO update control
+        run: python3 .github/scripts/apply_panel_update_v8.py
 
       - name: Validate panel JavaScript and guardrails
         run: |
