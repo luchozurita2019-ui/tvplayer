@@ -11,6 +11,7 @@ on:
       - '.github/scripts/apply_panel_payment_status_v6.py'
       - '.github/scripts/apply_panel_update_v8.py'
       - '.github/scripts/apply_panel_service_expiry_v9.py'
+      - '.github/scripts/apply_panel_nonblocking_validation_v10.py'
       - '.github/workflows/deploy-tv-full-panel.yml'
   workflow_dispatch:
 
@@ -48,6 +49,9 @@ jobs:
       - name: Add TV FULL PRO update control
         run: python3 .github/scripts/apply_panel_update_v8.py
 
+      - name: Make remote validation non-blocking
+        run: python3 .github/scripts/apply_panel_nonblocking_validation_v10.py
+
       - name: Validate panel JavaScript and guardrails
         run: |
           python3 - <<'PY'
@@ -65,7 +69,10 @@ jobs:
               'customer deletion': 'data-action="delete-customer"',
               'service validation action': 'data-action="validate-service"',
               'service validation backend': 'tvf-service-validate',
-              'service save validation': 'Validar y guardar',
+              'nonblocking save': '>Guardar servicio</button>',
+              'nonblocking active insert': 'active:true,server_url:null',
+              'background validation': 'validateExistingService(created.id,{showMessage:false,refreshAfter:true})',
+              'advisory validation status': "validation_status:result?.ok?'online':(definitive?'error':'unknown')",
               'expiry helper': 'function serviceExpiryInfo(service)',
               'expiry warning copy': 'Las listas que vencen dentro de 7 días',
               'automatic expiry copy': 'se completa automáticamente',
@@ -86,10 +93,13 @@ jobs:
           forbidden = {
               'playlist validator navigation': 'Validador de listas',
               'TiviMate route': 'data-route="tivimate"',
+              'blocking save message': 'No se guardó el servicio porque la fuente no pudo validarse.',
+              'validation forced inactive': 'El servicio quedó INACTIVO para que no se entregue a los dispositivos.',
+              'blocking activation': 'No se pudo activar el servicio.',
           }
           present = [label for label, marker in forbidden.items() if marker in text]
           if present:
-              raise SystemExit('Forbidden panel modules present: ' + ', '.join(present))
+              raise SystemExit('Forbidden panel modules/behaviors present: ' + ', '.join(present))
           if Path('panel/validator.html').exists():
               raise SystemExit('validator.html must not be deployed')
           PY
