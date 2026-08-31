@@ -86,11 +86,19 @@ text, count = create_pattern.subn(create_replacement, text, count=1)
 if count != 1:
     raise SystemExit('Nonblocking validation marker not found: createService')
 
-renew_pattern = re.compile(r"\$\('#renewCustomerForm'\)\.onsubmit=async e=>\{.*?\};", re.S)
-renew_replacement = "$('#renewCustomerForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const serviceId=String(f.get('service_id'));const expires=String(f.get('expires_at'));const {error}=await supabase.from('tvf_services').update({expires_at:new Date(expires+'T23:59:59').toISOString(),active:true}).eq('id',serviceId);if(error)return alert(error.message);closeModal();await refresh();validateExistingService(serviceId,{showMessage:false,refreshAfter:true});};"
-text, count = renew_pattern.subn(renew_replacement, text, count=1)
+renew_modal_pattern = re.compile(r"    function renewCustomerModal\(id\)\{.*?\n    \}\n\n    function exportCustomersCsv", re.S)
+renew_modal_replacement = '''    function renewCustomerModal(id){
+      const c=state.customers.find(x=>x.id===id); const services=customerServices(id); if(!c)return;
+      if(!services.length) return alert('Este cliente todavía no tiene servicios. Usá “+ Servicio” para crear uno.');
+      const plus30=new Date(Date.now()+30*86400000).toISOString().slice(0,10);
+      openModal('Renovar servicio',`<form id="renewCustomerForm"><div class="notice" style="margin:0 0 16px">Cliente: <b>${esc(c.name)}</b></div><div class="field"><label>Servicio</label><select name="service_id">${services.map(s=>`<option value="${s.id}">${esc(s.name)} · ${esc(s.service_type.toUpperCase())}</option>`).join('')}</select></div><div class="field"><label>Nueva fecha de vencimiento</label><input name="expires_at" type="date" value="${plus30}" required></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Renovar</button></div></form>`);
+      $('#renewCustomerForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const serviceId=String(f.get('service_id'));const expires=String(f.get('expires_at'));const {error}=await supabase.from('tvf_services').update({expires_at:new Date(expires+'T23:59:59').toISOString(),active:true}).eq('id',serviceId);if(error)return alert(error.message);closeModal();await refresh();validateExistingService(serviceId,{showMessage:false,refreshAfter:true});};
+    }
+
+    function exportCustomersCsv'''
+text, count = renew_modal_pattern.subn(renew_modal_replacement, text, count=1)
 if count != 1:
-    raise SystemExit('Nonblocking validation marker not found: renewCustomerForm')
+    raise SystemExit('Nonblocking validation marker not found: renewCustomerModal')
 
 toggle_pattern = re.compile(r"    async function toggleService\(id\)\{.*?\n    \}\n", re.S)
 toggle_replacement = '''    async function toggleService(id){
@@ -123,6 +131,7 @@ required = [
     "active:true,server_url:null",
     "validateExistingService(created.id,{showMessage:false,refreshAfter:true})",
     "function serviceOptions(){ return state.services.filter(s=>s.active)",
+    "validateExistingService(serviceId,{showMessage:false,refreshAfter:true})",
 ]
 for marker in required:
     if marker not in text:
