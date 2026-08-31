@@ -10,6 +10,7 @@ on:
       - '.github/scripts/apply_panel_service_validation_v5.py'
       - '.github/scripts/apply_panel_payment_status_v6.py'
       - '.github/scripts/apply_panel_update_v8.py'
+      - '.github/scripts/apply_panel_service_expiry_v9.py'
       - '.github/workflows/deploy-tv-full-panel.yml'
   workflow_dispatch:
 
@@ -44,6 +45,9 @@ jobs:
       - name: Add TV FULL PRO update control
         run: python3 .github/scripts/apply_panel_update_v8.py
 
+      - name: Add automatic service expiry warnings
+        run: python3 .github/scripts/apply_panel_service_expiry_v9.py
+
       - name: Validate panel JavaScript
         run: |
           python3 - <<'PY'
@@ -60,6 +64,10 @@ jobs:
           grep -q 'data-action="validate-service"' panel/index.html
           grep -q 'tvf-service-validate' panel/index.html
           grep -q 'Validar y guardar' panel/index.html
+          grep -q 'function serviceExpiryInfo(service)' panel/index.html
+          grep -q 'Las listas que vencen dentro de 7 días' panel/index.html
+          grep -q 'se completa automáticamente' panel/index.html
+          grep -q 'service-row-expired' panel/index.html
           grep -q 'access_status' panel/index.html
           grep -q 'access_state' panel/index.html
           grep -q 'Falta de pago' panel/index.html
@@ -70,6 +78,10 @@ jobs:
           grep -q 'Mostrar actualización' panel/index.html
           if grep -q 'Validador de listas' panel/index.html; then
             echo 'Playlist validator must not be deployed'
+            exit 1
+          fi
+          if [ -e panel/validator.html ]; then
+            echo 'validator.html must not be deployed'
             exit 1
           fi
           if grep -q 'data-route="tivimate"' panel/index.html; then
