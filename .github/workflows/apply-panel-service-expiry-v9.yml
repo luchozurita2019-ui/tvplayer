@@ -1,0 +1,62 @@
+name: Apply Panel Service Expiry V9
+
+on:
+  push:
+    branches:
+      - remote-provisioning-panel-v1
+    paths:
+      - '.github/scripts/apply_panel_service_expiry_v9.py'
+      - '.github/workflows/apply-panel-service-expiry-v9.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  patch-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout panel branch
+        uses: actions/checkout@v4
+        with:
+          ref: remote-provisioning-panel-v1
+          fetch-depth: 0
+
+      - name: Apply service expiry patch
+        run: python3 .github/scripts/apply_panel_service_expiry_v9.py
+
+      - name: Validate panel JavaScript
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+          text=Path('panel/index.html').read_text(encoding='utf-8')
+          m=re.search(r'<script type="module">(.*?)</script>', text, re.S)
+          if not m:
+              raise SystemExit('module script not found')
+          Path('/tmp/panel.mjs').write_text(m.group(1), encoding='utf-8')
+          PY
+          node --check /tmp/panel.mjs
+          grep -q 'function serviceExpiryInfo(service)' panel/index.html
+          grep -q 'service-row-soon' panel/index.html
+          grep -q 'service-row-expired' panel/index.html
+          grep -q 'providerExpiry(result)' panel/index.html
+          grep -q 'se completa automáticamente' panel/index.html
+          grep -q 'Las listas que vencen dentro de 7 días' panel/index.html
+          if grep -q 'Validador de listas' panel/index.html; then
+            echo 'Playlist validator must stay removed'
+            exit 1
+          fi
+
+      - name: Commit patched panel
+        run: |
+          if git diff --quiet -- panel/index.html; then
+            echo 'Panel already patched'
+            exit 0
+          fi
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add panel/index.html
+          git commit -m 'Show provider service expiry warnings'
+          git pull --rebase origin remote-provisioning-panel-v1
+          git push origin HEAD:remote-provisioning-panel-v1
