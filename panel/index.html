@@ -19,7 +19,7 @@
     .customer-toolbar{align-items:flex-end}.customer-toolbar .toolbar-copy{max-width:720px}.customer-toolbar .btn-row{justify-content:flex-end}
     .customer-controls{display:flex;align-items:center;justify-content:space-between;gap:14px;flex-wrap:wrap;margin:0 0 16px}.filter-pills{display:flex;gap:8px;flex-wrap:wrap}.filter-pill{border:1px solid var(--line);background:#0b1929;color:#b5c2d0;border-radius:999px;padding:9px 13px;font-size:11px;font-weight:850;cursor:pointer}.filter-pill:hover,.filter-pill.active{border-color:rgba(22,131,255,.5);background:rgba(22,131,255,.14);color:#fff}.customer-search{width:min(360px,100%)}
     .customer-summary{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:0 0 18px}.summary-chip{border:1px solid var(--line);background:rgba(11,24,40,.78);border-radius:15px;padding:13px 15px}.summary-chip .n{font-size:21px;font-weight:900}.summary-chip .t{font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:.7px;font-weight:850;margin-top:3px}
-    .customer-table table{min-width:1180px}.customer-table tbody tr{transition:.15s}.customer-table tbody tr:hover{background:rgba(22,131,255,.045)}.customer-table td{padding-top:11px;padding-bottom:11px}.customer-main{font-size:13px;font-weight:850}.customer-note{font-size:10px;color:var(--muted);margin-top:4px;max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.customer-meta{font-size:10px;color:var(--muted);margin-top:3px}.stack{display:flex;gap:5px;flex-wrap:wrap}.mini-tag{display:inline-flex;align-items:center;border-radius:7px;background:#10233a;border:1px solid #203c5c;padding:4px 7px;font-size:10px;font-weight:800;color:#c7ddf6}.badge.warn{color:#ffd779;border-color:rgba(229,189,85,.35);background:rgba(229,189,85,.10)}.badge.expired{color:#ff9ba2;border-color:rgba(255,110,120,.35);background:rgba(255,110,120,.10)}.badge.neutral{color:#b7c3d0;border-color:rgba(145,161,181,.28);background:rgba(145,161,181,.08)}.expiry-soon{color:#ffd779;font-weight:800}.expiry-expired{color:#ff9ba2;font-weight:800}.icon-action{min-width:37px;padding:7px 9px}.backend-strip{display:flex;align-items:center;justify-content:space-between;gap:12px}.backend-strip .muted{font-size:11px}.dashboard-list{display:grid;gap:8px}.dashboard-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #18314b;border-radius:12px;background:#091725}.dashboard-item b{font-size:12px}.dashboard-item small{display:block;color:var(--muted);margin-top:3px}
+    .customer-table table{min-width:1180px}.customer-table tbody tr{transition:.15s}.customer-table tbody tr:hover{background:rgba(22,131,255,.045)}.customer-table td{padding-top:11px;padding-bottom:11px}.customer-main{font-size:13px;font-weight:850}.customer-note{font-size:10px;color:var(--muted);margin-top:4px;max-width:250px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.customer-meta{font-size:10px;color:var(--muted);margin-top:3px}.stack{display:flex;gap:5px;flex-wrap:wrap}.mini-tag{display:inline-flex;align-items:center;border-radius:7px;background:#10233a;border:1px solid #203c5c;padding:4px 7px;font-size:10px;font-weight:800;color:#c7ddf6}.badge.warn{color:#ffd779;border-color:rgba(229,189,85,.35);background:rgba(229,189,85,.10)}.badge.expired{color:#ff9ba2;border-color:rgba(255,110,120,.35);background:rgba(255,110,120,.10)}.badge.neutral{color:#b7c3d0;border-color:rgba(145,161,181,.28);background:rgba(145,161,181,.08)}.expiry-soon{color:#ffd779;font-weight:800}.expiry-expired{color:#ff9ba2;font-weight:800}.service-row-soon{background:rgba(255,110,120,.075)}.service-row-expired{background:rgba(255,110,120,.14);box-shadow:inset 4px 0 0 var(--red)}.service-row-soon:hover,.service-row-expired:hover{background:rgba(255,110,120,.17)!important}.service-expiry{font-weight:900;white-space:nowrap}.service-expiry.soon,.service-expiry.expired{color:#ff9ba2}.service-expiry small{display:block;margin-top:3px;font-size:9px;color:var(--muted);font-weight:700}.service-expiry.expired small{color:#ff9ba2}.icon-action{min-width:37px;padding:7px 9px}.backend-strip{display:flex;align-items:center;justify-content:space-between;gap:12px}.backend-strip .muted{font-size:11px}.dashboard-list{display:grid;gap:8px}.dashboard-item{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 12px;border:1px solid #18314b;border-radius:12px;background:#091725}.dashboard-item b{font-size:12px}.dashboard-item small{display:block;color:var(--muted);margin-top:3px}
 
     @media(max-width:980px){.app{grid-template-columns:78px 1fr}.sidebar{padding:18px 10px}.sidebar .brand-title,.sidebar .brand-sub,.nav .label,.sidebar-note{display:none}.sidebar .brand{justify-content:center;margin-left:0;margin-right:0}.nav button{justify-content:center}.cards{grid-template-columns:repeat(2,1fr)}}
     @media(max-width:680px){.app{display:block}.sidebar{height:auto;position:static;border-right:0;border-bottom:1px solid var(--line);padding:10px}.sidebar .brand,.sidebar-note{display:none}.nav{display:flex;overflow:auto}.nav button{min-width:54px}.topbar{padding:0 16px}.content{padding:18px 14px}.cards,.grid2{grid-template-columns:1fr 1fr}.user span{display:none}.toolbar{align-items:flex-start;flex-direction:column}.search{max-width:none}.table-wrap{border-radius:12px}}
@@ -103,6 +103,30 @@
     const customerStatusBadge = h => `<span class="badge ${h.badge}">${h.label}</span>`;
     const customerExpiry = h => h.expires ? dateOnly(h.expires) : (h.key==='no_service'?'Sin servicio':'Sin vencimiento');
     const customerExpiryClass = h => h.key==='soon'?'expiry-soon':(h.key==='expired'?'expiry-expired':'');
+    function providerExpiry(result){
+      const raw=result?.expires_at||result?.details?.expires_at||null;
+      if(!raw)return null;
+      const d=new Date(raw);
+      return Number.isNaN(d.getTime())?null:d.toISOString();
+    }
+    function serviceExpiryInfo(service){
+      if(!service?.expires_at)return {key:'none',date:null,days:null,label:'Sin vencimiento'};
+      const d=new Date(service.expires_at);
+      if(Number.isNaN(d.getTime()))return {key:'none',date:null,days:null,label:'Sin vencimiento'};
+      const diff=d.getTime()-Date.now();
+      const days=Math.ceil(diff/86400000);
+      if(diff<0)return {key:'expired',date:d,days,label:'VENCIDA'};
+      if(days<=7)return {key:'soon',date:d,days,label:days<=1?'VENCE HOY':`VENCE EN ${days} DÍAS`};
+      return {key:'active',date:d,days,label:'ACTIVA'};
+    }
+    const serviceExpiryRowClass = info => info.key==='expired'?'service-row-expired':(info.key==='soon'?'service-row-soon':'');
+    const serviceExpiryCell = info => {
+      if(!info.date)return '<span class="muted">Sin vencimiento</span>';
+      const cls=info.key==='expired'?'expired':(info.key==='soon'?'soon':'');
+      const headline=(info.key==='expired'||info.key==='soon')?info.label:dateOnly(info.date.toISOString());
+      const detail=(info.key==='expired'||info.key==='soon')?dateOnly(info.date.toISOString()):'';
+      return `<div class="service-expiry ${cls}">${esc(headline)}${detail?`<small>${esc(detail)}</small>`:''}</div>`;
+    };
     const platformTags = devices => [...new Set(devices.map(d=>platformLabel(d.platform)))].map(v=>`<span class="mini-tag">${esc(v)}</span>`).join('') || '<span class="muted">—</span>';
     const versionTags = devices => [...new Set(devices.map(d=>d.app_version).filter(Boolean))].map(v=>`<span class="mini-tag">${esc(v)}</span>`).join('') || '<span class="muted">—</span>';
     function customerMatchesFilter(h, filter){
@@ -250,8 +274,8 @@
     function devicesTable(rows){ if(!rows.length)return '<div class="empty">No se encontraron dispositivos.</div>'; return `<div class="table-wrap"><table><thead><tr><th>Código</th><th>Nombre</th><th>Plataforma</th><th>Cliente</th><th>Última conexión</th><th>Estado</th><th></th></tr></thead><tbody>${rows.map(d=>`<tr><td class="code">${esc(d.device_code)}</td><td>${esc(d.device_name||'Sin nombre')}</td><td>${esc(platformLabel(d.platform))}</td><td>${esc(customerName(d.customer_id))}</td><td>${dt(d.last_seen_at)}</td><td>${statusBadge(d.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="edit-device" data-id="${d.id}">Editar</button><button class="btn btn-danger btn-small" data-action="delete-device" data-id="${d.id}">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>`; }
 
     function renderServices(){
-      $('#content').innerHTML=`<div class="toolbar"><div><h2>Servicios</h2><div class="muted">Las listas se validan antes de habilitarse. “Habilitado” indica permiso administrativo; “Conexión” confirma si la fuente respondió correctamente.</div></div><button class="btn btn-primary" data-action="new-service">+ Nuevo servicio</button></div>
-      ${state.services.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Tipo</th><th>Cliente</th><th>Servidor / URL</th><th>Credencial</th><th>Vence</th><th>Conexión</th><th>Habilitado</th><th></th></tr></thead><tbody>${state.services.map(s=>`<tr><td><b>${esc(s.name)}</b>${s.validated_at?`<div class="customer-meta">Validado: ${dt(s.validated_at)}</div>`:''}</td><td><span class="badge">${esc(s.service_type.toUpperCase())}</span></td><td>${esc(customerName(s.customer_id))}</td><td class="code">${esc(s.service_type==='m3u'?(s.m3u_url||''):(s.server_url||''))}</td><td>${s.service_type==='xtream'?`${esc(s.username||'')} · ••••••`:'—'}</td><td>${esc(dateOnly(s.expires_at))}</td><td>${validationBadge(s)}</td><td>${statusBadge(s.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="validate-service" data-id="${s.id}">Validar</button><button class="btn btn-secondary btn-small" data-action="toggle-service" data-id="${s.id}">${s.active?'Desactivar':'Activar'}</button><button class="btn btn-danger btn-small" data-action="delete-service" data-id="${s.id}">Borrar</button></div></td></tr>`).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios todavía.</div>'}`;
+      $('#content').innerHTML=`<div class="toolbar"><div><h2>Servicios</h2><div class="muted">El panel muestra el vencimiento informado por el proveedor cuando está disponible. Las listas que vencen dentro de 7 días o ya vencieron se resaltan en rojo.</div></div><button class="btn btn-primary" data-action="new-service">+ Nuevo servicio</button></div>
+      ${state.services.length?`<div class="table-wrap"><table><thead><tr><th>Servicio</th><th>Tipo</th><th>Cliente</th><th>Servidor / URL</th><th>Credencial</th><th>Vence</th><th>Conexión</th><th>Habilitado</th><th></th></tr></thead><tbody>${state.services.map(s=>{const expiry=serviceExpiryInfo(s);return `<tr class="${serviceExpiryRowClass(expiry)}"><td><b>${esc(s.name)}</b>${s.validated_at?`<div class="customer-meta">Validado: ${dt(s.validated_at)}</div>`:''}</td><td><span class="badge">${esc(s.service_type.toUpperCase())}</span></td><td>${esc(customerName(s.customer_id))}</td><td class="code">${esc(s.service_type==='m3u'?(s.m3u_url||''):(s.server_url||''))}</td><td>${s.service_type==='xtream'?`${esc(s.username||'')} · ••••••`:'—'}</td><td>${serviceExpiryCell(expiry)}</td><td>${validationBadge(s)}</td><td>${statusBadge(s.active)}</td><td><div class="actions"><button class="btn btn-secondary btn-small" data-action="validate-service" data-id="${s.id}">Validar</button><button class="btn btn-secondary btn-small" data-action="toggle-service" data-id="${s.id}">${s.active?'Desactivar':'Activar'}</button><button class="btn btn-danger btn-small" data-action="delete-service" data-id="${s.id}">Borrar</button></div></td></tr>`;}).join('')}</tbody></table></div>`:'<div class="empty">No hay servicios todavía.</div>'}`;
     }
 
     function renderAssignments(){
@@ -313,7 +337,9 @@
       const service=state.services.find(x=>x.id===id);
       if(!service) return {ok:false,status:'error',message:'Servicio no encontrado.'};
       const result=await runServiceValidation({service_id:id});
+      const detectedExpiry=providerExpiry(result);
       const update={...validationFields(result)};
+      if(!service.expires_at&&detectedExpiry) update.expires_at=detectedExpiry;
       if(!result.ok) update.active=false;
       const {error}=await supabase.from('tvf_services').update(update).eq('id',id);
       if(error){ if(showMessage) alert(error.message); return {ok:false,status:'error',message:error.message}; }
@@ -324,7 +350,7 @@ El servicio quedó INACTIVO para que no se entregue a los dispositivos.`);
       return result;
     }
 
-    function newServiceModal(customerId=''){ openModal('Nuevo servicio remoto',`<form id="serviceForm"><div class="grid2"><div class="field"><label>Nombre</label><input name="name" required autofocus placeholder="Ej: FULL TV Juan"></div><div class="field"><label>Cliente</label><select name="customer_id">${customerOptions(customerId)}</select></div></div><div class="grid2"><div class="field"><label>Tipo</label><select id="serviceType" name="service_type"><option value="m3u">M3U</option><option value="xtream">Xtream</option></select></div><div class="field"><label>Vencimiento</label><input name="expires_at" type="date"></div></div><div id="m3uFields"><div class="field"><label>URL M3U</label><input name="m3u_url" placeholder="http://servidor/lista.m3u"></div></div><div id="xtreamFields" class="hidden"><div class="field"><label>Servidor / Host</label><input name="server_url" placeholder="http://servidor:puerto"></div><div class="grid2"><div class="field"><label>Usuario</label><input name="username"></div><div class="field"><label>Contraseña</label><input name="password" type="password"></div></div></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Validar y guardar</button></div></form>`); const t=$('#serviceType'); t.onchange=()=>{$('#m3uFields').classList.toggle('hidden',t.value!=='m3u');$('#xtreamFields').classList.toggle('hidden',t.value!=='xtream');}; $('#serviceForm').onsubmit=createService; }
+    function newServiceModal(customerId=''){ openModal('Nuevo servicio remoto',`<form id="serviceForm"><div class="grid2"><div class="field"><label>Nombre</label><input name="name" required autofocus placeholder="Ej: FULL TV Juan"></div><div class="field"><label>Cliente</label><select name="customer_id">${customerOptions(customerId)}</select></div></div><div class="grid2"><div class="field"><label>Tipo</label><select id="serviceType" name="service_type"><option value="m3u">M3U</option><option value="xtream">Xtream</option></select></div><div class="field"><label>Vencimiento</label><input name="expires_at" type="date"><div class="customer-meta">Podés dejarlo vacío: si el proveedor informa la fecha, se completa automáticamente.</div></div></div><div id="m3uFields"><div class="field"><label>URL M3U</label><input name="m3u_url" placeholder="http://servidor/get.php?username=..."></div></div><div id="xtreamFields" class="hidden"><div class="field"><label>Servidor / Host</label><input name="server_url" placeholder="http://servidor:puerto"></div><div class="grid2"><div class="field"><label>Usuario</label><input name="username"></div><div class="field"><label>Contraseña</label><input name="password" type="password"></div></div></div><div class="notice" style="margin:4px 0 0">En Xtream, y en enlaces M3U que incluyan usuario y contraseña, TV FULL intentará leer automáticamente la fecha de vencimiento publicada por el proveedor.</div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Validar y guardar</button></div></form>`); const t=$('#serviceType'); t.onchange=()=>{$('#m3uFields').classList.toggle('hidden',t.value!=='m3u');$('#xtreamFields').classList.toggle('hidden',t.value!=='xtream');}; $('#serviceForm').onsubmit=createService; }
     async function createService(e){
       e.preventDefault();
       const form=e.currentTarget,submit=form.querySelector('button[type="submit"],button:not([type])');
@@ -345,10 +371,16 @@ El servicio quedó INACTIVO para que no se entregue a los dispositivos.`);
 
 ${result.message}`);
       }
+      const detectedExpiry=providerExpiry(result);
+      const autoApplied=!row.expires_at&&!!detectedExpiry;
+      if(autoApplied)row.expires_at=detectedExpiry;
       Object.assign(row,validationFields(result),{active:true});
       const {error}=await supabase.from('tvf_services').insert(row);
       if(error){if(submit){submit.disabled=false;submit.textContent='Validar y guardar';}return alert(error.message);}
       closeModal();await refresh();
+      if(autoApplied)alert(`Servicio guardado.
+
+El proveedor informa vencimiento: ${dateOnly(detectedExpiry)}`);
     }
 
     function assignmentModal(){ if(!state.devices.length||!state.services.length)return alert('Necesitás al menos un dispositivo y un servicio.'); openModal('Asignar servicio',`<form id="assignmentForm"><div class="field"><label>Dispositivo</label><select name="device_id" required>${deviceOptions()}</select></div><div class="field"><label>Servicio</label><select name="service_id" required>${serviceOptions()}</select></div><div class="field"><label>Orden</label><input name="display_order" type="number" value="0" min="0"></div><div class="modal-foot" style="margin:20px -20px -20px"><button type="button" class="btn btn-secondary" data-close>Cancelar</button><button class="btn btn-primary">Asignar</button></div></form>`); $('#assignmentForm').onsubmit=async e=>{e.preventDefault();const f=new FormData(e.currentTarget);const {error}=await supabase.from('tvf_device_services').insert({device_id:String(f.get('device_id')),service_id:String(f.get('service_id')),display_order:Number(f.get('display_order')||0),enabled:true});if(error)return alert(error.message);closeModal();await refresh();}; }
@@ -374,7 +406,9 @@ ${result.message}`);
         if(error)return alert(error.message);await refresh();return;
       }
       const result=await runServiceValidation({service_id:id});
+      const detectedExpiry=providerExpiry(result);
       const update={...validationFields(result),active:!!result.ok};
+      if(!s.expires_at&&detectedExpiry) update.expires_at=detectedExpiry;
       const {error}=await supabase.from('tvf_services').update(update).eq('id',id);
       if(error)return alert(error.message);
       if(!result.ok)alert(`No se pudo activar el servicio.
