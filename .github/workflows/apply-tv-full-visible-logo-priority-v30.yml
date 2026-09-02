@@ -64,7 +64,7 @@ jobs:
           grep -q '^version: 1.3.8+30$' pubspec.yaml
           grep -q 'Scrollable.maybeOf(context)?.position' lib/widgets/cached_artwork_image.dart
           grep -q '_isInLoadViewport' lib/widgets/cached_artwork_image.dart
-          grep -q 'cacheExtent: 0' lib/widgets/tv_live_premium_catalog.dart
+          grep -q 'scrollCacheExtent: 0' lib/widgets/tv_live_premium_catalog.dart
           grep -q 'addAutomaticKeepAlives: false' lib/widgets/tv_live_premium_catalog.dart
           grep -q 'Duration(milliseconds: 520)' lib/widgets/tv_live_premium_catalog.dart
           grep -q 'priority: 300' lib/widgets/tv_live_premium_catalog.dart
