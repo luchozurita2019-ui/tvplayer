@@ -9,7 +9,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -41,7 +41,8 @@ jobs:
           dart format --output=none --set-exit-if-changed lib
           flutter analyze
           flutter test
-          grep -q '^version: 1.3.8+30$' pubspec.yaml
+          grep -Eq '^version: [0-9]+\.[0-9]+\.[0-9]+\+[0-9]+$' pubspec.yaml
+          test -f tv_full_installer/latest.json
 
       - name: Configure persistent release signing
         shell: bash
@@ -71,21 +72,99 @@ jobs:
           --target-platform android-arm,android-arm64
 
       - name: Prepare and verify split APKs
+        id: prepare
         shell: bash
         run: |
           set -euo pipefail
           VERSION="$(sed -n 's/^version: //p' pubspec.yaml | head -n1)"
-          test "$VERSION" = '1.3.8+30'
+          VERSION_NAME="${VERSION%%+*}"
+          VERSION_CODE="${VERSION##*+}"
           mkdir -p artifact
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "artifact/TV-FULL-PRO-${VERSION}-ARM64.apk"
           cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "artifact/TV-FULL-PRO-${VERSION}-ARM32.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-ARM32.apk
+
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
-          for apk in artifact/*.apk; do
+          for apk in artifact/TV-FULL-PRO-ARM32.apk artifact/TV-FULL-PRO-ARM64.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
             grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' "$apk.signature.txt"
-            sha256sum "$apk" | tee "$apk.sha256.txt"
           done
+
+          ARM32_SHA="$(sha256sum artifact/TV-FULL-PRO-ARM32.apk | awk '{print $1}')"
+          ARM64_SHA="$(sha256sum artifact/TV-FULL-PRO-ARM64.apk | awk '{print $1}')"
+          ARM32_SIZE="$(stat -c '%s' artifact/TV-FULL-PRO-ARM32.apk)"
+          ARM64_SIZE="$(stat -c '%s' artifact/TV-FULL-PRO-ARM64.apk)"
+          printf '%s  %s\n' "$ARM32_SHA" 'TV-FULL-PRO-ARM32.apk' > artifact/TV-FULL-PRO-ARM32.apk.sha256.txt
+          printf '%s  %s\n' "$ARM64_SHA" 'TV-FULL-PRO-ARM64.apk' > artifact/TV-FULL-PRO-ARM64.apk.sha256.txt
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "arm32_sha=$ARM32_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm64_sha=$ARM64_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm32_size=$ARM32_SIZE" >> "$GITHUB_OUTPUT"
+          echo "arm64_size=$ARM64_SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish stable ARM32 and ARM64 URLs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=tv-full-pro-latest
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              artifact/TV-FULL-PRO-ARM32.apk \
+              artifact/TV-FULL-PRO-ARM64.apk \
+              --clobber
+          else
+            gh release create "$TAG" \
+              artifact/TV-FULL-PRO-ARM32.apk \
+              artifact/TV-FULL-PRO-ARM64.apk \
+              --title "TV FULL PRO latest" \
+              --notes "Canal estable de TV FULL PRO. El Installer selecciona automáticamente ARM32 o ARM64."
+          fi
+
+      - name: Update TV FULL Installer manifest
+        shell: bash
+        env:
+          VERSION_NAME: ${{ steps.prepare.outputs.version_name }}
+          VERSION_CODE: ${{ steps.prepare.outputs.version_code }}
+          ARM32_SHA: ${{ steps.prepare.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.prepare.outputs.arm64_sha }}
+          ARM32_SIZE: ${{ steps.prepare.outputs.arm32_size }}
+          ARM64_SIZE: ${{ steps.prepare.outputs.arm64_size }}
+        run: |
+          set -euo pipefail
+          git fetch origin android-tv-full-pro-clean-source
+          git checkout android-tv-full-pro-clean-source
+          git reset --hard origin/android-tv-full-pro-clean-source
+          mkdir -p tv_full_installer
+          cat > tv_full_installer/latest.json <<EOF
+          {
+            "versionName": "$VERSION_NAME",
+            "versionCode": $VERSION_CODE,
+            "packageName": "com.tvfull.pro.tv.v10safe",
+            "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
+            "arm32": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk",
+              "sha256": "$ARM32_SHA",
+              "size": $ARM32_SIZE
+            },
+            "arm64": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk",
+              "sha256": "$ARM64_SHA",
+              "size": $ARM64_SIZE
+            }
+          }
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tv_full_installer/latest.json
+          git commit -m "Update TV FULL Installer manifest to ${VERSION_NAME}+${VERSION_CODE}" || true
+          git push origin HEAD:android-tv-full-pro-clean-source
 
       - name: Remove signing material
         if: always()
@@ -94,7 +173,7 @@ jobs:
       - name: Upload split APKs
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-SPLIT-1.3.8+30
+          name: TV-FULL-PRO-SPLIT
           path: artifact/
           if-no-files-found: error
           retention-days: 30
