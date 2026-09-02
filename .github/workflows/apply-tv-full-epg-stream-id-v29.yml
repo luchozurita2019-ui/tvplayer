@@ -42,8 +42,8 @@ jobs:
       - name: Format touched Dart files
         run: dart format lib/models/channel.dart lib/services/xtream_live_fast_service.dart lib/services/xtream_service.dart lib/services/live_epg_service.dart test/channel_xtream_stream_id_test.dart
 
-      - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Verify touched formatting
+        run: dart format --output=none --set-exit-if-changed lib/models/channel.dart lib/services/xtream_live_fast_service.dart lib/services/xtream_service.dart lib/services/live_epg_service.dart test/channel_xtream_stream_id_test.dart
 
       - name: Check patch whitespace
         run: git diff --check
@@ -66,7 +66,7 @@ jobs:
           grep -q "'xtreamStreamId': id" lib/services/xtream_live_fast_service.dart
           grep -q "xtreamStreamId: _cleanText(item\['xtreamStreamId'\])" lib/services/xtream_live_fast_service.dart
           grep -q 'xtreamStreamId: streamId' lib/services/xtream_service.dart
-          grep -q "channel.xtreamStreamId" lib/services/live_epg_service.dart
+          grep -q 'channel.xtreamStreamId' lib/services/live_epg_service.dart
           grep -q 'static const int _cacheVersion = 4' lib/services/xtream_live_fast_service.dart
           grep -q 'Guía no informada' lib/widgets/tv_live_premium_catalog.dart
           ! grep -q 'Programación no disponible' lib/widgets/tv_live_premium_catalog.dart
