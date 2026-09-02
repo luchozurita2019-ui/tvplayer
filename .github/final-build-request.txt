@@ -1,9 +1,7 @@
-TV FULL PRO final release build requested for classic bundled-list performance test.
-validated_run=33604841960
-validation_result=dart format success; flutter analyze success; flutter test success including bundled classic asset parser; Android TV debug compile success; v26 performance guardrails and historical signing continuity success
-validated_code_commit=b4ae908f7940a1089e98f23dbc3c51a0cbfc91b6
-version=1.3.4+26
+TV FULL PRO final release build requested for premium lightweight LIVE UI.
+validated_code_commit=8d6e0ea0f04e23b4ed53ec93b66d34a8331b52b9
+version=1.3.5+27
 release_target=universal ARM Android TV APK
 signing=persistent TV FULL PRO release keystore; must match historical certificate SHA-256 40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a
-notes=remove runtime remote logo catalog scanning; use compact bundled 313-key logo index; bundle supplied public M3U as Lista clásica asset with 366 EXTINF entries; preserve channel-health dead skip behavior and all 1.3.2+24 LIVE timings.
-requested_at=2026-09-02T04:47:00-03:00
+notes=premium lightweight LIVE catalog for M3U/Xtream; intelligent sports highlights from favorites and real usage; transparent player HUD; larger sharp channel logo; red neon EN VIVO badge; preserve v26 logo performance, classic list, channel-health behavior and all LIVE playback timings.
+requested_at=2026-09-02T09:21:00-03:00
