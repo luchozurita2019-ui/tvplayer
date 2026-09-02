@@ -37,6 +37,9 @@ jobs:
       - name: Apply channel health and logo fallback v25
         run: python3 .github/scripts/apply_tv_full_channel_health_logos_v25.py
 
+      - name: Resolve dependencies
+        run: flutter pub get
+
       - name: Format touched Dart files
         run: >-
           dart format
@@ -49,9 +52,6 @@ jobs:
           lib/screens/channel_list_screen.dart
           lib/screens/xtream_live_screen.dart
           test/channel_logo_resolver_test.dart
-
-      - name: Resolve dependencies
-        run: flutter pub get
 
       - name: Verify touched-file formatting
         run: >-
