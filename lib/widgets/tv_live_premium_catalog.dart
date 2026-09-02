@@ -106,7 +106,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
     final loader = widget.programGuideLoader;
     if (loader == null) return;
 
-    _guideDebounce = Timer(const Duration(milliseconds: 220), () async {
+    _guideDebounce = Timer(const Duration(milliseconds: 520), () async {
       if (!mounted || generation != _guideGeneration) return;
       setState(() => _guideLoading = true);
       LiveProgramGuide? result;
@@ -186,6 +186,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                           ),
                         )
                       : GridView.builder(
+                          addAutomaticKeepAlives: false,
                           key: ValueKey<String>(
                             'premium-live:${widget.selectedCategory ?? 'all'}:${widget.query}',
                           ),
@@ -304,7 +305,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                     fit: BoxFit.contain,
                     cacheWidth: 172,
                     cacheHeight: 172,
-                    priority: 110,
+                    priority: 300,
                     prefetchExtent: 0,
                     fallback: const Icon(
                       Icons.live_tv_rounded,
@@ -621,7 +622,7 @@ class _LiveChannelCardState extends State<_LiveChannelCard> {
                     fit: BoxFit.contain,
                     cacheWidth: 80,
                     cacheHeight: 80,
-                    priority: _focused ? 100 : 25,
+                    priority: _focused ? 220 : 120,
                     prefetchExtent: 0,
                     fallback: const Icon(Icons.live_tv_rounded, size: 21),
                   ),
