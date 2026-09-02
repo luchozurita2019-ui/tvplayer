@@ -71,8 +71,9 @@ jobs:
           grep -q 'Guía no informada' lib/widgets/tv_live_premium_catalog.dart
           ! grep -q 'Programación no disponible' lib/widgets/tv_live_premium_catalog.dart
           ! grep -q 'iptv-org.github.io/api/logos.json' lib/services/channel_logo_resolver_service.dart
-          grep -q 'LIVE_STARTUP_MAX_WAIT_MS = 25000L' android/app/src/main/kotlin/com/tvfull/pro/tv/v10safe/MainActivity.kt
-          grep -q 'LIVE_STARTUP_NO_PROGRESS_MS = 9000L' android/app/src/main/kotlin/com/tvfull/pro/tv/v10safe/MainActivity.kt
+          grep -q 'LIVE_STARTUP_MAX_WAIT_MS = 25000L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'LIVE_STARTUP_NO_PROGRESS_MS = 9000L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'connectTimeout(4, TimeUnit.SECONDS)' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
 
       - name: Commit TV FULL PRO 1.3.7+29
         shell: bash
