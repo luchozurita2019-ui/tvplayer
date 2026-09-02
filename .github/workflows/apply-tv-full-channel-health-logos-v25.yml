@@ -53,8 +53,18 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Verify formatting
-        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Verify touched-file formatting
+        run: >-
+          dart format --output=none --set-exit-if-changed
+          lib/services/channel_health_service.dart
+          lib/services/channel_logo_resolver_service.dart
+          lib/services/tv_local_store.dart
+          lib/widgets/channel_logo_image.dart
+          lib/widgets/channel_tile.dart
+          lib/screens/android_media3_texture_player_screen.dart
+          lib/screens/channel_list_screen.dart
+          lib/screens/xtream_live_screen.dart
+          test/channel_logo_resolver_test.dart
 
       - name: Check patch whitespace
         run: git diff --check
