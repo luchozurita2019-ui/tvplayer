@@ -41,7 +41,7 @@ jobs:
           dart format --output=none --set-exit-if-changed lib
           flutter analyze
           flutter test
-          grep -q 'version: 1.3.6+28' pubspec.yaml
+          grep -q '^version: 1.3.8+30$' pubspec.yaml
 
       - name: Configure persistent release signing
         shell: bash
@@ -74,15 +74,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          VERSION="$(sed -n 's/^version: //p' pubspec.yaml | head -n1)"
+          test "$VERSION" = '1.3.8+30'
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-1.3.6+28-ARM64.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-1.3.6+28-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "artifact/TV-FULL-PRO-${VERSION}-ARM64.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "artifact/TV-FULL-PRO-${VERSION}-ARM32.apk"
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           for apk in artifact/*.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
             grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' "$apk.signature.txt"
-            sha256sum "$apk"
+            sha256sum "$apk" | tee "$apk.sha256.txt"
           done
 
       - name: Remove signing material
@@ -92,7 +94,7 @@ jobs:
       - name: Upload split APKs
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-SPLIT
+          name: TV-FULL-PRO-SPLIT-1.3.8+30
           path: artifact/
           if-no-files-found: error
           retention-days: 30
