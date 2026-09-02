@@ -399,13 +399,13 @@ class _ProgramGuidePanel extends StatelessWidget {
     final current = guide?.now;
     final next = guide?.next;
     if (!enabled) {
-      return const _GuideFallback(message: 'Programación no disponible');
+      return const _GuideFallback(message: 'Guía no informada');
     }
     if (loading) {
       return const _GuideFallback(message: 'Consultando programación…');
     }
     if (current == null && next == null) {
-      return const _GuideFallback(message: 'Programación no disponible');
+      return const _GuideFallback(message: 'Guía no informada');
     }
 
     return Column(
