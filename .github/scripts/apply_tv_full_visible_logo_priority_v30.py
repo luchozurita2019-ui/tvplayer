@@ -212,7 +212,7 @@ text = catalog.read_text()
 text = text.replace('Timer(const Duration(milliseconds: 220), () async {',
                     'Timer(const Duration(milliseconds: 520), () async {', 1)
 text = text.replace("GridView.builder(\n                          key:",
-                    "GridView.builder(\n                          scrollCacheExtent: 0,\n                          addAutomaticKeepAlives: false,\n                          key:", 1)
+                    "GridView.builder(\n                          addAutomaticKeepAlives: false,\n                          key:", 1)
 text = text.replace('priority: 110,', 'priority: 300,', 1)
 text = text.replace('priority: _focused ? 100 : 25,',
                     'priority: _focused ? 220 : 120,', 1)
