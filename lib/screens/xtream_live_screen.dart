@@ -12,6 +12,7 @@ import '../services/artwork_cache_service.dart';
 import '../services/catalog_index.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
+import '../services/live_epg_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/remote_access_guard.dart';
 import '../services/section_catalog_service.dart';
@@ -391,6 +392,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         },
         isFavorite: provider.isFavorite,
         onFavoriteToggle: provider.toggleFavorite,
+        programGuideLoader: (channel) => LiveEpgService.instance
+            .loadXtreamNowNext(widget.playlist.source, channel),
       );
     }
 

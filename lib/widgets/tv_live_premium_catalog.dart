@@ -4,7 +4,7 @@ import 'package:flutter/material.dart';
 
 import '../models/channel.dart';
 import '../services/device_performance_service.dart';
-import '../services/live_channel_usage_service.dart';
+import '../services/live_epg_service.dart';
 import 'channel_logo_image.dart';
 import 'tv_catalog_category_row.dart';
 import 'tv_full_premium_ui.dart';
@@ -20,6 +20,7 @@ class TvLivePremiumCatalog extends StatefulWidget {
   final ValueChanged<Channel> onPlay;
   final bool Function(Channel channel) isFavorite;
   final ValueChanged<Channel> onFavoriteToggle;
+  final LiveProgramGuideLoader? programGuideLoader;
 
   const TvLivePremiumCatalog({
     super.key,
@@ -33,6 +34,7 @@ class TvLivePremiumCatalog extends StatefulWidget {
     required this.isFavorite,
     required this.onFavoriteToggle,
     this.showSearchField = true,
+    this.programGuideLoader,
   });
 
   @override
@@ -40,15 +42,20 @@ class TvLivePremiumCatalog extends StatefulWidget {
 }
 
 class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
-  final LiveChannelUsageService _usage = LiveChannelUsageService.instance;
   Channel? _focusedChannel;
+  LiveProgramGuide? _guide;
+  Timer? _guideDebounce;
+  int _guideGeneration = 0;
+  bool _guideLoading = false;
 
   @override
   void initState() {
     super.initState();
-    unawaited(_usage.ensureLoaded().then((_) {
-      if (mounted) setState(() {});
-    }));
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && widget.channels.isNotEmpty && _focusedChannel == null) {
+        _focusChannel(widget.channels.first);
+      }
+    });
   }
 
   @override
@@ -57,23 +64,69 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
     final focused = _focusedChannel;
     if (focused != null &&
         !widget.channels.any((item) => item.uniqueKey == focused.uniqueKey)) {
-      _focusedChannel = null;
+      if (widget.channels.isEmpty) {
+        _guideDebounce?.cancel();
+        _guideGeneration++;
+        _focusedChannel = null;
+        _guide = null;
+        _guideLoading = false;
+      } else {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) _focusChannel(widget.channels.first);
+        });
+      }
+    } else if (!identical(
+            oldWidget.programGuideLoader, widget.programGuideLoader) &&
+        focused != null) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) _focusChannel(focused, forceGuideRefresh: true);
+      });
     }
   }
 
   @override
+  void dispose() {
+    _guideDebounce?.cancel();
+    _guideGeneration++;
+    super.dispose();
+  }
+
+  void _focusChannel(Channel channel, {bool forceGuideRefresh = false}) {
+    final same = _focusedChannel?.uniqueKey == channel.uniqueKey;
+    if (same && !forceGuideRefresh) return;
+
+    _guideDebounce?.cancel();
+    final generation = ++_guideGeneration;
+    setState(() {
+      _focusedChannel = channel;
+      _guide = null;
+      _guideLoading = false;
+    });
+
+    final loader = widget.programGuideLoader;
+    if (loader == null) return;
+
+    _guideDebounce = Timer(const Duration(milliseconds: 220), () async {
+      if (!mounted || generation != _guideGeneration) return;
+      setState(() => _guideLoading = true);
+      LiveProgramGuide? result;
+      try {
+        result = await loader(channel);
+      } catch (_) {
+        result = null;
+      }
+      if (!mounted || generation != _guideGeneration) return;
+      setState(() {
+        _guide = result;
+        _guideLoading = false;
+      });
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    final featured = widget.query.trim().isEmpty
-        ? _usage.featuredChannels(
-            widget.channels,
-            isFavorite: widget.isFavorite,
-            limit: 7,
-          )
-        : const <Channel>[];
     final hero = _focusedChannel ??
-        (featured.isNotEmpty
-            ? featured.first
-            : (widget.channels.isNotEmpty ? widget.channels.first : null));
+        (widget.channels.isNotEmpty ? widget.channels.first : null);
 
     return Row(
       children: [
@@ -118,31 +171,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                   const SizedBox(height: 8),
                   _hero(hero),
                 ],
-                if (featured.isNotEmpty) ...[
-                  const SizedBox(height: 10),
-                  const _SectionTitle(
-                    title: 'Canales destacados',
-                    subtitle: 'Partidos y deportes · favoritos y más usados',
-                  ),
-                  const SizedBox(height: 6),
-                  SizedBox(
-                    height: 68,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: featured.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 8),
-                      itemBuilder: (context, index) {
-                        final channel = featured[index];
-                        return _FeaturedChannelCard(
-                          channel: channel,
-                          onFocus: () =>
-                              setState(() => _focusedChannel = channel),
-                          onPlay: () => widget.onPlay(channel),
-                        );
-                      },
-                    ),
-                  ),
-                ],
                 const SizedBox(height: 10),
                 _SectionTitle(
                   title: widget.selectedCategory ?? 'Todos los canales',
@@ -174,8 +202,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                             final channel = widget.channels[index];
                             return _LiveChannelCard(
                               channel: channel,
-                              onFocus: () =>
-                                  setState(() => _focusedChannel = channel),
+                              onFocus: () => _focusChannel(channel),
                               onPlay: () => widget.onPlay(channel),
                             );
                           },
@@ -244,84 +271,49 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
   Widget _hero(Channel channel) {
     final group = channel.group?.trim();
     return Container(
-      height: 145,
+      height: 150,
+      padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
       decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(18),
+        borderRadius: BorderRadius.circular(16),
         gradient: const LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [
-            Color(0xF0121D35),
-            Color(0xF0091020),
-            Color(0xF0040911),
-          ],
+          colors: [Color(0xEC10192B), Color(0xEC070D17)],
         ),
         border: Border.all(color: Colors.white.withValues(alpha: .10)),
       ),
-      clipBehavior: Clip.antiAlias,
-      child: Stack(
+      child: Row(
         children: [
-          Positioned(
-            right: -18,
-            top: -38,
-            child: IgnorePointer(
-              child: Icon(
-                Icons.live_tv_rounded,
-                size: 210,
-                color: tvFullCyan.withValues(alpha: .035),
-              ),
-            ),
-          ),
-          Positioned(
-            right: 34,
-            bottom: -48,
-            child: IgnorePointer(
-              child: Container(
-                width: 210,
-                height: 105,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(999),
-                  boxShadow: [
-                    BoxShadow(
-                      color: tvFullViolet.withValues(alpha: .12),
-                      blurRadius: 46,
-                      spreadRadius: 18,
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(18, 14, 20, 14),
+          Expanded(
+            flex: 11,
             child: Row(
               children: [
                 Container(
-                  width: 92,
-                  height: 92,
-                  padding: const EdgeInsets.all(8),
+                  width: 86,
+                  height: 86,
+                  padding: const EdgeInsets.all(7),
                   decoration: BoxDecoration(
-                    color: Colors.black.withValues(alpha: .22),
-                    borderRadius: BorderRadius.circular(16),
+                    color: Colors.black.withValues(alpha: .18),
+                    borderRadius: BorderRadius.circular(15),
                     border: Border.all(
-                      color: tvFullCyan.withValues(alpha: .38),
+                      color: tvFullCyan.withValues(alpha: .28),
                     ),
                   ),
                   child: ChannelLogoImage(
                     channel: channel,
                     fit: BoxFit.contain,
-                    cacheWidth: 184,
-                    cacheHeight: 184,
+                    cacheWidth: 172,
+                    cacheHeight: 172,
                     priority: 110,
                     prefetchExtent: 0,
                     fallback: const Icon(
                       Icons.live_tv_rounded,
-                      size: 40,
+                      size: 38,
                       color: Colors.white54,
                     ),
                   ),
                 ),
-                const SizedBox(width: 18),
+                const SizedBox(width: 15),
                 Expanded(
                   child: Column(
                     mainAxisAlignment: MainAxisAlignment.center,
@@ -335,56 +327,36 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                               style: const TextStyle(
-                                fontSize: 22,
+                                fontSize: 20,
                                 fontWeight: FontWeight.w900,
                               ),
                             ),
                           ),
-                          const SizedBox(width: 10),
-                          const TvFullLiveBadge(),
+                          const SizedBox(width: 9),
+                          const TvFullLiveBadge(compact: true),
                         ],
                       ),
-                      const SizedBox(height: 6),
+                      const SizedBox(height: 7),
                       Text(
                         group == null || group.isEmpty
-                            ? 'Señal en vivo · navegación rápida'
-                            : '$group · señal en vivo',
+                            ? 'Señal en vivo'
+                            : '$group · Señal en vivo',
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: const TextStyle(
                           color: Colors.white60,
-                          fontSize: 12,
+                          fontSize: 11.5,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
                       const Spacer(),
-                      Row(
-                        children: [
-                          FilledButton.icon(
-                            onPressed: () => widget.onPlay(channel),
-                            icon:
-                                const Icon(Icons.play_arrow_rounded, size: 20),
-                            label: const Text('Ver ahora'),
-                          ),
-                          const SizedBox(width: 10),
-                          OutlinedButton.icon(
-                            onPressed: () {
-                              widget.onFavoriteToggle(channel);
-                              setState(() {});
-                            },
-                            icon: Icon(
-                              widget.isFavorite(channel)
-                                  ? Icons.favorite_rounded
-                                  : Icons.favorite_border_rounded,
-                              size: 18,
-                            ),
-                            label: Text(
-                              widget.isFavorite(channel)
-                                  ? 'Favorito'
-                                  : 'Agregar a favoritos',
-                            ),
-                          ),
-                        ],
+                      SizedBox(
+                        height: 35,
+                        child: FilledButton.icon(
+                          onPressed: () => widget.onPlay(channel),
+                          icon: const Icon(Icons.play_arrow_rounded, size: 19),
+                          label: const Text('Ver ahora'),
+                        ),
                       ),
                     ],
                   ),
@@ -392,8 +364,176 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
               ],
             ),
           ),
+          Container(
+            width: 1,
+            margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 3),
+            color: Colors.white.withValues(alpha: .10),
+          ),
+          Expanded(
+            flex: 9,
+            child: _ProgramGuidePanel(
+              guide: _guide,
+              loading: _guideLoading,
+              enabled: widget.programGuideLoader != null,
+            ),
+          ),
         ],
       ),
+    );
+  }
+}
+
+class _ProgramGuidePanel extends StatelessWidget {
+  final LiveProgramGuide? guide;
+  final bool loading;
+  final bool enabled;
+
+  const _ProgramGuidePanel({
+    required this.guide,
+    required this.loading,
+    required this.enabled,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final current = guide?.now;
+    final next = guide?.next;
+    if (!enabled) {
+      return const _GuideFallback(message: 'Programación no disponible');
+    }
+    if (loading) {
+      return const _GuideFallback(message: 'Consultando programación…');
+    }
+    if (current == null && next == null) {
+      return const _GuideFallback(message: 'Programación no disponible');
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          'AHORA',
+          style: TextStyle(
+            color: tvFullCyan,
+            fontSize: 9.5,
+            fontWeight: FontWeight.w900,
+            letterSpacing: .7,
+          ),
+        ),
+        const SizedBox(height: 4),
+        Text(
+          current?.title ?? 'Sin programa actual informado',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w900),
+        ),
+        const SizedBox(height: 3),
+        Text(
+          current == null ? 'Señal en vivo' : _formatRange(current),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(color: Colors.white54, fontSize: 10.5),
+        ),
+        if ((current?.description ?? '').trim().isNotEmpty) ...[
+          const SizedBox(height: 3),
+          Text(
+            current!.description!,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: const TextStyle(color: Colors.white38, fontSize: 9.5),
+          ),
+        ],
+        const Spacer(),
+        Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'DESPUÉS',
+              style: TextStyle(
+                color: Colors.white38,
+                fontSize: 9,
+                fontWeight: FontWeight.w900,
+                letterSpacing: .55,
+              ),
+            ),
+            const SizedBox(width: 9),
+            Expanded(
+              child: Text(
+                next == null
+                    ? 'Sin próximo programa informado'
+                    : '${next.title}  ·  ${_formatRange(next)}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: const TextStyle(
+                  color: Colors.white60,
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
+  static String _formatRange(LiveProgram program) {
+    final start = program.start;
+    final end = program.end;
+    if (start == null && end == null) return 'Horario no disponible';
+    if (start == null) return 'Hasta ${_clock(end!)}';
+    if (end == null) return 'Desde ${_clock(start)}';
+    return '${_clock(start)} - ${_clock(end)}';
+  }
+
+  static String _clock(DateTime value) {
+    final local = value.toLocal();
+    final hour = local.hour.toString().padLeft(2, '0');
+    final minute = local.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
+  }
+}
+
+class _GuideFallback extends StatelessWidget {
+  final String message;
+
+  const _GuideFallback({required this.message});
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisAlignment: MainAxisAlignment.center,
+      children: [
+        const Text(
+          'AHORA',
+          style: TextStyle(
+            color: tvFullCyan,
+            fontSize: 9.5,
+            fontWeight: FontWeight.w900,
+            letterSpacing: .7,
+          ),
+        ),
+        const SizedBox(height: 6),
+        Text(
+          message,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(
+            color: Colors.white70,
+            fontSize: 13,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        const SizedBox(height: 5),
+        const Text(
+          'La señal se puede reproducir normalmente.',
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(color: Colors.white38, fontSize: 9.5),
+        ),
+      ],
     );
   }
 }
@@ -427,105 +567,6 @@ class _SectionTitle extends StatelessWidget {
           ),
         ),
       ],
-    );
-  }
-}
-
-class _FeaturedChannelCard extends StatefulWidget {
-  final Channel channel;
-  final VoidCallback onFocus;
-  final VoidCallback onPlay;
-
-  const _FeaturedChannelCard({
-    required this.channel,
-    required this.onFocus,
-    required this.onPlay,
-  });
-
-  @override
-  State<_FeaturedChannelCard> createState() => _FeaturedChannelCardState();
-}
-
-class _FeaturedChannelCardState extends State<_FeaturedChannelCard> {
-  bool _focused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final lowRam = DevicePerformanceService.instance.lowRam;
-    return AnimatedContainer(
-      duration: Duration(milliseconds: lowRam ? 60 : 100),
-      width: 205,
-      decoration: tvFullGlassDecoration(
-        focused: _focused,
-        radius: 12,
-        accent: tvFullCyan,
-      ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onFocusChange: (value) {
-            if (value) widget.onFocus();
-            setState(() => _focused = value);
-          },
-          onTap: widget.onPlay,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
-            child: Row(
-              children: [
-                SizedBox(
-                  width: 42,
-                  height: 42,
-                  child: ChannelLogoImage(
-                    channel: widget.channel,
-                    fit: BoxFit.contain,
-                    cacheWidth: 84,
-                    cacheHeight: 84,
-                    priority: _focused ? 100 : 50,
-                    prefetchExtent: 0,
-                    fallback: const Icon(Icons.live_tv_rounded, size: 22),
-                  ),
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        widget.channel.name,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          fontSize: 12,
-                          fontWeight:
-                              _focused ? FontWeight.w900 : FontWeight.w700,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      const Row(
-                        children: [
-                          Icon(Icons.circle, size: 5, color: tvFullLiveRed),
-                          SizedBox(width: 4),
-                          Text(
-                            'EN VIVO',
-                            style: TextStyle(
-                              color: Color(0xFFFF8998),
-                              fontSize: 8.5,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
     );
   }
 }
