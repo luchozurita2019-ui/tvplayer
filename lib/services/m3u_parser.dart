@@ -185,7 +185,7 @@ class M3uLineParser {
 
       final channel = pendingName != null
           ? Channel(
-              name: pendingName,
+              name: pendingName!,
               url: parsed.url,
               logoUrl: pendingLogo,
               group: pendingGroup,
