@@ -41,6 +41,7 @@ jobs:
           dart format --output=none --set-exit-if-changed lib
           flutter analyze
           flutter test
+          grep -q 'version: 1.3.6+28' pubspec.yaml
 
       - name: Configure persistent release signing
         shell: bash
@@ -74,8 +75,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-1.3.5+27-ARM64.apk
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-1.3.5+27-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-1.3.6+28-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-1.3.6+28-ARM32.apk
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           for apk in artifact/*.apk; do
