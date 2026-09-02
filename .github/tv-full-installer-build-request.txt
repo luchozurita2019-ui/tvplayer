@@ -1,0 +1,4 @@
+TV FULL Installer 1.0.0 build requested.
+features=auto ARM32/ARM64 detection, secure latest.json, SHA-256 verification, historical TV FULL PRO certificate verification
+package=com.tvfull.pro.installer
+requested_at=2026-09-02T11:52:00-03:00
