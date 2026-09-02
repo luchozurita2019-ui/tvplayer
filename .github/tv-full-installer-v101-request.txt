@@ -1,0 +1,7 @@
+TV FULL Installer 1.0.1
+- premium updater icon
+- request unknown-app install permission before download
+- continue automatically after returning from settings
+- preserve downloaded APK when permission is requested after download
+- keep SHA-256 and package verification
+requested_at=2026-09-02
