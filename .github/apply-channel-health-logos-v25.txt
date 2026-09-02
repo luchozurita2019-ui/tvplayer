@@ -1,0 +1,10 @@
+TV FULL PRO 1.3.3+25 approved changes
+- remember dead LIVE channels for 10 minutes
+- skip known dead channels during zapping
+- manual channel selection still retries and can restore health
+- provider logo remains first priority
+- missing/broken channel logos use exact tvg-id/name fallback
+- iptv-org logos catalog is streamed, not fully loaded into RAM
+- existing 1.3.2+24 LIVE timing remains unchanged
+- historical release signing SHA-256 guardrail remains mandatory
+requested_at=2026-09-02
