@@ -37,6 +37,9 @@ jobs:
       - name: Apply channel health and logo fallback v25
         run: python3 .github/scripts/apply_tv_full_channel_health_logos_v25.py
 
+      - name: Clean generated v25 resolver
+        run: python3 .github/scripts/fix_tv_full_v25_generated.py
+
       - name: Resolve dependencies
         run: flutter pub get
 
