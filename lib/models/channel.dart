@@ -4,7 +4,8 @@ class Channel {
   final String url;
   final String? logoUrl;
   final String? group; // categoría (ej: "Deportes", "Noticias")
-  final String? tvgId; // id para cruzar con EPG en el futuro
+  final String? tvgId; // id XMLTV/EPG del proveedor
+  final String? xtreamStreamId; // stream_id real para APIs Xtream (EPG, etc.)
 
   // Compatibilidad histórica: seguimos exponiendo User-Agent y Referer de
   // forma explícita porque ya existen listas guardadas con estos campos.
@@ -22,6 +23,7 @@ class Channel {
     this.logoUrl,
     this.group,
     this.tvgId,
+    this.xtreamStreamId,
     this.httpUserAgent,
     this.httpReferrer,
     this.httpHeaders,
@@ -90,6 +92,7 @@ class Channel {
         'logoUrl': logoUrl,
         'group': group,
         'tvgId': tvgId,
+        'xtreamStreamId': xtreamStreamId,
         'httpUserAgent': httpUserAgent,
         'httpReferrer': httpReferrer,
         if (httpHeaders != null) 'httpHeaders': httpHeaders,
@@ -114,6 +117,7 @@ class Channel {
       logoUrl: json['logoUrl'] as String?,
       group: json['group'] as String?,
       tvgId: json['tvgId'] as String?,
+      xtreamStreamId: json['xtreamStreamId'] as String?,
       httpUserAgent: json['httpUserAgent'] as String?,
       httpReferrer: json['httpReferrer'] as String?,
       httpHeaders: headers,

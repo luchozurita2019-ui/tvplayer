@@ -125,6 +125,9 @@ class LiveEpgService {
   }
 
   String? _streamIdFromChannel(Channel channel) {
+    final stored = channel.xtreamStreamId?.trim() ?? '';
+    if (RegExp(r'^\d+$').hasMatch(stored)) return stored;
+
     final uri = Uri.tryParse(channel.url.trim());
     if (uri == null || uri.pathSegments.isEmpty) return null;
     for (final segment in uri.pathSegments.reversed) {

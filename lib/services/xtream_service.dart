@@ -379,6 +379,7 @@ class XtreamService {
           logoUrl: logo == null || logo.isEmpty ? null : logo,
           group: group,
           tvgId: epgId == null || epgId.isEmpty ? null : epgId,
+          xtreamStreamId: streamId,
         ),
       );
     }

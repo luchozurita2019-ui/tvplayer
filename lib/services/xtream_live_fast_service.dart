@@ -37,7 +37,7 @@ class XtreamLiveFastService {
 
   static final XtreamLiveFastService instance = XtreamLiveFastService._();
 
-  static const int _cacheVersion = 3;
+  static const int _cacheVersion = 4;
   static const Duration _categoryTimeout = Duration(seconds: 8);
   static const Duration _liveTimeout = Duration(seconds: 35);
   static const Duration _connectTimeout = Duration(seconds: 12);
@@ -343,6 +343,7 @@ class XtreamLiveFastService {
             logoUrl: _cleanText(item['logoUrl']),
             group: _cleanText(item['group']),
             tvgId: _cleanText(item['tvgId']),
+            xtreamStreamId: _cleanText(item['xtreamStreamId']),
           ),
         );
       } catch (_) {
@@ -771,6 +772,7 @@ Map<String, dynamic> _prepareLiveCatalogFromFile(Map<String, String> input) {
             'epg_channel_id',
             'tvg_id',
           ]),
+          'xtreamStreamId': id,
         }),
       );
       count++;
