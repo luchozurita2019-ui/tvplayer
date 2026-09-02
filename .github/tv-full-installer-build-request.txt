@@ -1,4 +1,4 @@
-TV FULL Installer 1.0.0 build requested.
-features=auto ARM32/ARM64 detection, secure latest.json, SHA-256 verification, historical TV FULL PRO certificate verification
+TV FULL Installer 1.0.1 build requested.
+features=premium updater icon, auto ARM32/ARM64 detection, unknown-app permission before download, resume after settings, SHA-256 verification, historical TV FULL PRO certificate verification with TCL OEM fallback
 package=com.tvfull.pro.installer
-requested_at=2026-09-02T11:52:00-03:00
+requested_at=2026-09-02
