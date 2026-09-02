@@ -23,6 +23,96 @@ class CatalogFileSource {
   });
 }
 
+/// Escritura incremental de una generación de catálogo.
+///
+/// Los elementos se vuelcan directamente a un archivo temporal NDJSON. La
+/// generación sólo pasa a ser visible al llamar [commit]; [abort] elimina el
+/// temporal y conserva intacta la generación anterior.
+class CatalogFileWriter {
+  final CatalogFileStore _owner;
+  final Directory _section;
+  final Directory _temp;
+  final Directory _generation;
+  final IOSink _sink;
+
+  int _count = 0;
+  bool _finished = false;
+
+  CatalogFileWriter._(
+    this._owner,
+    this._section,
+    this._temp,
+    this._generation,
+    this._sink,
+  );
+
+  int get count => _count;
+
+  void add(Object? item) {
+    if (_finished) {
+      throw StateError('La escritura del catálogo ya finalizó.');
+    }
+    if (item == null) return;
+    _sink.writeln(jsonEncode(item));
+    _count++;
+  }
+
+  Future<bool> commit({required List<String> categories}) async {
+    if (_finished) return false;
+    _finished = true;
+
+    try {
+      await _sink.flush();
+      await _sink.close();
+    } catch (_) {
+      await _owner._deleteDirectoryQuietly(_temp);
+      rethrow;
+    }
+
+    if (_count == 0) {
+      await _owner._deleteDirectoryQuietly(_temp);
+      return false;
+    }
+
+    final now = DateTime.now();
+    try {
+      await File('${_temp.path}/categories.json').writeAsString(
+        jsonEncode(categories),
+        flush: true,
+      );
+      await File('${_temp.path}/meta.json').writeAsString(
+        jsonEncode({
+          'version': CatalogFileStore._version,
+          'updatedAt': now.millisecondsSinceEpoch,
+          'count': _count,
+        }),
+        flush: true,
+      );
+
+      await _temp.rename(_generation.path);
+      await _owner._publishGeneration(
+        _section,
+        _generation,
+        updatedAt: now,
+        count: _count,
+      );
+      return true;
+    } catch (_) {
+      await _owner._deleteDirectoryQuietly(_temp);
+      rethrow;
+    }
+  }
+
+  Future<void> abort() async {
+    if (_finished) return;
+    _finished = true;
+    try {
+      await _sink.close();
+    } catch (_) {}
+    await _owner._deleteDirectoryQuietly(_temp);
+  }
+}
+
 /// Persistencia de catálogos pesados fuera de SQLite.
 ///
 /// Cada servicio/sección mantiene generaciones independientes en Application
@@ -115,81 +205,71 @@ class CatalogFileStore {
     }
   }
 
+  /// Abre una generación temporal para escribir elementos a medida que llegan.
+  Future<CatalogFileWriter> beginSnapshot({
+    required String serviceId,
+    required String kind,
+  }) async {
+    final section = await _sectionDirectory(serviceId, kind);
+    await section.create(recursive: true);
+
+    final stamp = DateTime.now().microsecondsSinceEpoch;
+    final temp = Directory('${section.path}/.tmp_$stamp');
+    final generation = Directory('${section.path}/gen_$stamp');
+    await temp.create(recursive: true);
+    final sink = File('${temp.path}/items.ndjson').openWrite();
+    return CatalogFileWriter._(this, section, temp, generation, sink);
+  }
+
   Future<void> saveSnapshot({
     required String serviceId,
     required String kind,
     required Iterable<Object?> items,
     required List<String> categories,
   }) async {
-    final section = await _sectionDirectory(serviceId, kind);
-    await section.create(recursive: true);
-
-    final now = DateTime.now();
-    final stamp = now.microsecondsSinceEpoch;
-    final temp = Directory('${section.path}/.tmp_$stamp');
-    final generation = Directory('${section.path}/gen_$stamp');
-    await temp.create(recursive: true);
-
-    var count = 0;
-    final itemsFile = File('${temp.path}/items.ndjson');
-    final sink = itemsFile.openWrite();
+    final writer = await beginSnapshot(serviceId: serviceId, kind: kind);
     try {
       for (final item in items) {
-        if (item == null) continue;
-        sink.writeln(jsonEncode(item));
-        count++;
+        writer.add(item);
       }
-      await sink.flush();
-      await sink.close();
+      final committed = await writer.commit(categories: categories);
+      if (!committed) {
+        throw const FormatException('No se guarda un catálogo vacío.');
+      }
     } catch (_) {
-      try {
-        await sink.close();
-      } catch (_) {}
-      await _deleteDirectoryQuietly(temp);
+      await writer.abort();
       rethrow;
     }
-
-    if (count == 0) {
-      await _deleteDirectoryQuietly(temp);
-      throw const FormatException('No se guarda un catálogo vacío.');
-    }
-
-    await File('${temp.path}/categories.json').writeAsString(
-      jsonEncode(categories),
-      flush: true,
-    );
-    await File('${temp.path}/meta.json').writeAsString(
-      jsonEncode({
-        'version': _version,
-        'updatedAt': now.millisecondsSinceEpoch,
-        'count': count,
-      }),
-      flush: true,
-    );
-
-    await temp.rename(generation.path);
-
-    final current = File('${section.path}/current.json');
-    final pointerTemp = File('${section.path}/current.tmp');
-    await pointerTemp.writeAsString(
-      jsonEncode({
-        'version': _version,
-        'generation': generation.path.split(Platform.pathSeparator).last,
-        'updatedAt': now.millisecondsSinceEpoch,
-        'count': count,
-      }),
-      flush: true,
-    );
-    if (await current.exists()) await current.delete();
-    await pointerTemp.rename(current.path);
-
-    await _cleanupOldGenerations(section, keep: 2);
   }
 
   Future<void> clearService(String serviceId) async {
     final root = await _ensureRoot();
     final directory = Directory('${root.path}/${_serviceKey(serviceId)}');
     await _deleteDirectoryQuietly(directory);
+  }
+
+  Future<void> _publishGeneration(
+    Directory section,
+    Directory generation, {
+    required DateTime updatedAt,
+    required int count,
+  }) async {
+    final current = File('${section.path}/current.json');
+    final pointerTemp = File(
+      '${section.path}/current.tmp_${updatedAt.microsecondsSinceEpoch}',
+    );
+    await pointerTemp.writeAsString(
+      jsonEncode({
+        'version': _version,
+        'generation': generation.path.split(Platform.pathSeparator).last,
+        'updatedAt': updatedAt.millisecondsSinceEpoch,
+        'count': count,
+      }),
+      flush: true,
+    );
+    if (await current.exists()) await current.delete();
+    await pointerTemp.rename(current.path);
+    await _cleanupOldGenerations(section, keep: 2);
   }
 
   Future<Directory?> _resolveCurrentGeneration(Directory section) async {
