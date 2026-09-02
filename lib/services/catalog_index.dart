@@ -96,5 +96,13 @@ class _CatalogSearchEntry<T> {
   const _CatalogSearchEntry(this.item, this.searchText);
 }
 
-String _normalizeCatalogSearch(String value) =>
-    value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), ' ');
+String _normalizeCatalogSearch(String value) => value
+    .trim()
+    .toLowerCase()
+    .replaceAll(RegExp('[áàäâã]'), 'a')
+    .replaceAll(RegExp('[éèëê]'), 'e')
+    .replaceAll(RegExp('[íìïî]'), 'i')
+    .replaceAll(RegExp('[óòöôõ]'), 'o')
+    .replaceAll(RegExp('[úùüû]'), 'u')
+    .replaceAll('ñ', 'n')
+    .replaceAll(RegExp(r'\s+'), ' ');
