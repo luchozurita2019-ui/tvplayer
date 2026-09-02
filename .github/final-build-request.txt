@@ -1,9 +1,9 @@
-TV FULL PRO final release build requested for live slow-grace test release.
-validated_run=33596744331
-validation_result=dart format success; flutter analyze success; flutter test success; Android TV debug compile success; LIVE slow-grace guardrails success
-validated_code_commit=76d2af15a2be0a4becd622205e1aeeeb3d23795a
-version=1.3.2+24
+TV FULL PRO final release build requested for channel health and logo fallback release.
+validated_run=33601273178
+validation_result=dart format success; flutter analyze success; flutter test success; Android TV debug compile success; v25 guardrails and historical signing continuity success
+validated_code_commit=4233d540fc98f1a144546f7dffe2b81aa4c6251d
+version=1.3.3+25
 release_target=universal ARM Android TV APK
 signing=persistent TV FULL PRO release keystore; must match historical certificate SHA-256 40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a
-notes=5.5s now enters tolerance instead of stopping; final no-progress cutoff 9s; tracks/buffer/bytes renew startup grace; unexpected LIVE end recovery raised to 5; fast-channel path unchanged.
-requested_at=2026-09-02T03:03:00-03:00
+notes=remember dead LIVE channels for 10 minutes; skip known dead channels during zapping; manual selection can retry and restore health; provider logo remains first priority; missing or broken logos use exact tvg-id/name fallback; existing 1.3.2+24 LIVE timing unchanged.
+requested_at=2026-09-02T04:08:00-03:00
