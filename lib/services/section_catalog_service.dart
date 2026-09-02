@@ -239,7 +239,12 @@ class SectionCatalogService {
           await writer.abort();
           continue;
         }
-        await writer.commit(categories: categories[kind]!);
+        final committed = await writer.commit(categories: categories[kind]!);
+        if (committed) {
+          // La próxima lectura debe materializar la generación nueva, no una
+          // instantánea RAM anterior que todavía estaba visible en pantalla.
+          _forget('${playlist.id}|m3u_${kind.name}');
+        }
       }
 
       _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
