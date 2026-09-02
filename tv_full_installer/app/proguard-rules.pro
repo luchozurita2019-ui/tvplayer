@@ -1,0 +1,1 @@
+-keep class com.tvfull.pro.installer.MainActivity { *; }
