@@ -21,6 +21,10 @@ class IptvProvider extends ChangeNotifier {
       RemoteProvisioningService();
 
   static const _remotePlaylistPrefix = 'tvf_remote_';
+  static const _classicPlaylistId = 'tvf_builtin_classic';
+  static const _classicPlaylistName = 'Lista clásica';
+  static const _classicPlaylistSource =
+      'asset://assets/playlists/lista_clasica.m3u';
 
   List<Playlist> _playlists = const [];
   List<Channel> _favorites = const [];
@@ -88,6 +92,7 @@ class IptvProvider extends ChangeNotifier {
       } catch (_) {}
     }
 
+    await _ensureClassicPlaylist();
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
@@ -95,6 +100,39 @@ class IptvProvider extends ChangeNotifier {
     if (_remoteProvisioning.isSupported) {
       unawaited(syncRemoteServices());
     }
+  }
+
+  Future<void> _ensureClassicPlaylist() async {
+    final index =
+        _playlists.indexWhere((item) => item.id == _classicPlaylistId);
+    final classic = Playlist(
+      id: _classicPlaylistId,
+      name: _classicPlaylistName,
+      source: _classicPlaylistSource,
+      isRemote: false,
+      channels: const <Channel>[],
+      lastUpdated: DateTime.now(),
+      sourceType: PlaylistSourceType.m3u,
+    );
+
+    if (index < 0) {
+      _playlists = [..._playlists, classic];
+      await _localStore.saveServices(_playlists);
+      return;
+    }
+
+    final current = _playlists[index];
+    if (current.name == _classicPlaylistName &&
+        current.source == _classicPlaylistSource &&
+        current.sourceType == PlaylistSourceType.m3u) {
+      return;
+    }
+
+    final next = List<Playlist>.from(_playlists);
+    next[index] = classic.copyWith(lastUpdated: current.lastUpdated);
+    _playlists = next;
+    await _localStore.clearServiceCatalogs(_classicPlaylistId);
+    await _localStore.saveServices(_playlists);
   }
 
   Playlist? playlistById(String playlistId) {

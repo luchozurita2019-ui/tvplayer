@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 /// Descarga el contenido de una lista M3U remota.
@@ -23,8 +24,17 @@ class M3uFetcher {
       'AppleWebKit/537.36 (KHTML, like Gecko) '
       'Chrome/96.0.4664.18 Safari/537.36';
 
+  static const String _assetPrefix = 'asset://';
+
   static http.Client _client = http.Client();
   static int _generation = 0;
+
+  static String? _assetPath(String source) {
+    final clean = source.trim();
+    if (!clean.startsWith(_assetPrefix)) return null;
+    final path = clean.substring(_assetPrefix.length).trim();
+    return path.isEmpty ? null : path;
+  }
 
   static void cancelBrowsingRequests() {
     final previous = _client;
@@ -39,6 +49,11 @@ class M3uFetcher {
     Duration timeout = const Duration(seconds: 15),
     Duration idleTimeout = const Duration(seconds: 30),
   }) async {
+    final assetPath = _assetPath(url);
+    if (assetPath != null) {
+      return rootBundle.loadString(assetPath);
+    }
+
     final generation = _generation;
     Object? lastError;
 
@@ -153,6 +168,15 @@ class M3uFetcher {
     Duration timeout = const Duration(seconds: 15),
     Duration idleTimeout = const Duration(seconds: 30),
   }) async* {
+    final assetPath = _assetPath(url);
+    if (assetPath != null) {
+      final content = await rootBundle.loadString(assetPath);
+      for (final line in const LineSplitter().convert(content)) {
+        yield line;
+      }
+      return;
+    }
+
     final generation = _generation;
     Object? lastError;
 
