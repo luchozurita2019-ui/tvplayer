@@ -54,11 +54,14 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         private const val LIVE_STARTUP_MAX_WAIT_MS = 25000L
         private const val LIVE_RECOVERY_MAX_WAIT_MS = 12000L
         private const val LIVE_STARTUP_CHECK_INTERVAL_MS = 750L
-        private const val LIVE_STARTUP_NO_PROGRESS_MS = 5500L
+        // A los 5,5 s sin progreso entramos en tolerancia, pero no matamos la señal.
+        // Sólo declaramos canal muerto tras 9 s completos sin bytes/buffer/tracks.
+        private const val LIVE_STARTUP_SLOW_SIGNAL_MS = 5500L
+        private const val LIVE_STARTUP_NO_PROGRESS_MS = 9000L
         private const val LIVE_BUFFER_HEALTH_INTERVAL_MS = 2500L
         private const val LIVE_BUFFER_STALL_MS = 6500L
         private const val LIVE_STABLE_RESET_MS = 30000L
-        private const val MAX_LIVE_ENDED_RECOVERIES = 2
+        private const val MAX_LIVE_ENDED_RECOVERIES = 5
         private const val MAX_LIVE_STALL_RECOVERIES = 2
     }
 
@@ -584,6 +587,20 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
             }
             val age = now - startupStartedAtMs
             val silentFor = now - startupLastProgressAtMs
+
+            // Fase 1: misma respuesta rápida de siempre. A los 5,5 s no
+            // interrumpimos: sólo pasamos a una breve ventana de tolerancia.
+            if (age < maxWaitMs && silentFor < LIVE_STARTUP_SLOW_SIGNAL_MS) {
+                mainHandler.postDelayed(
+                    startupDeadline ?: return@Runnable,
+                    LIVE_STARTUP_CHECK_INTERVAL_MS,
+                )
+                return@Runnable
+            }
+
+            // Fase 2: un canal lento todavía puede completar manifiesto/TLS,
+            // descubrir tracks o empezar a llenar buffer. Cualquier progreso
+            // renueva startupLastProgressAtMs y vuelve a abrir esta ventana.
             if (age < maxWaitMs && silentFor < LIVE_STARTUP_NO_PROGRESS_MS) {
                 mainHandler.postDelayed(
                     startupDeadline ?: return@Runnable,
@@ -864,7 +881,17 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         )
     }
 
-    override fun onTracksChanged(tracks: Tracks) = sendTracks()
+    override fun onTracksChanged(tracks: Tracks) {
+        if (isLive && tracks.groups.isNotEmpty()) {
+            // Descubrir tracks demuestra que la señal está viva aunque todavía
+            // no haya primer frame. Evitamos matar canales lentos justo antes
+            // de que Media3 termine de preparar audio/video.
+            val now = System.currentTimeMillis()
+            liveNetworkProgressAtMs = now
+            startupLastProgressAtMs = maxOf(startupLastProgressAtMs, now)
+        }
+        sendTracks()
+    }
 
     override fun onRenderedFirstFrame() {
         liveNetworkProgressAtMs = System.currentTimeMillis()
