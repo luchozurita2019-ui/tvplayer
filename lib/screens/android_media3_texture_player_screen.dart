@@ -5,8 +5,10 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
+import '../services/channel_health_service.dart';
+import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
-import '../widgets/cached_artwork_image.dart';
+import '../widgets/channel_logo_image.dart';
 
 const String _media3DefaultUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -41,6 +43,7 @@ class _AndroidMedia3TexturePlayerScreenState
   );
   final FocusNode _retryFocus = FocusNode(debugLabel: 'tvfull-pro-live-retry');
   final ScrollController _channelScrollController = ScrollController();
+  final ChannelHealthService _health = ChannelHealthService.instance;
   StreamSubscription<dynamic>? _eventSub;
   Timer? _overlayTimer;
   Timer? _retryTimer;
@@ -54,6 +57,8 @@ class _AndroidMedia3TexturePlayerScreenState
   String? _friendlyError;
   int _openGeneration = 0;
   int _autoRetryCount = 0;
+  int _healthRecordedGeneration = -1;
+  DateTime? _prepareStartedAt;
   List<_LiveAudioTrack> _audioTracks = const <_LiveAudioTrack>[];
 
   Channel get _channel => widget.playlist[_index];
@@ -84,6 +89,9 @@ class _AndroidMedia3TexturePlayerScreenState
 
   Future<void> _initialize() async {
     try {
+      final healthReady = _health.ensureLoaded();
+      unawaited(
+          ChannelLogoResolverService.instance.primeChannels(widget.playlist));
       final lowRam = DevicePerformanceService.instance.lowRam;
       var adaptiveLevel = 0;
       if (widget.playlist.isNotEmpty) {
@@ -114,6 +122,7 @@ class _AndroidMedia3TexturePlayerScreenState
         'bufferForPlaybackAfterRebuffer':
             lowRam ? lowRamRebuffer : normalRebuffer,
       });
+      await healthReady;
       if (!mounted) return;
       setState(() => _textureId = id);
       if (widget.playlist.isNotEmpty) await _prepareCurrent();
@@ -129,7 +138,13 @@ class _AndroidMedia3TexturePlayerScreenState
     if (widget.playlist.isEmpty || _textureId == null) return;
     final generation = ++_openGeneration;
     _retryTimer?.cancel();
-    if (!preserveRetry) _autoRetryCount = 0;
+    if (!preserveRetry) {
+      _autoRetryCount = 0;
+      _prepareStartedAt = DateTime.now();
+    } else {
+      _prepareStartedAt ??= DateTime.now();
+    }
+    _healthRecordedGeneration = -1;
     if (mounted) {
       setState(() {
         _buffering = true;
@@ -162,6 +177,16 @@ class _AndroidMedia3TexturePlayerScreenState
     }
   }
 
+  void _recordHealthySignal() {
+    if (_healthRecordedGeneration == _openGeneration) return;
+    final startedAt = _prepareStartedAt;
+    final slow = startedAt != null &&
+        DateTime.now().difference(startedAt) >=
+            const Duration(milliseconds: 5500);
+    _health.markHealthy(_channel, slow: slow);
+    _healthRecordedGeneration = _openGeneration;
+  }
+
   void _onNativeEvent(dynamic raw) {
     if (!mounted || raw is! Map) return;
     final event = raw.cast<Object?, Object?>();
@@ -175,6 +200,7 @@ class _AndroidMedia3TexturePlayerScreenState
       case 'bufferingEnd':
       case 'playing':
         _autoRetryCount = 0;
+        _recordHealthySignal();
         setState(() {
           _buffering = false;
           _friendlyError = null;
@@ -192,6 +218,7 @@ class _AndroidMedia3TexturePlayerScreenState
             }
           }
         }
+        _recordHealthySignal();
         setState(() => _audioTracks = tracks);
         break;
       case 'videoSize':
@@ -215,6 +242,7 @@ class _AndroidMedia3TexturePlayerScreenState
       case 'completed':
         // Media3 nativo ya hizo sus recuperaciones LIVE estilo Hot Player.
         // No repetimos otra cascada desde Dart.
+        _health.markDead(_channel, reason: 'stream_ended');
         _finishWithError(
           'Canal no disponible',
           'STREAM_ENDED · La señal terminó inesperadamente.',
@@ -244,7 +272,8 @@ class _AndroidMedia3TexturePlayerScreenState
     final combined = '$code $detail'.toLowerCase();
     final permanentHttp = combined.contains('401') ||
         combined.contains('403') ||
-        combined.contains('404');
+        combined.contains('404') ||
+        combined.contains('410');
     final transient = !permanentHttp &&
         (combined.contains('network') ||
             combined.contains('timeout') ||
@@ -266,6 +295,17 @@ class _AndroidMedia3TexturePlayerScreenState
       return;
     }
 
+    final shouldCooldown = permanentHttp ||
+        combined.contains('tvfull_no_progress') ||
+        combined.contains('tvfull_fast_io') ||
+        combined.contains('io_bad_http_status') ||
+        combined.contains('response_code_5') ||
+        combined.contains('network') ||
+        combined.contains('timeout') ||
+        combined.contains('connection');
+    if (shouldCooldown) {
+      _health.markDead(_channel, reason: code);
+    }
     _finishWithError(_friendlyMessage(combined), '$code · $detail');
   }
 
@@ -443,16 +483,30 @@ class _AndroidMedia3TexturePlayerScreenState
     _showOverlay();
   }
 
+  int _nextPlayableIndex(int direction) {
+    final length = widget.playlist.length;
+    if (length <= 1) return _index;
+    for (var step = 1; step <= length; step++) {
+      final candidate = (_index + direction * step) % length;
+      final normalized = candidate < 0 ? candidate + length : candidate;
+      if (!_health.isTemporarilyDead(widget.playlist[normalized])) {
+        return normalized;
+      }
+    }
+    final fallback = (_index + direction) % length;
+    return fallback < 0 ? fallback + length : fallback;
+  }
+
   void _previous() {
     if (widget.playlist.isEmpty) return;
-    _index = (_index - 1 + widget.playlist.length) % widget.playlist.length;
+    _index = _nextPlayableIndex(-1);
     unawaited(_prepareCurrent());
     _showOverlay();
   }
 
   void _next() {
     if (widget.playlist.isEmpty) return;
-    _index = (_index + 1) % widget.playlist.length;
+    _index = _nextPlayableIndex(1);
     unawaited(_prepareCurrent());
     _showOverlay();
   }
@@ -610,8 +664,8 @@ class _AndroidMedia3TexturePlayerScreenState
                   height: 34,
                   child: ClipRRect(
                     borderRadius: BorderRadius.circular(7),
-                    child: CachedArtworkImage(
-                      url: _channel.logoUrl,
+                    child: ChannelLogoImage(
+                      channel: _channel,
                       fit: BoxFit.contain,
                       cacheWidth: 68,
                       cacheHeight: 68,
@@ -718,45 +772,65 @@ class _AndroidMedia3TexturePlayerScreenState
                       itemBuilder: (context, index) {
                         final item = widget.playlist[index];
                         final selected = index == _index;
+                        final dead = _health.isTemporarilyDead(item);
                         return Padding(
                           padding: const EdgeInsets.symmetric(vertical: 2),
-                          child: ListTile(
-                            focusNode: selected ? _channelListFocus : null,
-                            autofocus: selected,
-                            selected: selected,
-                            minTileHeight: 54,
-                            selectedTileColor:
-                                const Color(0xFF1677FF).withValues(alpha: .18),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(9),
-                            ),
-                            leading: SizedBox(
-                              width: 36,
-                              height: 36,
-                              child: CachedArtworkImage(
-                                url: item.logoUrl,
-                                fit: BoxFit.contain,
-                                cacheWidth: 72,
-                                cacheHeight: 72,
-                                prefetchExtent: 0,
-                                fallback: const Icon(
-                                  Icons.live_tv_rounded,
-                                  size: 20,
+                          child: Opacity(
+                            opacity: dead && !selected ? .48 : 1,
+                            child: ListTile(
+                              focusNode: selected ? _channelListFocus : null,
+                              autofocus: selected,
+                              selected: selected,
+                              minTileHeight: 54,
+                              selectedTileColor: const Color(0xFF1677FF)
+                                  .withValues(alpha: .18),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              leading: SizedBox(
+                                width: 36,
+                                height: 36,
+                                child: ChannelLogoImage(
+                                  channel: item,
+                                  fit: BoxFit.contain,
+                                  cacheWidth: 72,
+                                  cacheHeight: 72,
+                                  prefetchExtent: 0,
+                                  fallback: const Icon(
+                                    Icons.live_tv_rounded,
+                                    size: 20,
+                                  ),
                                 ),
                               ),
-                            ),
-                            title: Text(
-                              item.name,
-                              maxLines: 1,
-                              overflow: TextOverflow.ellipsis,
-                              style: TextStyle(
-                                fontSize: 14,
-                                fontWeight: selected
-                                    ? FontWeight.w800
-                                    : FontWeight.w600,
+                              title: Text(
+                                item.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: selected
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                ),
                               ),
+                              subtitle: dead
+                                  ? const Text(
+                                      'No disponible temporalmente',
+                                      style: TextStyle(
+                                        color: Colors.white38,
+                                        fontSize: 10,
+                                      ),
+                                    )
+                                  : null,
+                              trailing: dead
+                                  ? const Icon(
+                                      Icons.tv_off_rounded,
+                                      size: 18,
+                                      color: Colors.white38,
+                                    )
+                                  : null,
+                              onTap: () => _selectChannel(index),
                             ),
-                            onTap: () => _selectChannel(index),
                           ),
                         );
                       },

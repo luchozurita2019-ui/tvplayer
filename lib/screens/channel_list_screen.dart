@@ -9,8 +9,10 @@ import '../models/channel.dart';
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
+import '../services/channel_logo_resolver_service.dart';
 import '../services/parental_control_service.dart';
 import '../widgets/cached_artwork_image.dart';
+import '../widgets/channel_logo_image.dart';
 import '../widgets/parental_lock_button.dart';
 import '../services/player_route_guard.dart';
 import 'player_screen.dart';
@@ -157,6 +159,11 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     final groups = counts.keys.toList()..sort();
     _groups = List.unmodifiable(groups);
     _groupCounts = Map.unmodifiable(counts);
+    if (_mode == _CatalogMode.live || _mode == _CatalogMode.radios) {
+      unawaited(
+        ChannelLogoResolverService.instance.primeChannels(playlist.channels),
+      );
+    }
   }
 
   @override
@@ -1504,15 +1511,23 @@ class _Artwork extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    if (!mode.usesPoster) {
+      return ChannelLogoImage(
+        channel: channel,
+        fit: fit,
+        cacheWidth: 300,
+        fallback: _ArtworkFallback(mode: mode),
+      );
+    }
+
     final logo = channel.logoUrl?.trim();
     if (logo == null || logo.isEmpty) {
       return _ArtworkFallback(mode: mode);
     }
-
     return CachedArtworkImage(
       url: logo,
       fit: fit,
-      cacheWidth: mode.usesPoster ? 420 : 300,
+      cacheWidth: 420,
       fallback: _ArtworkFallback(mode: mode),
     );
   }

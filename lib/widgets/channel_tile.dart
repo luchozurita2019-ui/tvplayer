@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../models/channel.dart';
-import 'cached_artwork_image.dart';
+import 'channel_logo_image.dart';
 
 class ChannelTile extends StatelessWidget {
   final Channel channel;
@@ -27,8 +27,8 @@ class ChannelTile extends StatelessWidget {
         height: 48,
         child: ClipRRect(
           borderRadius: BorderRadius.circular(6),
-          child: CachedArtworkImage(
-            url: channel.logoUrl,
+          child: ChannelLogoImage(
+            channel: channel,
             fit: BoxFit.cover,
             cacheWidth: 96,
             allowNetwork: allowNetworkArtwork,

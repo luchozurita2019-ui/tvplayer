@@ -10,6 +10,7 @@ import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/catalog_index.dart';
+import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/remote_access_guard.dart';
@@ -17,7 +18,7 @@ import '../services/section_catalog_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_live_fast_service.dart';
 import '../services/xtream_service.dart';
-import '../widgets/cached_artwork_image.dart';
+import '../widgets/channel_logo_image.dart';
 import '../widgets/tv_catalog_category_row.dart';
 import '../widgets/tv_full_premium_ui.dart';
 import 'player_screen.dart';
@@ -133,6 +134,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       categoryOf: (item) => item.group,
       include: (item) => _parental.canShowChannel(item),
     );
+    unawaited(ChannelLogoResolverService.instance.primeChannels(data.channels));
     _indexedData = data;
     _catalogIndex = built;
     return built;
@@ -535,8 +537,8 @@ class _ChannelRowState extends State<_ChannelRow> {
                       height: 42,
                       child: ClipRRect(
                         borderRadius: BorderRadius.circular(9),
-                        child: CachedArtworkImage(
-                          url: widget.channel.logoUrl,
+                        child: ChannelLogoImage(
+                          channel: widget.channel,
                           fit: BoxFit.contain,
                           cacheWidth: 84,
                           cacheHeight: 84,
