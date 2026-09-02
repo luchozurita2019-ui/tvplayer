@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:url_launcher/url_launcher.dart';
 
@@ -30,6 +31,10 @@ class AppUpdateService extends ChangeNotifier {
   AppUpdateService._();
 
   static final AppUpdateService instance = AppUpdateService._();
+
+  static const MethodChannel _deviceChannel = MethodChannel(
+    'tvfull/device_identity',
+  );
 
   static final Uri _endpoint = Uri.parse(
     'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-update',
@@ -92,6 +97,16 @@ class AppUpdateService extends ChangeNotifier {
     } finally {
       _checking = false;
       notifyListeners();
+    }
+  }
+
+  Future<bool> openInstaller() async {
+    if (defaultTargetPlatform != TargetPlatform.android) return false;
+    try {
+      return await _deviceChannel.invokeMethod<bool>('openTvFullInstaller') ??
+          false;
+    } catch (_) {
+      return false;
     }
   }
 

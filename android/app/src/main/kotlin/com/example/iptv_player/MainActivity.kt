@@ -2,6 +2,7 @@ package com.example.iptv_player
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -151,6 +152,16 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                                 "versionCode" to code,
                             )
                         )
+                    }
+                    "openTvFullInstaller" -> {
+                        val launchIntent = packageManager.getLaunchIntentForPackage("com.tvfull.pro.installer")
+                        if (launchIntent == null) {
+                            result.success(false)
+                        } else {
+                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(launchIntent)
+                            result.success(true)
+                        }
                     }
                     "getDeviceProfile" -> {
                         val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager

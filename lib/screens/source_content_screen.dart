@@ -299,6 +299,9 @@ class _SourceContentScreenState extends State<SourceContentScreen>
   }
 
   Future<void> _openUpdate() async {
+    final openedInstaller = await _updates.openInstaller();
+    if (openedInstaller) return;
+
     final update = _updates.availableUpdate;
     final code = update?.downloaderCode ?? '';
     if (code.isEmpty) {
@@ -352,7 +355,7 @@ class _SourceContentScreenState extends State<SourceContentScreen>
               ),
               const SizedBox(height: 14),
               const Text(
-                'El código ya quedó copiado. Abrí Downloader e ingresalo. '
+                'TV FULL Installer no está instalado. El código ya quedó copiado. Abrí Downloader e ingresalo para instalar el actualizador. '
                 'TV FULL PRO ya no envía el enlace directamente a Downloader, '
                 'evitando que la aplicación se abra y se cierre sola.',
                 style: TextStyle(color: Colors.white60, height: 1.35),
@@ -487,7 +490,7 @@ class _UpdateBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Mejor rendimiento · versión $versionName',
+                  'Mejoras de rendimiento, estabilidad y compatibilidad · versión $versionName',
                   style: const TextStyle(color: Colors.white60, fontSize: 12),
                 ),
               ],
