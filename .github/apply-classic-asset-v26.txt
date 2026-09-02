@@ -1,0 +1,8 @@
+TV FULL PRO 1.3.4+26 approved test package
+- remove remote logo catalog scanning from runtime
+- keep logo fallback through a compact bundled index
+- bundle the supplied public M3U as Lista clásica inside the APK
+- keep channel health/dead skip behavior from 1.3.3+25
+- keep LIVE timing from 1.3.2+24 unchanged
+- preserve historical release signing guardrail
+requested_at=2026-09-02
