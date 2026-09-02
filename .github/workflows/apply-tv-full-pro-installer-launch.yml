@@ -1,0 +1,162 @@
+name: Apply TV FULL PRO Installer Launch
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/tv-full-pro-installer-launch-request.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply TV FULL Installer launch integration
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          # Android package visibility + native launcher.
+          manifest = Path('android/app/src/main/AndroidManifest.xml')
+          text = manifest.read_text()
+          if 'com.tvfull.pro.installer' not in text:
+              marker = '<application'
+              insert = '''<queries>\n        <package android:name="com.tvfull.pro.installer" />\n    </queries>\n\n    '''
+              if marker not in text:
+                  raise SystemExit('Android manifest application marker missing')
+              text = text.replace(marker, insert + marker, 1)
+              manifest.write_text(text)
+
+          main = Path('android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt')
+          text = main.read_text()
+          if 'import android.content.Intent' not in text:
+              text = text.replace('import android.content.Context\n', 'import android.content.Context\nimport android.content.Intent\n', 1)
+          if '"openTvFullInstaller"' not in text:
+              marker = '                    "getDeviceProfile" -> {'
+              block = '''                    "openTvFullInstaller" -> {\n                        val launchIntent = packageManager.getLaunchIntentForPackage("com.tvfull.pro.installer")\n                        if (launchIntent == null) {\n                            result.success(false)\n                        } else {\n                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)\n                            startActivity(launchIntent)\n                            result.success(true)\n                        }\n                    }\n'''
+              if marker not in text:
+                  raise SystemExit('MainActivity device channel marker missing')
+              text = text.replace(marker, block + marker, 1)
+          main.write_text(text)
+
+          service = Path('lib/services/app_update_service.dart')
+          text = service.read_text()
+          if "package:flutter/services.dart" not in text:
+              text = text.replace("import 'package:flutter/foundation.dart';\n", "import 'package:flutter/foundation.dart';\nimport 'package:flutter/services.dart';\n", 1)
+          if '_deviceChannel' not in text:
+              marker = '  static final AppUpdateService instance = AppUpdateService._();\n'
+              replacement = marker + "\n  static const MethodChannel _deviceChannel = MethodChannel(\n    'tvfull/device_identity',\n  );\n"
+              if marker not in text:
+                  raise SystemExit('AppUpdateService singleton marker missing')
+              text = text.replace(marker, replacement, 1)
+          if 'Future<bool> openInstaller()' not in text:
+              marker = '  Future<bool> openUpdate() async {'
+              method = '''  Future<bool> openInstaller() async {\n    if (defaultTargetPlatform != TargetPlatform.android) return false;\n    try {\n      return await _deviceChannel.invokeMethod<bool>('openTvFullInstaller') ??\n          false;\n    } catch (_) {\n      return false;\n    }\n  }\n\n'''
+              if marker not in text:
+                  raise SystemExit('AppUpdateService openUpdate marker missing')
+              text = text.replace(marker, method + marker, 1)
+          service.write_text(text)
+
+          screen = Path('lib/screens/source_content_screen.dart')
+          text = screen.read_text()
+          if 'final openedInstaller = await _updates.openInstaller();' not in text:
+              marker = '  Future<void> _openUpdate() async {\n'
+              replacement = marker + '''    final openedInstaller = await _updates.openInstaller();\n    if (openedInstaller) return;\n\n'''
+              if marker not in text:
+                  raise SystemExit('SourceContentScreen update handler marker missing')
+              text = text.replace(marker, replacement, 1)
+          text = text.replace(
+              "'Mejor rendimiento · versión $versionName'",
+              "'Mejoras de rendimiento, estabilidad y compatibilidad · versión $versionName'",
+          )
+          text = text.replace(
+              "'El código ya quedó copiado. Abrí Downloader e ingresalo. '",
+              "'TV FULL Installer no está instalado. El código ya quedó copiado. Abrí Downloader e ingresalo para instalar el actualizador. '",
+          )
+          screen.write_text(text)
+
+          pubspec = Path('pubspec.yaml')
+          text = pubspec.read_text()
+          if 'version: 1.3.8+30' not in text:
+              raise SystemExit('Unexpected TV FULL PRO version before v31 patch')
+          pubspec.write_text(text.replace('version: 1.3.8+30', 'version: 1.3.9+31', 1))
+
+          split = Path('.github/workflows/build-tv-full-pro-split.yml')
+          text = split.read_text()
+          text = text.replace('1.3.8+30', '1.3.9+31')
+          split.write_text(text)
+
+          request = Path('.github/split-build-request.txt')
+          request.write_text('''TV FULL PRO 1.3.9+31 split APK build requested.\nsource_version=1.3.9+31\narchitectures=arm64-v8a,armeabi-v7a\nsigning=historical TV FULL PRO certificate required\nincludes=v31 update button opens TV FULL Installer directly, with Downloader fallback\nrequested_at=2026-09-02\n''')
+          PY
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format touched Dart files
+        run: dart format lib/services/app_update_service.dart lib/screens/source_content_screen.dart
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Run automated tests
+        run: flutter test
+
+      - name: Compile Android TV debug validation
+        run: flutter build apk --debug --dart-define=TV_FULL_ANDROID_TV=true --target-platform android-arm
+
+      - name: Verify update integration and playback guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^version: 1.3.9+31$' pubspec.yaml
+          grep -q 'com.tvfull.pro.installer' android/app/src/main/AndroidManifest.xml
+          grep -q 'openTvFullInstaller' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q "invokeMethod<bool>('openTvFullInstaller')" lib/services/app_update_service.dart
+          grep -q 'final openedInstaller = await _updates.openInstaller();' lib/screens/source_content_screen.dart
+          grep -q 'Mejoras de rendimiento, estabilidad y compatibilidad' lib/screens/source_content_screen.dart
+          grep -q 'LIVE_STARTUP_MAX_WAIT_MS = 25000L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'LIVE_STARTUP_NO_PROGRESS_MS = 9000L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'MAX_LIVE_ENDED_RECOVERIES = 5' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+
+      - name: Commit TV FULL PRO 1.3.9+31
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add android/app/src/main/AndroidManifest.xml \
+                  android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt \
+                  lib/services/app_update_service.dart \
+                  lib/screens/source_content_screen.dart \
+                  pubspec.yaml \
+                  .github/workflows/build-tv-full-pro-split.yml \
+                  .github/split-build-request.txt
+          git commit -m "TV FULL PRO 1.3.9+31: open TV FULL Installer from update banner"
+          git push origin HEAD:android-tv-full-pro-clean-source
