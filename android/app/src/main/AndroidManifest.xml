@@ -11,8 +11,7 @@
         android:icon="@mipmap/ic_launcher"
         android:banner="@mipmap/ic_launcher"
         android:usesCleartextTraffic="true"
-        android:hardwareAccelerated="true"
-        android:largeHeap="true">
+        android:hardwareAccelerated="true">
         <activity
             android:name=".MainActivity"
             android:exported="true"

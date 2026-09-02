@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import '../models/channel.dart';
+import 'device_performance_service.dart';
 import 'xtream_fast_catalog_service.dart';
 import 'xtream_http_client.dart';
 import 'xtream_service.dart';
@@ -44,10 +45,38 @@ class XtreamLiveFastService {
   Directory? _cacheDirectory;
   Directory? _transferDirectory;
   String? _lastDiagnostics;
+  final Map<String, XtreamLiveCatalogSnapshot> _memory =
+      <String, XtreamLiveCatalogSnapshot>{};
+  final Map<String, Future<XtreamLiveCatalogSnapshot?>> _pendingCacheReads =
+      <String, Future<XtreamLiveCatalogSnapshot?>>{};
 
   String? get lastDiagnostics => _lastDiagnostics;
 
   Future<XtreamLiveCatalogSnapshot?> loadCached(String playlistUrl) async {
+    final key = playlistUrl.trim();
+    final memory = _memory.remove(key);
+    if (memory != null) {
+      _memory[key] = memory;
+      return memory;
+    }
+    final pending = _pendingCacheReads[key];
+    if (pending != null) return pending;
+    final future = _loadCachedFromDisk(key);
+    _pendingCacheReads[key] = future;
+    try {
+      final snapshot = await future;
+      if (snapshot != null) _remember(key, snapshot);
+      return snapshot;
+    } finally {
+      if (identical(_pendingCacheReads[key], future)) {
+        _pendingCacheReads.remove(key);
+      }
+    }
+  }
+
+  Future<XtreamLiveCatalogSnapshot?> _loadCachedFromDisk(
+    String playlistUrl,
+  ) async {
     final files = await _cacheFiles(playlistUrl);
     if (!await files.meta.exists() || !await files.items.exists()) return null;
 
@@ -70,6 +99,15 @@ class XtreamLiveFastService {
       );
     } catch (_) {
       return null;
+    }
+  }
+
+  void _remember(String key, XtreamLiveCatalogSnapshot snapshot) {
+    _memory.remove(key);
+    _memory[key] = snapshot;
+    final limit = DevicePerformanceService.instance.lowRam ? 1 : 2;
+    while (_memory.length > limit) {
+      _memory.remove(_memory.keys.first);
     }
   }
 
@@ -242,7 +280,10 @@ class XtreamLiveFastService {
     await _replaceFile(itemsTemp, files.items);
     await _replaceFile(metaTemp, files.meta);
 
-    final cached = await loadCached(playlistUrl);
+    // La actualización recién confirmada debe reconstruirse desde la nueva
+    // generación de disco, no desde una instantánea RAM anterior.
+    _memory.remove(playlistUrl.trim());
+    final cached = await _loadCachedFromDisk(playlistUrl);
     if (cached == null || cached.channels.isEmpty) {
       throw const FormatException('No se pudo reconstruir el catálogo LIVE.');
     }
@@ -271,12 +312,14 @@ class XtreamLiveFastService {
     debugPrint(diagnostic);
     unawaited(_writeDiagnostics(diagnostic));
 
-    return XtreamLiveCatalogSnapshot(
+    final snapshot = XtreamLiveCatalogSnapshot(
       channels: cached.channels,
       categories: cached.categories,
       savedAt: savedAt,
       fromCache: false,
     );
+    _remember(playlistUrl.trim(), snapshot);
+    return snapshot;
   }
 
   Future<List<Channel>> _readCachedChannels(File file) async {

@@ -20,120 +20,12 @@ List<Channel> parseM3uInBackground(String content) {
 /// - URL|User-Agent=...&Referer=...&Origin=...
 class M3uParser {
   static List<Channel> parse(String content) {
-    final lines = content.split('\n');
     final channels = <Channel>[];
-
-    String? pendingName;
-    String? pendingLogo;
-    String? pendingGroup;
-    String? pendingTvgId;
-    String? pendingUserAgent;
-    String? pendingReferrer;
-    final pendingHeaders = <String, String>{};
-
-    for (var rawLine in lines) {
-      final line = rawLine.trim();
-      if (line.isEmpty) continue;
-
-      if (line.startsWith('#EXTINF')) {
-        final commaIndex = line.indexOf(',');
-        pendingName = commaIndex != -1
-            ? line.substring(commaIndex + 1).trim()
-            : 'Canal sin nombre';
-
-        pendingLogo = _extractAttr(line, 'tvg-logo');
-        pendingGroup = _extractAttr(line, 'group-title');
-        pendingTvgId = _extractAttr(line, 'tvg-id');
-      } else if (line.startsWith('#EXTVLCOPT:')) {
-        final rawOption = line.substring('#EXTVLCOPT:'.length).trim();
-        final equals = rawOption.indexOf('=');
-        if (equals > 0) {
-          final key = rawOption.substring(0, equals).trim().toLowerCase();
-          final value = rawOption.substring(equals + 1).trim();
-          if (value.isNotEmpty) {
-            switch (key) {
-              case 'http-user-agent':
-                pendingUserAgent = value;
-                pendingHeaders['User-Agent'] = value;
-                break;
-              case 'http-referrer':
-              case 'http-referer':
-                pendingReferrer = value;
-                pendingHeaders['Referer'] = value;
-                break;
-              case 'http-origin':
-                pendingHeaders['Origin'] = value;
-                break;
-              case 'http-cookie':
-                pendingHeaders['Cookie'] = value;
-                break;
-              case 'http-authorization':
-                pendingHeaders['Authorization'] = value;
-                break;
-              case 'http-header':
-                _parseHeaderLine(value, pendingHeaders);
-                break;
-            }
-          }
-        }
-      } else if (line.startsWith('#EXTHTTP:')) {
-        _parseExtHttp(line.substring('#EXTHTTP:'.length), pendingHeaders);
-      } else if (line.startsWith(
-            '#KODIPROP:inputstream.adaptive.stream_headers=',
-          ) ||
-          line.startsWith('#KODIPROP:inputstream.adaptive.manifest_headers=')) {
-        final equals = line.indexOf('=');
-        if (equals != -1) {
-          _parseHeaderQuery(line.substring(equals + 1), pendingHeaders);
-        }
-      } else if (!line.startsWith('#')) {
-        final parsed = _splitUrlAndInlineHeaders(line);
-        pendingHeaders.addAll(parsed.headers);
-
-        // Sincronizamos los campos históricos para listas guardadas y código
-        // existente que todavía los consulta directamente.
-        pendingUserAgent ??= _headerValue(pendingHeaders, 'User-Agent');
-        pendingReferrer ??= _headerValue(pendingHeaders, 'Referer');
-
-        if (pendingName != null) {
-          channels.add(
-            Channel(
-              name: pendingName,
-              url: parsed.url,
-              logoUrl: pendingLogo,
-              group: pendingGroup,
-              tvgId: pendingTvgId,
-              httpUserAgent: pendingUserAgent,
-              httpReferrer: pendingReferrer,
-              httpHeaders: pendingHeaders.isEmpty
-                  ? null
-                  : Map<String, String>.from(pendingHeaders),
-            ),
-          );
-        } else {
-          channels.add(
-            Channel(
-              name: parsed.url,
-              url: parsed.url,
-              httpUserAgent: pendingUserAgent,
-              httpReferrer: pendingReferrer,
-              httpHeaders: pendingHeaders.isEmpty
-                  ? null
-                  : Map<String, String>.from(pendingHeaders),
-            ),
-          );
-        }
-
-        pendingName = null;
-        pendingLogo = null;
-        pendingGroup = null;
-        pendingTvgId = null;
-        pendingUserAgent = null;
-        pendingReferrer = null;
-        pendingHeaders.clear();
-      }
+    final parser = M3uLineParser();
+    for (final line in const LineSplitter().convert(content)) {
+      final channel = parser.addLine(line);
+      if (channel != null) channels.add(channel);
     }
-
     return channels;
   }
 
@@ -162,9 +54,7 @@ class M3uParser {
           }
         }
       }
-    } catch (_) {
-      // Algunas listas usan EXTHTTP no JSON. No invalidamos toda la lista.
-    }
+    } catch (_) {}
   }
 
   static void _parseHeaderLine(String value, Map<String, String> target) {
@@ -213,6 +103,118 @@ class M3uParser {
       if (entry.key.toLowerCase() == wanted) return entry.value;
     }
     return null;
+  }
+}
+
+/// Parser incremental: conserva sólo los metadatos pendientes de una entrada y
+/// produce un canal en cuanto aparece su URL. Permite consumir listas grandes
+/// directamente desde la respuesta HTTP sin `join()` ni `split()` globales.
+class M3uLineParser {
+  String? pendingName;
+  String? pendingLogo;
+  String? pendingGroup;
+  String? pendingTvgId;
+  String? pendingUserAgent;
+  String? pendingReferrer;
+  final Map<String, String> pendingHeaders = <String, String>{};
+
+  Channel? addLine(String rawLine) {
+      final line = rawLine.trim();
+      if (line.isEmpty) return null;
+
+      if (line.startsWith('#EXTINF')) {
+        final commaIndex = line.indexOf(',');
+        pendingName = commaIndex != -1
+            ? line.substring(commaIndex + 1).trim()
+            : 'Canal sin nombre';
+
+        pendingLogo = M3uParser._extractAttr(line, 'tvg-logo');
+        pendingGroup = M3uParser._extractAttr(line, 'group-title');
+        pendingTvgId = M3uParser._extractAttr(line, 'tvg-id');
+      } else if (line.startsWith('#EXTVLCOPT:')) {
+        final rawOption = line.substring('#EXTVLCOPT:'.length).trim();
+        final equals = rawOption.indexOf('=');
+        if (equals > 0) {
+          final key = rawOption.substring(0, equals).trim().toLowerCase();
+          final value = rawOption.substring(equals + 1).trim();
+          if (value.isNotEmpty) {
+            switch (key) {
+              case 'http-user-agent':
+                pendingUserAgent = value;
+                pendingHeaders['User-Agent'] = value;
+                break;
+              case 'http-referrer':
+              case 'http-referer':
+                pendingReferrer = value;
+                pendingHeaders['Referer'] = value;
+                break;
+              case 'http-origin':
+                pendingHeaders['Origin'] = value;
+                break;
+              case 'http-cookie':
+                pendingHeaders['Cookie'] = value;
+                break;
+              case 'http-authorization':
+                pendingHeaders['Authorization'] = value;
+                break;
+              case 'http-header':
+                M3uParser._parseHeaderLine(value, pendingHeaders);
+                break;
+            }
+          }
+        }
+      } else if (line.startsWith('#EXTHTTP:')) {
+        M3uParser._parseExtHttp(line.substring('#EXTHTTP:'.length), pendingHeaders);
+      } else if (line.startsWith(
+            '#KODIPROP:inputstream.adaptive.stream_headers=',
+          ) ||
+          line.startsWith('#KODIPROP:inputstream.adaptive.manifest_headers=')) {
+        final equals = line.indexOf('=');
+        if (equals != -1) {
+          M3uParser._parseHeaderQuery(line.substring(equals + 1), pendingHeaders);
+        }
+      } else if (!line.startsWith('#')) {
+        final parsed = M3uParser._splitUrlAndInlineHeaders(line);
+        pendingHeaders.addAll(parsed.headers);
+
+        // Sincronizamos los campos históricos para listas guardadas y código
+        // existente que todavía los consulta directamente.
+        pendingUserAgent ??= M3uParser._headerValue(pendingHeaders, 'User-Agent');
+        pendingReferrer ??= M3uParser._headerValue(pendingHeaders, 'Referer');
+
+        final channel = pendingName != null
+            ? Channel(
+              name: pendingName,
+              url: parsed.url,
+              logoUrl: pendingLogo,
+              group: pendingGroup,
+              tvgId: pendingTvgId,
+              httpUserAgent: pendingUserAgent,
+              httpReferrer: pendingReferrer,
+              httpHeaders: pendingHeaders.isEmpty
+                  ? null
+                  : Map<String, String>.from(pendingHeaders),
+            )
+            : Channel(
+              name: parsed.url,
+              url: parsed.url,
+              httpUserAgent: pendingUserAgent,
+              httpReferrer: pendingReferrer,
+              httpHeaders: pendingHeaders.isEmpty
+                  ? null
+                  : Map<String, String>.from(pendingHeaders),
+            );
+
+        pendingName = null;
+        pendingLogo = null;
+        pendingGroup = null;
+        pendingTvgId = null;
+        pendingUserAgent = null;
+        pendingReferrer = null;
+        pendingHeaders.clear();
+        return channel;
+      }
+      return null;
   }
 }
 

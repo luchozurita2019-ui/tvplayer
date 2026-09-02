@@ -43,6 +43,9 @@ jobs:
       - name: Analyze clean source
         run: flutter analyze
 
+      - name: Run automated tests
+        run: flutter test
+
       - name: Verify TV FULL PRO architecture
         shell: bash
         run: |

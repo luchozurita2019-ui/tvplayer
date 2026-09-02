@@ -47,6 +47,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   Timer? _searchDebounce;
   CatalogIndex<_MovieItem>? _catalogIndex;
   _MovieData? _indexedData;
+  _MovieData? _visibleData;
 
   @override
   void initState() {
@@ -214,7 +215,11 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
         savedAt: fresh.savedAt,
       );
       _rememberPrepared(data);
-      setState(() => _future = Future.value(data));
+      setState(() {
+        _visibleData = data;
+        _catalogIndex = null;
+        _indexedData = null;
+      });
     } catch (_) {}
   }
 
@@ -232,7 +237,12 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
       if (all == null) return;
       final fresh = all[TvSectionKind.movies];
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
-      setState(() => _future = Future.value(_MovieData.m3u(fresh.channels)));
+      final data = _MovieData.m3u(fresh.channels);
+      setState(() {
+        _visibleData = data;
+        _catalogIndex = null;
+        _indexedData = null;
+      });
     } catch (_) {}
   }
 
@@ -298,16 +308,23 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
           child: FutureBuilder<_MovieData>(
             future: _future,
             builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
+              final data = _visibleData ?? snapshot.data;
+              if (data == null &&
+                  snapshot.connectionState != ConnectionState.done) {
                 return const _CenteredLoading(label: 'Cargando películas…');
               }
-              if (snapshot.hasError) {
+              if (data == null && snapshot.hasError) {
                 return _CenteredError(
                   label: 'No se pudo cargar el catálogo de películas.',
-                  onRetry: () => setState(() => _future = _loadInitial()),
+                  onRetry: () => setState(() {
+                    _visibleData = null;
+                    _future = _loadInitial();
+                  }),
                 );
               }
-              final data = snapshot.data!;
+              if (data == null) {
+                return const _CenteredLoading(label: 'Cargando películas…');
+              }
               if (data.items.isEmpty) {
                 return _CenteredError(
                   label: 'Esta lista no contiene películas disponibles.',

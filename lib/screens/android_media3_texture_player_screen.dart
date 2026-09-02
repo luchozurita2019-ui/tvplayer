@@ -151,6 +151,7 @@ class _AndroidMedia3TexturePlayerScreenState
     try {
       await _player.invokeMethod<void>('prepare', {
         'url': _channel.url,
+        'requestGeneration': generation,
         'headers': headers,
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
@@ -164,12 +165,15 @@ class _AndroidMedia3TexturePlayerScreenState
   void _onNativeEvent(dynamic raw) {
     if (!mounted || raw is! Map) return;
     final event = raw.cast<Object?, Object?>();
+    final eventGeneration = (event['generation'] as num?)?.toInt();
+    if (eventGeneration == null || eventGeneration != _openGeneration) return;
     switch (event['eventType']?.toString()) {
       case 'bufferingStart':
         setState(() => _buffering = true);
         break;
       case 'prepared':
       case 'bufferingEnd':
+      case 'playing':
         _autoRetryCount = 0;
         setState(() {
           _buffering = false;

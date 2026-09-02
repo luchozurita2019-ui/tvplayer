@@ -1,11 +1,10 @@
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
-
 import '../models/channel.dart';
 import '../models/playlist.dart';
 import 'catalog_file_store.dart';
 import 'content_classifier.dart';
+import 'device_performance_service.dart';
 import 'm3u_fetcher.dart';
 import 'm3u_parser.dart';
 import 'tv_local_store.dart';
@@ -35,17 +34,28 @@ class SectionCatalogService {
   final Map<String, Future<Map<TvSectionKind, SectionCatalogSnapshot>>>
       _pending = {};
   final Map<String, DateTime> _lastNetworkRefresh = {};
+  final Map<String, SectionCatalogSnapshot> _memory =
+      <String, SectionCatalogSnapshot>{};
 
   Future<SectionCatalogSnapshot?> loadCached(
     Playlist playlist,
     TvSectionKind kind,
   ) async {
     final key = 'm3u_${kind.name}';
+    final memoryKey = '${playlist.id}|$key';
+    final memory = _memory.remove(memoryKey);
+    if (memory != null) {
+      _memory[memoryKey] = memory;
+      return memory;
+    }
 
     final fileSource = await _catalogFiles.loadSource(playlist.id, key);
     if (fileSource != null) {
       final decoded = await _decodeFileSource(fileSource);
-      if (decoded != null) return decoded;
+      if (decoded != null) {
+        _remember(memoryKey, decoded);
+        return decoded;
+      }
     }
 
     final legacy = await _store.loadLegacySnapshot(playlist.id, key);
@@ -61,6 +71,7 @@ class SectionCatalogService {
         await _store.deleteLegacySnapshot(playlist.id, key);
       } catch (_) {}
     }
+    if (migrated != null) _remember(memoryKey, migrated);
     return migrated;
   }
 
@@ -132,20 +143,23 @@ class SectionCatalogService {
   Future<Map<TvSectionKind, SectionCatalogSnapshot>> _downloadAndPartition(
     Playlist playlist,
   ) async {
-    final content = await M3uFetcher.fetch(playlist.source);
-    final parsed = await compute(parseM3uInBackground, content);
-    if (parsed.isEmpty) {
-      throw const FormatException(
-        'La lista M3U descargada no contiene entradas válidas.',
-      );
-    }
+    final parser = M3uLineParser();
+    var parsedCount = 0;
     final buckets = <TvSectionKind, List<Channel>>{
       TvSectionKind.live: <Channel>[],
       TvSectionKind.movies: <Channel>[],
       TvSectionKind.series: <Channel>[],
     };
-    for (final channel in parsed) {
+    await for (final line in M3uFetcher.fetchLines(playlist.source)) {
+      final channel = parser.addLine(line);
+      if (channel == null) continue;
+      parsedCount++;
       buckets[_classify(channel)]!.add(channel);
+    }
+    if (parsedCount == 0) {
+      throw const FormatException(
+        'La lista M3U descargada no contiene entradas válidas.',
+      );
     }
 
     final result = <TvSectionKind, SectionCatalogSnapshot>{};
@@ -172,6 +186,7 @@ class SectionCatalogService {
         fromCache: false,
       );
       result[kind] = snapshot;
+      _remember('${playlist.id}|m3u_${kind.name}', snapshot);
       writes.add(
         _catalogFiles.saveSnapshot(
           serviceId: playlist.id,
@@ -185,6 +200,15 @@ class SectionCatalogService {
     await Future.wait(writes);
     _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
     return result;
+  }
+
+  void _remember(String key, SectionCatalogSnapshot snapshot) {
+    _memory.remove(key);
+    _memory[key] = snapshot;
+    final limit = DevicePerformanceService.instance.lowRam ? 1 : 3;
+    while (_memory.length > limit) {
+      _memory.remove(_memory.keys.first);
+    }
   }
 
   Future<SectionCatalogSnapshot?> _decodeFileSource(

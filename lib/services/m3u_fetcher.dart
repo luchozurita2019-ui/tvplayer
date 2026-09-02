@@ -144,6 +144,100 @@ class M3uFetcher {
     throw lastError ?? Exception('No se pudo descargar la lista');
   }
 
+  /// Entrega una lista remota línea por línea. A diferencia de [fetch], no
+  /// construye un `String` con todo el archivo ni duplica su contenido al
+  /// enviarlo a otro isolate.
+  static Stream<String> fetchLines(
+    String url, {
+    int maxRetries = 2,
+    Duration timeout = const Duration(seconds: 15),
+    Duration idleTimeout = const Duration(seconds: 30),
+  }) async* {
+    final generation = _generation;
+    Object? lastError;
+
+    for (var attempt = 0; attempt <= maxRetries; attempt++) {
+      _ensureCurrent(generation);
+      try {
+        final request = http.Request('GET', Uri.parse(url))
+          ..headers.addAll(const {
+            'User-Agent': _browserUserAgent,
+            'Accept':
+                'application/x-mpegURL,application/vnd.apple.mpegurl,text/plain,*/*',
+          });
+        final response = await _client.send(request).timeout(timeout);
+        _ensureCurrent(generation);
+
+        if (response.statusCode >= 200 && response.statusCode < 300) {
+          try {
+            final lines = response.stream
+                .timeout(idleTimeout)
+                .transform(utf8.decoder)
+                .transform(const LineSplitter());
+            await for (final line in lines) {
+              _ensureCurrent(generation);
+              yield line;
+            }
+            return;
+          } on TimeoutException {
+            _ensureCurrent(generation);
+            throw const _BodyDownloadException(
+              'La descarga de la lista se interrumpió porque el servidor dejó de enviar datos.',
+            );
+          } on SocketException {
+            _ensureCurrent(generation);
+            throw const _BodyDownloadException(
+              'La conexión se cortó mientras se estaba descargando la lista.',
+            );
+          } on http.ClientException {
+            _ensureCurrent(generation);
+            throw const _BodyDownloadException(
+              'La conexión HTTP se interrumpió mientras se descargaba la lista.',
+            );
+          }
+        }
+
+        if (response.statusCode >= 500 && attempt < maxRetries) {
+          lastError = Exception(
+            'El servidor respondió con código ${response.statusCode}',
+          );
+          await _backoff(attempt);
+          continue;
+        }
+        throw Exception(
+          'El servidor respondió con código ${response.statusCode}',
+        );
+      } on _BrowsingCancelledException {
+        rethrow;
+      } on _BodyDownloadException catch (error) {
+        throw Exception(error.message);
+      } on TimeoutException {
+        lastError = Exception(
+          'El servidor tardó demasiado en iniciar la respuesta',
+        );
+      } on SocketException {
+        lastError = Exception(
+          'No hay conexión a internet o el servidor no responde',
+        );
+      } on HttpException {
+        lastError = Exception('Error al conectar con el servidor de la lista');
+      } on http.ClientException {
+        lastError = Exception(
+          'Error HTTP al conectar con el servidor de la lista',
+        );
+      }
+
+      _ensureCurrent(generation);
+      if (attempt < maxRetries) {
+        await _backoff(attempt);
+        continue;
+      }
+    }
+
+    _ensureCurrent(generation);
+    throw lastError ?? Exception('No se pudo descargar la lista');
+  }
+
   static void _ensureCurrent(int generation) {
     if (generation != _generation) {
       throw const _BrowsingCancelledException();

@@ -3,13 +3,16 @@ class CatalogIndex<T> {
   final List<T> all;
   final List<String> categories;
   final Map<String, List<T>> _byCategory;
-  final List<_CatalogSearchEntry<T>> _searchEntries;
+  final String Function(T item) _nameOf;
+  final String? Function(T item) _categoryOf;
+  List<_CatalogSearchEntry<T>>? _searchEntries;
 
-  const CatalogIndex._(
+  CatalogIndex._(
     this.all,
     this.categories,
     this._byCategory,
-    this._searchEntries,
+    this._nameOf,
+    this._categoryOf,
   );
 
   factory CatalogIndex.build({
@@ -21,7 +24,6 @@ class CatalogIndex<T> {
   }) {
     final visible = <T>[];
     final buckets = <String, List<T>>{};
-    final searchEntries = <_CatalogSearchEntry<T>>[];
     final discovered = <String>[];
     final discoveredSet = <String>{};
 
@@ -33,10 +35,6 @@ class CatalogIndex<T> {
         buckets.putIfAbsent(category, () => <T>[]).add(item);
         if (discoveredSet.add(category)) discovered.add(category);
       }
-      final searchText = _normalizeCatalogSearch(
-        '${nameOf(item)} ${category ?? ''}',
-      );
-      searchEntries.add(_CatalogSearchEntry(item, searchText));
     }
 
     final orderedCategories = <String>[];
@@ -58,7 +56,8 @@ class CatalogIndex<T> {
           (key, value) => MapEntry(key, List<T>.unmodifiable(value)),
         ),
       ),
-      List<_CatalogSearchEntry<T>>.unmodifiable(searchEntries),
+      nameOf,
+      categoryOf,
     );
   }
 
@@ -70,8 +69,20 @@ class CatalogIndex<T> {
   List<T> search(String rawQuery) {
     final query = _normalizeCatalogSearch(rawQuery);
     if (query.isEmpty) return all;
+    // El texto normalizado de miles de elementos sólo se crea cuando el
+    // usuario abre/usa Buscar. La navegación normal conserva únicamente los
+    // buckets de categorías.
+    final entries = _searchEntries ??= List<_CatalogSearchEntry<T>>.unmodifiable(
+      all.map((item) {
+        final category = _categoryOf(item)?.trim() ?? '';
+        return _CatalogSearchEntry(
+          item,
+          _normalizeCatalogSearch('${_nameOf(item)} $category'),
+        );
+      }),
+    );
     final result = <T>[];
-    for (final entry in _searchEntries) {
+    for (final entry in entries) {
       if (entry.searchText.contains(query)) result.add(entry.item);
     }
     return result;

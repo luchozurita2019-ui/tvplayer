@@ -47,6 +47,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   Timer? _searchDebounce;
   CatalogIndex<Channel>? _catalogIndex;
   _LiveData? _indexedData;
+  _LiveData? _visibleData;
 
   @override
   void initState() {
@@ -187,11 +188,12 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         onProgress: (p) => _setStatus(p.label),
       );
       if (!mounted || fresh.channels.isEmpty) return;
-      setState(
-        () => _future = Future.value(
-          _LiveData(fresh.channels, categories: fresh.categories),
-        ),
-      );
+      final data = _LiveData(fresh.channels, categories: fresh.categories);
+      setState(() {
+        _visibleData = data;
+        _catalogIndex = null;
+        _indexedData = null;
+      });
     } catch (_) {}
   }
 
@@ -247,7 +249,12 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       if (all == null) return;
       final fresh = all[TvSectionKind.live];
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
-      setState(() => _future = Future.value(_LiveData(fresh.channels)));
+      final data = _LiveData(fresh.channels, categories: fresh.categories);
+      setState(() {
+        _visibleData = data;
+        _catalogIndex = null;
+        _indexedData = null;
+      });
     } catch (_) {}
   }
 
@@ -325,16 +332,21 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
           child: FutureBuilder<_LiveData>(
             future: _future,
             builder: (context, snapshot) {
-              if (snapshot.connectionState != ConnectionState.done) {
+              final data = _visibleData ?? snapshot.data;
+              if (data == null &&
+                  snapshot.connectionState != ConnectionState.done) {
                 return _Loading(message: _status);
               }
-              if (snapshot.hasError) {
+              if (data == null && snapshot.hasError) {
                 return _ErrorView(
                   message: 'No se pudo cargar la TV en vivo.',
-                  onRetry: () => setState(() => _future = _loadInitial()),
+                  onRetry: () => setState(() {
+                    _visibleData = null;
+                    _future = _loadInitial();
+                  }),
                 );
               }
-              final data = snapshot.data!;
+              if (data == null) return _Loading(message: _status);
               if (data.channels.isEmpty) {
                 return _ErrorView(
                   message: 'Esta lista no contiene canales de TV en vivo.',

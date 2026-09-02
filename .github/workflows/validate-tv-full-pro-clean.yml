@@ -65,6 +65,9 @@ jobs:
       - name: Analyze complete Dart source
         run: flutter analyze
 
+      - name: Run catalog and parser tests
+        run: flutter test
+
       - name: Compile Android TV integration
         run: >-
           flutter build apk --debug

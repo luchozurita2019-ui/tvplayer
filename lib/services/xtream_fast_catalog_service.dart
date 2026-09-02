@@ -9,6 +9,7 @@ import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
 import 'xtream_http_client.dart';
+import 'device_performance_service.dart';
 import 'xtream_series_service.dart';
 import 'xtream_service.dart';
 import 'xtream_vod_service.dart';
@@ -107,6 +108,7 @@ class XtreamFastCatalogService {
       <String, XtreamMovieCatalogSnapshot>{};
   final Map<String, XtreamSeriesCatalogSnapshot> _seriesMemory =
       <String, XtreamSeriesCatalogSnapshot>{};
+  final List<String> _catalogMemoryOrder = <String>[];
   final Map<String, Future<XtreamMovieCatalogSnapshot?>>
       _pendingMovieCacheReads = <String, Future<XtreamMovieCatalogSnapshot?>>{};
   final Map<String, Future<XtreamSeriesCatalogSnapshot?>>
@@ -287,28 +289,56 @@ class XtreamFastCatalogService {
   void _rememberMovieSnapshot(String key, XtreamMovieCatalogSnapshot snapshot) {
     _movieMemory.remove(key);
     _movieMemory[key] = snapshot;
-    while (_movieMemory.length > 2) {
-      _movieMemory.remove(_movieMemory.keys.first);
-    }
+    _touchCatalogMemory('movie|$key');
+    _trimCatalogMemory();
   }
 
   void _rememberSeriesSnapshot(
       String key, XtreamSeriesCatalogSnapshot snapshot) {
     _seriesMemory.remove(key);
     _seriesMemory[key] = snapshot;
-    while (_seriesMemory.length > 2) {
-      _seriesMemory.remove(_seriesMemory.keys.first);
-    }
+    _touchCatalogMemory('series|$key');
+    _trimCatalogMemory();
   }
 
   void _touchMovieMemory(String key, XtreamMovieCatalogSnapshot snapshot) {
     _movieMemory.remove(key);
     _movieMemory[key] = snapshot;
+    _touchCatalogMemory('movie|$key');
   }
 
   void _touchSeriesMemory(String key, XtreamSeriesCatalogSnapshot snapshot) {
     _seriesMemory.remove(key);
     _seriesMemory[key] = snapshot;
+    _touchCatalogMemory('series|$key');
+  }
+
+  void _touchCatalogMemory(String token) {
+    _catalogMemoryOrder.remove(token);
+    _catalogMemoryOrder.add(token);
+  }
+
+  void _trimCatalogMemory() {
+    final lowRam = DevicePerformanceService.instance.lowRam;
+    final maxCatalogs = lowRam ? 1 : 2;
+    final maxItems = lowRam ? 12000 : 32000;
+    int itemCount() =>
+        _movieMemory.values.fold(0, (sum, item) => sum + item.movies.length) +
+        _seriesMemory.values.fold(0, (sum, item) => sum + item.series.length);
+
+    while (_catalogMemoryOrder.length > 1 &&
+        (_catalogMemoryOrder.length > maxCatalogs || itemCount() > maxItems)) {
+      final oldest = _catalogMemoryOrder.removeAt(0);
+      final separator = oldest.indexOf('|');
+      if (separator <= 0) continue;
+      final kind = oldest.substring(0, separator);
+      final key = oldest.substring(separator + 1);
+      if (kind == 'movie') {
+        _movieMemory.remove(key);
+      } else {
+        _seriesMemory.remove(key);
+      }
+    }
   }
 
   Future<XtreamMovieCatalogSnapshot> refreshMovies(
