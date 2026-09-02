@@ -1,0 +1,4 @@
+TV FULL PRO 1.3.8+30 visible-first artwork optimization.
+Priority order: selected hero logo -> visible LIVE grid logos -> lazy EPG -> offscreen content.
+No mass prefetch. Keep v26 local logo resolver, v29 Xtream EPG stream_id fix and LIVE playback timings unchanged.
+requested_at=2026-09-02
