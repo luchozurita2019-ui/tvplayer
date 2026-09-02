@@ -72,7 +72,8 @@ class CatalogIndex<T> {
     // El texto normalizado de miles de elementos sólo se crea cuando el
     // usuario abre/usa Buscar. La navegación normal conserva únicamente los
     // buckets de categorías.
-    final entries = _searchEntries ??= List<_CatalogSearchEntry<T>>.unmodifiable(
+    final entries =
+        _searchEntries ??= List<_CatalogSearchEntry<T>>.unmodifiable(
       all.map((item) {
         final category = _categoryOf(item)?.trim() ?? '';
         return _CatalogSearchEntry(

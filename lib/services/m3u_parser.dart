@@ -119,71 +119,72 @@ class M3uLineParser {
   final Map<String, String> pendingHeaders = <String, String>{};
 
   Channel? addLine(String rawLine) {
-      final line = rawLine.trim();
-      if (line.isEmpty) return null;
+    final line = rawLine.trim();
+    if (line.isEmpty) return null;
 
-      if (line.startsWith('#EXTINF')) {
-        final commaIndex = line.indexOf(',');
-        pendingName = commaIndex != -1
-            ? line.substring(commaIndex + 1).trim()
-            : 'Canal sin nombre';
+    if (line.startsWith('#EXTINF')) {
+      final commaIndex = line.indexOf(',');
+      pendingName = commaIndex != -1
+          ? line.substring(commaIndex + 1).trim()
+          : 'Canal sin nombre';
 
-        pendingLogo = M3uParser._extractAttr(line, 'tvg-logo');
-        pendingGroup = M3uParser._extractAttr(line, 'group-title');
-        pendingTvgId = M3uParser._extractAttr(line, 'tvg-id');
-      } else if (line.startsWith('#EXTVLCOPT:')) {
-        final rawOption = line.substring('#EXTVLCOPT:'.length).trim();
-        final equals = rawOption.indexOf('=');
-        if (equals > 0) {
-          final key = rawOption.substring(0, equals).trim().toLowerCase();
-          final value = rawOption.substring(equals + 1).trim();
-          if (value.isNotEmpty) {
-            switch (key) {
-              case 'http-user-agent':
-                pendingUserAgent = value;
-                pendingHeaders['User-Agent'] = value;
-                break;
-              case 'http-referrer':
-              case 'http-referer':
-                pendingReferrer = value;
-                pendingHeaders['Referer'] = value;
-                break;
-              case 'http-origin':
-                pendingHeaders['Origin'] = value;
-                break;
-              case 'http-cookie':
-                pendingHeaders['Cookie'] = value;
-                break;
-              case 'http-authorization':
-                pendingHeaders['Authorization'] = value;
-                break;
-              case 'http-header':
-                M3uParser._parseHeaderLine(value, pendingHeaders);
-                break;
-            }
+      pendingLogo = M3uParser._extractAttr(line, 'tvg-logo');
+      pendingGroup = M3uParser._extractAttr(line, 'group-title');
+      pendingTvgId = M3uParser._extractAttr(line, 'tvg-id');
+    } else if (line.startsWith('#EXTVLCOPT:')) {
+      final rawOption = line.substring('#EXTVLCOPT:'.length).trim();
+      final equals = rawOption.indexOf('=');
+      if (equals > 0) {
+        final key = rawOption.substring(0, equals).trim().toLowerCase();
+        final value = rawOption.substring(equals + 1).trim();
+        if (value.isNotEmpty) {
+          switch (key) {
+            case 'http-user-agent':
+              pendingUserAgent = value;
+              pendingHeaders['User-Agent'] = value;
+              break;
+            case 'http-referrer':
+            case 'http-referer':
+              pendingReferrer = value;
+              pendingHeaders['Referer'] = value;
+              break;
+            case 'http-origin':
+              pendingHeaders['Origin'] = value;
+              break;
+            case 'http-cookie':
+              pendingHeaders['Cookie'] = value;
+              break;
+            case 'http-authorization':
+              pendingHeaders['Authorization'] = value;
+              break;
+            case 'http-header':
+              M3uParser._parseHeaderLine(value, pendingHeaders);
+              break;
           }
         }
-      } else if (line.startsWith('#EXTHTTP:')) {
-        M3uParser._parseExtHttp(line.substring('#EXTHTTP:'.length), pendingHeaders);
-      } else if (line.startsWith(
-            '#KODIPROP:inputstream.adaptive.stream_headers=',
-          ) ||
-          line.startsWith('#KODIPROP:inputstream.adaptive.manifest_headers=')) {
-        final equals = line.indexOf('=');
-        if (equals != -1) {
-          M3uParser._parseHeaderQuery(line.substring(equals + 1), pendingHeaders);
-        }
-      } else if (!line.startsWith('#')) {
-        final parsed = M3uParser._splitUrlAndInlineHeaders(line);
-        pendingHeaders.addAll(parsed.headers);
+      }
+    } else if (line.startsWith('#EXTHTTP:')) {
+      M3uParser._parseExtHttp(
+          line.substring('#EXTHTTP:'.length), pendingHeaders);
+    } else if (line.startsWith(
+          '#KODIPROP:inputstream.adaptive.stream_headers=',
+        ) ||
+        line.startsWith('#KODIPROP:inputstream.adaptive.manifest_headers=')) {
+      final equals = line.indexOf('=');
+      if (equals != -1) {
+        M3uParser._parseHeaderQuery(line.substring(equals + 1), pendingHeaders);
+      }
+    } else if (!line.startsWith('#')) {
+      final parsed = M3uParser._splitUrlAndInlineHeaders(line);
+      pendingHeaders.addAll(parsed.headers);
 
-        // Sincronizamos los campos históricos para listas guardadas y código
-        // existente que todavía los consulta directamente.
-        pendingUserAgent ??= M3uParser._headerValue(pendingHeaders, 'User-Agent');
-        pendingReferrer ??= M3uParser._headerValue(pendingHeaders, 'Referer');
+      // Sincronizamos los campos históricos para listas guardadas y código
+      // existente que todavía los consulta directamente.
+      pendingUserAgent ??= M3uParser._headerValue(pendingHeaders, 'User-Agent');
+      pendingReferrer ??= M3uParser._headerValue(pendingHeaders, 'Referer');
 
-        final channel = pendingName != null
-            ? Channel(
+      final channel = pendingName != null
+          ? Channel(
               name: pendingName,
               url: parsed.url,
               logoUrl: pendingLogo,
@@ -195,7 +196,7 @@ class M3uLineParser {
                   ? null
                   : Map<String, String>.from(pendingHeaders),
             )
-            : Channel(
+          : Channel(
               name: parsed.url,
               url: parsed.url,
               httpUserAgent: pendingUserAgent,
@@ -205,16 +206,16 @@ class M3uLineParser {
                   : Map<String, String>.from(pendingHeaders),
             );
 
-        pendingName = null;
-        pendingLogo = null;
-        pendingGroup = null;
-        pendingTvgId = null;
-        pendingUserAgent = null;
-        pendingReferrer = null;
-        pendingHeaders.clear();
-        return channel;
-      }
-      return null;
+      pendingName = null;
+      pendingLogo = null;
+      pendingGroup = null;
+      pendingTvgId = null;
+      pendingUserAgent = null;
+      pendingReferrer = null;
+      pendingHeaders.clear();
+      return channel;
+    }
+    return null;
   }
 }
 
