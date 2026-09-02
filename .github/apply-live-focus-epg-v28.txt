@@ -1,0 +1,9 @@
+TV FULL PRO 1.3.6+28
+- remove Canales destacados row
+- keep compact channel grid unchanged
+- selected channel remains large in hero
+- remove favorite action from hero
+- show Ahora / Después when Xtream provider exposes short EPG
+- fetch guide lazily only after channel focus settles
+- preserve 1.3.4+26 performance, logo, health and LIVE timing behavior
+requested_at=2026-09-02T10:25:00-03:00
