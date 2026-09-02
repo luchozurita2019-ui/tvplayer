@@ -1,0 +1,7 @@
+TV FULL PRO 1.3.2+24 live slow-grace detector requested.
+- Keep fast channels unchanged.
+- 5.5 s without progress enters tolerance instead of stopping playback.
+- 9 s without bytes/buffer/tracks becomes TVFULL_NO_PROGRESS.
+- Track discovery counts as startup progress and renews the window.
+- Increase unexpected LIVE end recoveries from 2 to 5.
+- Keep stall recoveries at 2 and LIVE connect timeout at 4 s for controlled comparison.
