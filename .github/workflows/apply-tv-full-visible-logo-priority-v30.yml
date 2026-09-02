@@ -34,7 +34,11 @@ jobs:
           cache: true
 
       - name: Apply visible-first logo optimization
-        run: python .github/scripts/apply_tv_full_visible_logo_priority_v30.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python .github/scripts/apply_tv_full_visible_logo_priority_v30.py
+          sed -i 's/scrollCacheExtent: 0,/scrollCacheExtent: const ScrollCacheExtent.pixels(0),/' lib/widgets/tv_live_premium_catalog.dart
 
       - name: Resolve dependencies
         run: flutter pub get
@@ -64,7 +68,7 @@ jobs:
           grep -q '^version: 1.3.8+30$' pubspec.yaml
           grep -q 'Scrollable.maybeOf(context)?.position' lib/widgets/cached_artwork_image.dart
           grep -q '_isInLoadViewport' lib/widgets/cached_artwork_image.dart
-          grep -q 'scrollCacheExtent: 0' lib/widgets/tv_live_premium_catalog.dart
+          grep -q 'scrollCacheExtent: const ScrollCacheExtent.pixels(0)' lib/widgets/tv_live_premium_catalog.dart
           grep -q 'addAutomaticKeepAlives: false' lib/widgets/tv_live_premium_catalog.dart
           grep -q 'Duration(milliseconds: 520)' lib/widgets/tv_live_premium_catalog.dart
           grep -q 'priority: 300' lib/widgets/tv_live_premium_catalog.dart
