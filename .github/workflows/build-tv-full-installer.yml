@@ -1,0 +1,116 @@
+name: Build TV FULL Installer
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/tv-full-installer-build-request.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: Validate installer manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m json.tool tv_full_installer/latest.json >/dev/null
+          grep -q 'com.tvfull.pro.tv.v10safe' tv_full_installer/latest.json
+          grep -q 'TV-FULL-PRO-ARM32.apk' tv_full_installer/latest.json
+          grep -q 'TV-FULL-PRO-ARM64.apk' tv_full_installer/latest.json
+          grep -q 'Build.SUPPORTED_ABIS' tv_full_installer/app/src/main/java/com/tvfull/pro/installer/MainActivity.java
+          grep -q 'EXPECTED_CERT_SHA256' tv_full_installer/app/src/main/java/com/tvfull/pro/installer/MainActivity.java
+
+      - name: Configure installer signing
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > tv_full_installer/tvfull-release.jks
+
+      - name: Build signed installer
+        shell: bash
+        env:
+          TV_FULL_INSTALLER_KEYSTORE: ${{ github.workspace }}/tv_full_installer/tvfull-release.jks
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_PASSWORD"
+          test -n "$TV_FULL_KEY_ALIAS"
+          test -n "$TV_FULL_KEY_PASSWORD"
+          gradle -p tv_full_installer --no-daemon :app:assembleRelease
+
+      - name: Verify installer APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK=tv_full_installer/app/build/outputs/apk/release/app-release.apk
+          test -f "$APK"
+          mkdir -p artifact
+          cp "$APK" artifact/TV-FULL-INSTALLER.apk
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          "$APKSIGNER" verify --verbose --print-certs artifact/TV-FULL-INSTALLER.apk > artifact/SIGNATURE.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' artifact/SIGNATURE.txt
+          grep -qi 'Verified using v1 scheme.*true' artifact/SIGNATURE.txt
+          grep -qi 'Verified using v2 scheme.*true' artifact/SIGNATURE.txt
+          "$AAPT" dump badging artifact/TV-FULL-INSTALLER.apk | grep -q "package: name='com.tvfull.pro.installer'"
+          SIZE="$(stat -c '%s' artifact/TV-FULL-INSTALLER.apk)"
+          test "$SIZE" -lt 5242880
+          sha256sum artifact/TV-FULL-INSTALLER.apk | tee artifact/SHA256.txt
+          printf 'size=%s\n' "$SIZE" > artifact/INFO.txt
+
+      - name: Publish stable Installer URL
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=tv-full-installer-latest
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" artifact/TV-FULL-INSTALLER.apk --clobber
+          else
+            gh release create "$TAG" artifact/TV-FULL-INSTALLER.apk \
+              --title "TV FULL Installer latest" \
+              --notes "Instalador liviano para Android TV. Detecta ARM32/ARM64 y descarga solamente la TV FULL PRO compatible."
+          fi
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f tv_full_installer/tvfull-release.jks
+
+      - name: Upload Installer artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-INSTALLER
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
