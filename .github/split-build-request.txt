@@ -1,6 +1,6 @@
-TV FULL PRO 1.3.6+28 split APK build requested for low-storage TCL/Android TV devices.
-source_version=1.3.6+28
+TV FULL PRO 1.3.8+30 split APK build requested for low-storage TCL/Android TV devices.
+source_version=1.3.8+30
 architectures=arm64-v8a,armeabi-v7a
 signing=historical TV FULL PRO certificate required
-reason=keep install footprint lower than universal APK and test simplified LIVE + lazy now-next EPG UI
-requested_at=2026-09-02T10:38:00-03:00
+includes=v29 Xtream EPG stream-id fix + v30 visible-first logo loading
+requested_at=2026-09-02
