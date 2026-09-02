@@ -2,5 +2,5 @@ TV FULL PRO 1.3.7+29 EPG stream_id fix requested.
 Problem: Ahora/Después does not load when Xtream channels use direct_source URLs because stream_id was not persisted.
 Fix: persist real stream_id on Channel, rebuild Xtream LIVE cache once, prefer stored ID for get_short_epg.
 Keep LIVE timings, logo architecture and playback unchanged.
-retry_reason=scope formatting validation to touched files only
-requested_at=2026-09-02T11:08:00-03:00
+retry_reason=correct MainActivity guardrail path after successful analysis/tests/debug build
+requested_at=2026-09-02T11:13:00-03:00
