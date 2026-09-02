@@ -1,0 +1,5 @@
+TV FULL PRO 1.3.5+27 premium LIVE UI apply trigger
+requested_at=2026-09-02T05:26:00-03:00
+branch=android-tv-full-pro-clean-source
+scope=LIVE catalog UI + transparent LIVE player HUD + red neon EN VIVO + adaptive sports featured ranking
+preserve=1.3.4+26 performance, classic bundled list, local logo index, channel health, Media3 LIVE timings, historical signing continuity
