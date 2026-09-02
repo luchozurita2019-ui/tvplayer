@@ -5,12 +5,12 @@
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
     "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk",
-    "sha256": "a513879f83950940dd4ba6e2056da4a4237d1fccdfb808eef8524f4d74204ab0",
+    "sha256": "749de18c58dafc3900944debf89a0ff219d540d140a1e171862e31b847d8722f",
     "size": 34893037
   },
   "arm64": {
     "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk",
-    "sha256": "5bfd4840cd54909ab6c42ceb95284c1b3794b3f7519dc3be3487f305393b8c2e",
+    "sha256": "c2c12ecea79937a6501bb139fe50ef912856862ce7a3a3e72ad1b1eb801a7654",
     "size": 38583575
   }
 }
