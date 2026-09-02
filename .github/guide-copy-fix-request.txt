@@ -1,0 +1,4 @@
+TV FULL PRO guide fallback copy fix requested.
+Replace misleading 'Programación no disponible' with 'Guía no informada'.
+Keep explicit note that the live signal can reproduce normally.
+requested_at=2026-09-02T10:55:00-03:00
