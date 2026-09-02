@@ -6,6 +6,68 @@ const Color tvFullCyan = Color(0xFF39C5FF);
 const Color tvFullBlue = Color(0xFF245CFF);
 const Color tvFullViolet = Color(0xFF8A48FF);
 const Color tvFullPanel = Color(0xD90A1220);
+const Color tvFullLiveRed = Color(0xFFFF304A);
+
+class TvFullLiveBadge extends StatelessWidget {
+  final bool compact;
+  final String label;
+
+  const TvFullLiveBadge({
+    super.key,
+    this.compact = false,
+    this.label = 'EN VIVO',
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: compact ? 7 : 10,
+        vertical: compact ? 4 : 6,
+      ),
+      decoration: BoxDecoration(
+        color: tvFullLiveRed.withValues(alpha: compact ? .10 : .13),
+        borderRadius: BorderRadius.circular(999),
+        border: Border.all(
+          color: tvFullLiveRed.withValues(alpha: compact ? .66 : .82),
+          width: compact ? .8 : 1,
+        ),
+        boxShadow: compact
+            ? const []
+            : [
+                BoxShadow(
+                  color: tvFullLiveRed.withValues(alpha: .30),
+                  blurRadius: 14,
+                  spreadRadius: .5,
+                ),
+              ],
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Container(
+            width: compact ? 5 : 7,
+            height: compact ? 5 : 7,
+            decoration: const BoxDecoration(
+              color: tvFullLiveRed,
+              shape: BoxShape.circle,
+            ),
+          ),
+          SizedBox(width: compact ? 5 : 7),
+          Text(
+            label,
+            style: TextStyle(
+              color: const Color(0xFFFFD9DE),
+              fontSize: compact ? 9 : 11,
+              fontWeight: FontWeight.w900,
+              letterSpacing: .45,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
 
 class TvFullPremiumBackground extends StatelessWidget {
   final Widget child;

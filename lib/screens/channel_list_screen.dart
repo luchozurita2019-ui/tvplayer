@@ -14,6 +14,7 @@ import '../services/parental_control_service.dart';
 import '../widgets/cached_artwork_image.dart';
 import '../widgets/channel_logo_image.dart';
 import '../widgets/parental_lock_button.dart';
+import '../widgets/tv_live_premium_catalog.dart';
 import '../services/player_route_guard.dart';
 import 'player_screen.dart';
 
@@ -253,6 +254,8 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
               onQueryChanged: (value) => setState(() => _query = value),
               onPlay: (channel) =>
                   _openChannel(context, channels, channel, provider),
+              isFavorite: provider.isFavorite,
+              onFavoriteToggle: provider.toggleFavorite,
             );
           }
 
@@ -414,6 +417,7 @@ class _ChannelListScreenState extends State<ChannelListScreen> {
     } finally {
       _openingPlayer = false;
       ArtworkCacheService.instance.resumeBrowsing();
+      if (mounted) setState(() {});
     }
   }
 }
@@ -427,6 +431,8 @@ class _TvCatalogLayout extends StatelessWidget {
   final ValueChanged<String?> onGroupSelected;
   final ValueChanged<String> onQueryChanged;
   final ValueChanged<Channel> onPlay;
+  final bool Function(Channel channel) isFavorite;
+  final ValueChanged<Channel> onFavoriteToggle;
 
   const _TvCatalogLayout({
     required this.mode,
@@ -437,10 +443,27 @@ class _TvCatalogLayout extends StatelessWidget {
     required this.onGroupSelected,
     required this.onQueryChanged,
     required this.onPlay,
+    required this.isFavorite,
+    required this.onFavoriteToggle,
   });
 
   @override
   Widget build(BuildContext context) {
+    if (mode == _CatalogMode.live) {
+      return TvLivePremiumCatalog(
+        channels: channels,
+        categories: groups,
+        selectedCategory: selectedGroup,
+        query: query,
+        showSearchField: true,
+        onCategorySelected: onGroupSelected,
+        onQueryChanged: onQueryChanged,
+        onPlay: onPlay,
+        isFavorite: isFavorite,
+        onFavoriteToggle: onFavoriteToggle,
+      );
+    }
+
     return Row(
       children: [
         Container(

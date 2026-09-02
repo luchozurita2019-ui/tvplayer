@@ -8,7 +8,9 @@ import '../models/channel.dart';
 import '../services/channel_health_service.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
+import '../services/live_channel_usage_service.dart';
 import '../widgets/channel_logo_image.dart';
+import '../widgets/tv_full_premium_ui.dart';
 
 const String _media3DefaultUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -44,6 +46,7 @@ class _AndroidMedia3TexturePlayerScreenState
   final FocusNode _retryFocus = FocusNode(debugLabel: 'tvfull-pro-live-retry');
   final ScrollController _channelScrollController = ScrollController();
   final ChannelHealthService _health = ChannelHealthService.instance;
+  final LiveChannelUsageService _usage = LiveChannelUsageService.instance;
   StreamSubscription<dynamic>? _eventSub;
   Timer? _overlayTimer;
   Timer? _retryTimer;
@@ -185,6 +188,7 @@ class _AndroidMedia3TexturePlayerScreenState
             const Duration(milliseconds: 5500);
     _health.markHealthy(_channel, slow: slow);
     _healthRecordedGeneration = _openGeneration;
+    unawaited(_usage.record(_channel));
   }
 
   void _onNativeEvent(dynamic raw) {
@@ -649,81 +653,130 @@ class _AndroidMedia3TexturePlayerScreenState
         child: Align(
           alignment: Alignment.bottomCenter,
           child: Container(
-            height: 54,
-            margin: const EdgeInsets.fromLTRB(18, 0, 18, 14),
-            padding: const EdgeInsets.symmetric(horizontal: 12),
-            decoration: BoxDecoration(
-              color: const Color(0xE80A1017),
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(color: Colors.white12),
+            height: 108,
+            padding: const EdgeInsets.fromLTRB(22, 30, 22, 12),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x00000000),
+                  Color(0x3502080F),
+                  Color(0xA802060B),
+                ],
+                stops: [0, .42, 1],
+              ),
             ),
             child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
               children: [
-                SizedBox(
-                  width: 34,
-                  height: 34,
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(7),
-                    child: ChannelLogoImage(
-                      channel: _channel,
-                      fit: BoxFit.contain,
-                      cacheWidth: 68,
-                      cacheHeight: 68,
-                      prefetchExtent: 0,
-                      fallback: const Icon(Icons.live_tv_rounded, size: 20),
+                Container(
+                  width: 62,
+                  height: 62,
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: .24),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: tvFullCyan.withValues(alpha: .40),
                     ),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Text(
-                    _channel.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      fontSize: 14,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                ),
-                if (_hasMultipleAudioTracks) ...[
-                  SizedBox(
-                    height: 34,
-                    child: OutlinedButton.icon(
-                      style: OutlinedButton.styleFrom(
-                        padding: const EdgeInsets.symmetric(horizontal: 10),
-                        visualDensity: VisualDensity.compact,
+                    boxShadow: [
+                      BoxShadow(
+                        color: tvFullCyan.withValues(alpha: .10),
+                        blurRadius: 12,
                       ),
-                      onPressed: () => unawaited(_showAudioPicker()),
-                      icon: const Icon(Icons.language_rounded, size: 18),
-                      label: const Text('Audio'),
+                    ],
+                  ),
+                  child: ChannelLogoImage(
+                    channel: _channel,
+                    fit: BoxFit.contain,
+                    cacheWidth: 124,
+                    cacheHeight: 124,
+                    priority: 120,
+                    prefetchExtent: 0,
+                    fallback: const Icon(
+                      Icons.live_tv_rounded,
+                      size: 31,
+                      color: Colors.white70,
                     ),
                   ),
-                  const SizedBox(width: 10),
-                ],
-                Container(width: 1, height: 24, color: Colors.white12),
-                const SizedBox(width: 10),
-                const Icon(Icons.circle, size: 8, color: Colors.redAccent),
-                const SizedBox(width: 5),
-                const Text(
-                  'LIVE',
-                  style: TextStyle(
-                    color: Colors.redAccent,
-                    fontSize: 11,
-                    fontWeight: FontWeight.w900,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                _channel.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black87,
+                                      blurRadius: 8,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            const TvFullLiveBadge(),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          (_channel.group ?? '').trim().isEmpty
+                              ? 'TV en vivo'
+                              : _channel.group!.trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white60,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            shadows: [
+                              Shadow(color: Colors.black87, blurRadius: 6),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
                   ),
+                ),
+                if (_hasMultipleAudioTracks)
+                  _LiveHudAction(
+                    icon: Icons.language_rounded,
+                    label: 'Audio',
+                    onTap: () => unawaited(_showAudioPicker()),
+                  ),
+                if (_hasMultipleAudioTracks) const SizedBox(width: 8),
+                _LiveHudAction(
+                  icon: Icons.grid_view_rounded,
+                  label: 'Canales',
+                  onTap: _openChannelList,
                 ),
                 const SizedBox(width: 12),
-                SizedBox(
-                  height: 34,
-                  child: OutlinedButton.icon(
-                    style: OutlinedButton.styleFrom(
-                      padding: const EdgeInsets.symmetric(horizontal: 10),
-                      visualDensity: VisualDensity.compact,
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '← → cambiar   ·   ↓ canales',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      shadows: [
+                        Shadow(color: Colors.black87, blurRadius: 6),
+                      ],
                     ),
-                    onPressed: _openChannelList,
-                    icon: const Icon(Icons.list_rounded, size: 18),
-                    label: const Text('Catálogo'),
                   ),
                 ),
               ],
@@ -893,6 +946,37 @@ class _AndroidMedia3TexturePlayerScreenState
           ),
         ),
       );
+}
+
+class _LiveHudAction extends StatelessWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onTap;
+
+  const _LiveHudAction({
+    required this.icon,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton.icon(
+      style: OutlinedButton.styleFrom(
+        foregroundColor: Colors.white,
+        backgroundColor: Colors.black.withValues(alpha: .10),
+        side: BorderSide(color: Colors.white.withValues(alpha: .18)),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 9),
+        visualDensity: VisualDensity.compact,
+      ),
+      onPressed: onTap,
+      icon: Icon(icon, size: 17, color: tvFullCyan),
+      label: Text(
+        label,
+        style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
+      ),
+    );
+  }
 }
 
 class _LiveErrorButton extends StatefulWidget {

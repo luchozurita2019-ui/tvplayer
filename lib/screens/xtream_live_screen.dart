@@ -21,6 +21,7 @@ import '../services/xtream_service.dart';
 import '../widgets/channel_logo_image.dart';
 import '../widgets/tv_catalog_category_row.dart';
 import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_live_premium_catalog.dart';
 import 'player_screen.dart';
 
 class XtreamLiveScreen extends StatefulWidget {
@@ -369,6 +370,30 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     final visible =
         _searchOpen ? index.search(_query) : index.forCategory(_category);
 
+    if (!_searchOpen) {
+      final provider = context.read<IptvProvider>();
+      return TvLivePremiumCatalog(
+        channels: visible,
+        categories: categories,
+        selectedCategory: _category,
+        query: _query,
+        showSearchField: false,
+        onCategorySelected: (category) {
+          setState(() => _category = category);
+          _resetCatalogScroll();
+        },
+        onQueryChanged: (_) {},
+        onPlay: (channel) {
+          final channelIndex = visible.indexOf(channel);
+          if (channelIndex >= 0) {
+            unawaited(_openPlayer(visible, channelIndex));
+          }
+        },
+        isFavorite: provider.isFavorite,
+        onFavoriteToggle: provider.toggleFavorite,
+      );
+    }
+
     return Row(
       children: [
         SizedBox(
@@ -481,6 +506,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       );
     } finally {
       _openingPlayer = false;
+      if (mounted) setState(() {});
     }
   }
 }
