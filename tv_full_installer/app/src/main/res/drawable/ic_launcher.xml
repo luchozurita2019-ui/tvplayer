@@ -4,19 +4,47 @@
     android:height="108dp"
     android:viewportWidth="108"
     android:viewportHeight="108">
+
     <path
         android:fillColor="#07111F"
-        android:pathData="M0,0h108v108h-108z" />
+        android:pathData="M14,4 H94 A10,10 0,0 1,104 14 V94 A10,10 0,0 1,94 104 H14 A10,10 0,0 1,4 94 V14 A10,10 0,0 1,14 4 Z"
+        android:strokeColor="#F6C64A"
+        android:strokeWidth="3" />
+
     <path
-        android:fillColor="#26D9FF"
-        android:pathData="M18,27h72a6,6 0,0 1,6 6v42a6,6 0,0 1,-6 6h-72a6,6 0,0 1,-6 -6v-42a6,6 0,0 1,6 -6z" />
+        android:fillColor="#0B1E38"
+        android:pathData="M17,9 H91 A8,8 0,0 1,99 17 V91 A8,8 0,0 1,91 99 H17 A8,8 0,0 1,9 91 V17 A8,8 0,0 1,17 9 Z"
+        android:strokeColor="#16C7FF"
+        android:strokeWidth="2" />
+
+    <!-- Refresh arrows -->
     <path
-        android:fillColor="#07111F"
-        android:pathData="M22,35h64v34h-64z" />
+        android:fillColor="#F6C64A"
+        android:pathData="M23,38 C28,21 47,13 64,18 C72,20 79,24 84,30 L89,24 L91,42 L73,39 L80,34 C75,29 69,26 62,24 C49,21 35,27 30,40 Z" />
     <path
-        android:fillColor="#FF2D55"
-        android:pathData="M47,43l20,9l-20,10z" />
+        android:fillColor="#20C9FF"
+        android:pathData="M85,69 C80,86 61,95 44,90 C36,88 29,84 24,78 L19,84 L17,66 L35,69 L28,74 C33,79 39,82 46,84 C59,87 73,81 78,68 Z" />
+
+    <!-- TV -->
     <path
-        android:fillColor="#26D9FF"
-        android:pathData="M39,85h30v5h-30z" />
+        android:fillColor="#0A1628"
+        android:pathData="M24,35 H84 A4,4 0,0 1,88 39 V68 A4,4 0,0 1,84 72 H24 A4,4 0,0 1,20 68 V39 A4,4 0,0 1,24 35 Z"
+        android:strokeColor="#F5D36D"
+        android:strokeWidth="2.3" />
+    <path
+        android:fillColor="#16BFFF"
+        android:pathData="M47,45 L67,54 L47,63 Z" />
+    <path
+        android:fillColor="#F6C64A"
+        android:pathData="M43,75 H65 L69,80 H39 Z" />
+
+    <!-- Download arrow -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M52,38 H56 V48 H62 L54,57 L46,48 H52 Z" />
+
+    <!-- small premium dots -->
+    <path android:fillColor="#F6C64A" android:pathData="M43,88 A2,2 0,1 0,47 88 A2,2 0,1 0,43 88" />
+    <path android:fillColor="#F6C64A" android:pathData="M52,88 A2,2 0,1 0,56 88 A2,2 0,1 0,52 88" />
+    <path android:fillColor="#F6C64A" android:pathData="M61,88 A2,2 0,1 0,65 88 A2,2 0,1 0,61 88" />
 </vector>

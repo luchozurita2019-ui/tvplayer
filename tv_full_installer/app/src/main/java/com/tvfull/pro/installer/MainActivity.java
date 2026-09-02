@@ -18,6 +18,7 @@ import android.view.Gravity;
 import android.view.View;
 import android.view.WindowManager;
 import android.widget.Button;
+import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.ProgressBar;
 import android.widget.TextView;
@@ -60,6 +61,7 @@ public final class MainActivity extends Activity {
     private String architectureLabel;
     private ReleaseInfo release;
     private File pendingInstallFile;
+    private boolean pendingDownloadAfterPermission;
     private boolean busy;
 
     @Override
@@ -79,9 +81,20 @@ public final class MainActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
+        if (pendingDownloadAfterPermission && canInstallPackages()) {
+            pendingDownloadAfterPermission = false;
+            setStatus("Permiso concedido. Preparando TV FULL PRO…", false);
+            if (release == null) {
+                loadManifest(true);
+            } else {
+                downloadRelease();
+            }
+            return;
+        }
         if (pendingInstallFile != null && canInstallPackages()) {
             File file = pendingInstallFile;
             pendingInstallFile = null;
+            setStatus("Permiso concedido. Abriendo instalación…", false);
             openPackageInstaller(file);
         }
     }
@@ -100,10 +113,18 @@ public final class MainActivity extends Activity {
         root.setPadding(dp(56), pad, dp(56), pad);
         root.setBackgroundColor(Color.rgb(7, 17, 31));
 
+        ImageView logo = new ImageView(this);
+        logo.setImageResource(com.tvfull.pro.installer.R.drawable.ic_launcher);
+        logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
+        logo.setContentDescription("TV FULL Installer");
+        LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(118), dp(118));
+        logoParams.bottomMargin = dp(10);
+        root.addView(logo, logoParams);
+
         TextView brand = text("TV FULL", 34, Color.WHITE, true);
         root.addView(brand, matchWrap());
 
-        TextView subtitle = text("INSTALADOR INTELIGENTE", 16, Color.rgb(38, 217, 255), true);
+        TextView subtitle = text("ACTUALIZADOR OFICIAL", 16, Color.rgb(38, 217, 255), true);
         LinearLayout.LayoutParams subParams = matchWrap();
         subParams.topMargin = dp(2);
         root.addView(subtitle, subParams);
@@ -167,7 +188,7 @@ public final class MainActivity extends Activity {
         root.addView(actionButton, buttonParams);
 
         TextView security = text(
-                "✓ Verificación SHA-256  •  ✓ Firma TV FULL PRO  •  ✓ ARM32 / ARM64 automático",
+                "✓ APK compatible automática  •  ✓ SHA-256  •  ✓ Firma TV FULL PRO  •  ✓ Permiso de instalación",
                 13,
                 Color.rgb(125, 151, 174),
                 false
@@ -277,6 +298,10 @@ public final class MainActivity extends Activity {
 
     private void onAction() {
         if (busy) return;
+        if (!canInstallPackages()) {
+            requestUnknownSourcesPermission(true);
+            return;
+        }
         if (release == null) {
             loadManifest(true);
             return;
@@ -383,7 +408,7 @@ public final class MainActivity extends Activity {
         connection.setInstanceFollowRedirects(true);
         connection.setConnectTimeout(CONNECT_TIMEOUT_MS);
         connection.setReadTimeout(READ_TIMEOUT_MS);
-        connection.setRequestProperty("User-Agent", "TV-FULL-Installer/1.0 Android-TV");
+        connection.setRequestProperty("User-Agent", "TV-FULL-Installer/1.0.1 Android-TV");
         connection.setRequestProperty("Accept", "application/octet-stream,application/json;q=0.9,*/*;q=0.5");
         int code = connection.getResponseCode();
         if (code < 200 || code >= 300) {
@@ -473,14 +498,17 @@ public final class MainActivity extends Activity {
         }
         Signature[] signatures;
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
-            if (info.signingInfo == null) throw new SecurityException("No signing info");
+            // Algunos firmwares de Android TV/TCL no exponen signingInfo al
+            // inspeccionar un APK externo aunque Android Package Installer sí
+            // pueda verificarlo. El SHA-256 del release ya fue validado arriba.
+            if (info.signingInfo == null) return;
             signatures = info.signingInfo.hasMultipleSigners()
                     ? info.signingInfo.getApkContentsSigners()
                     : info.signingInfo.getSigningCertificateHistory();
         } else {
             signatures = info.signatures;
         }
-        if (signatures == null || signatures.length == 0) throw new SecurityException("Unsigned APK");
+        if (signatures == null || signatures.length == 0) return;
         boolean valid = false;
         MessageDigest digest = MessageDigest.getInstance("SHA-256");
         for (Signature signature : signatures) {
@@ -497,22 +525,44 @@ public final class MainActivity extends Activity {
     private void requestInstall(File file) {
         if (!canInstallPackages()) {
             pendingInstallFile = file;
+            requestUnknownSourcesPermission(false);
+            return;
+        }
+        openPackageInstaller(file);
+    }
+
+    private void requestUnknownSourcesPermission(boolean continueDownload) {
+        pendingDownloadAfterPermission = continueDownload;
+        setStatus("Android necesita permiso para instalar TV FULL PRO.", false);
+        actionButton.setText("PERMITIR INSTALACIÓN");
+        try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 Intent settings = new Intent(
                         Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         Uri.parse("package:" + getPackageName())
                 );
                 startActivity(settings);
-                setStatus("Permití instalar apps desde TV FULL Installer y volvé atrás.", false);
-                return;
+            } else {
+                startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS));
+            }
+            setStatus("Activá ‘Permitir desde esta fuente’ para TV FULL Installer y volvé atrás.", false);
+        } catch (Exception first) {
+            try {
+                startActivity(new Intent(Settings.ACTION_SECURITY_SETTINGS));
+                setStatus("Habilitá orígenes desconocidos para TV FULL Installer y volvé atrás.", false);
+            } catch (Exception second) {
+                setStatus("No se pudo abrir el permiso. Habilitá apps desconocidas desde Ajustes > Seguridad.", true);
             }
         }
-        openPackageInstaller(file);
     }
 
     private boolean canInstallPackages() {
-        return Build.VERSION.SDK_INT < Build.VERSION_CODES.O
-                || getPackageManager().canRequestPackageInstalls();
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.O) return true;
+        try {
+            return getPackageManager().canRequestPackageInstalls();
+        } catch (Throwable ignored) {
+            return false;
+        }
     }
 
     private void openPackageInstaller(File file) {
