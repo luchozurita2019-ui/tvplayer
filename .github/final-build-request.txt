@@ -1,7 +1,9 @@
-TV FULL PRO final release build requested after v22 Adaptive Live Engine: preserve fast 1s initial playback target and 4.5s dead-channel deadline, learn per-channel stability locally, hash channel URLs before persistence, use LOW_RAM-aware learned startup buffer profiles, adapt HLS/live target offset by channel protection level, measure bandwidth and rebuffer events through Media3 analytics, escalate retry protection only for unstable channels, relax learned protection after repeated stable 30s windows, keep persistent OkHttp session guardian, bounded segment retries, DNS fallback, same ExoPlayer/Surface, multi-audio, updater and D-pad fixes. VOD/Series architecture remains unchanged.
-validated_run=33338183844
-validation_result=flutter analyze success; Android debug compile success; adaptive LIVE engine and playback guardrails success
-source_commit=24662863de86e1764e68c2551aa21cb4511af58d
-version=1.3.0+22
-signing=persistent TV FULL PRO release keystore (same signature as previous releases)
-requested_at=2026-08-30T19:15:00-03:00
+TV FULL PRO final release build requested after the completed 1.3.1+23 optimization and stability work.
+validated_run=33593254944
+validation_result=dart format success; flutter analyze success; flutter test success; Android TV debug compile success
+validated_code_commit=7f55dcd5f59c16d4d16419a1a7a9740c5d0fe5a0
+version=1.3.1+23
+release_target=universal ARM Android TV APK
+signing=persistent TV FULL PRO release keystore; must match historical certificate SHA-256 40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a
+notes=M3U sections stream directly to disk with transactional generations; RAM cache uses device-aware byte budget; refreshed sections invalidate stale RAM snapshots; existing demand-driven artwork cache retained.
+requested_at=2026-09-02T02:15:00-03:00
