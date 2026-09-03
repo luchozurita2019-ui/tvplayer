@@ -21,6 +21,12 @@ String? remoteAccessBlockMessage(IptvProvider provider) {
     'inactive',
     'disabled',
     'suspended',
+    'vencido',
+    'vencida',
+    'expired',
+    'no autorizado',
+    'unauthorized',
+    'forbidden',
   ];
   for (final signal in blockedSignals) {
     if (value.contains(signal)) return raw;

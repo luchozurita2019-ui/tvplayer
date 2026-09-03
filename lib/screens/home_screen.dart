@@ -78,6 +78,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       );
     }
 
+    // En cada arranque de la APK el contenido permanece cerrado hasta que
+    // tvf-device-config responda correctamente. Una lista local o precargada
+    // nunca puede saltarse esta validación inicial del servidor.
+    if (provider.remoteProvisioningSupported &&
+        provider.remoteLastSyncedAt == null) {
+      final verificationError = provider.remoteSyncError;
+      return _StartupView(
+        message: verificationError == null
+            ? 'Verificando el estado de tu servicio…'
+            : 'No se pudo verificar el servicio. Revisá la conexión a Internet. TV FULL PRO se habilitará cuando el servidor confirme que este dispositivo está activo.',
+        deviceCode: provider.remoteDeviceCode,
+        busy: provider.remoteSyncing || verificationError == null,
+      );
+    }
+
     final selected = provider.selectedPlaylist;
     if (selected == null) {
       return _StartupView(

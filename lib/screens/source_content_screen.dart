@@ -490,7 +490,7 @@ class _UpdateBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Mejoras de rendimiento, estabilidad y compatibilidad · versión $versionName',
+                  'Nueva versión $versionName · Presioná para abrir TV FULL Installer.',
                   style: const TextStyle(color: Colors.white60, fontSize: 12),
                 ),
               ],
@@ -504,7 +504,7 @@ class _UpdateBanner extends StatelessWidget {
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
             ),
             child: const Text(
-              'ACTUALIZAR',
+              'INSTALAR ACTUALIZACIÓN',
               style: TextStyle(fontWeight: FontWeight.w900),
             ),
           ),

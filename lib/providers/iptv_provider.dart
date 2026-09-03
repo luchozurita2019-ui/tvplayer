@@ -159,7 +159,8 @@ class IptvProvider extends ChangeNotifier {
   Future<void> syncRemoteServices() async {
     if (!_remoteProvisioning.isSupported || _remoteSyncing) return;
     _remoteSyncing = true;
-    _remoteSyncError = null;
+    // Si el servidor ya bloqueó el dispositivo, conservar ese bloqueo mientras
+    // se revalida evita reabrir el contenido guardado durante unos segundos.
     notifyListeners();
 
     try {
@@ -201,6 +202,7 @@ class IptvProvider extends ChangeNotifier {
       _normalizeSelection();
       await _localStore.saveServices(_playlists);
       await _localStore.saveSelectedServiceId(_selectedPlaylistId);
+      _remoteSyncError = null;
       _remoteLastSyncedAt = configuration.syncedAt ?? DateTime.now();
       _error = null;
     } catch (error) {
