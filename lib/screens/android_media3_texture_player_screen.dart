@@ -986,7 +986,7 @@ class _LiveHudAction extends StatelessWidget {
         visualDensity: VisualDensity.compact,
       ),
       onPressed: onTap,
-      icon: Icon(widget.icon, size: 17, color: tvFullCyan),
+      icon: Icon(icon, size: 17, color: tvFullCyan),
       label: Text(
         label,
         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
