@@ -1,6 +1,6 @@
-TV FULL PRO 1.4.0+32 split APK build requested.
-source_version=1.4.0+32
+TV FULL PRO 1.4.1+33 split APK build requested.
+source_version=1.4.1+33
 architectures=arm64-v8a,armeabi-v7a
 signing=historical TV FULL PRO certificate required
-includes=server-first access gate; payment block stays closed during revalidation; update banner opens installed TV FULL Installer
-requested_at=2026-09-03T00:31:00-03:00
+includes=server authorization and remote list sync once per app launch; no 30-second panel polling; update button keeps opening installed TV FULL Installer
+requested_at=2026-09-03T02:23:00-03:00
