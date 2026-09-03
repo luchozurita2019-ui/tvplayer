@@ -628,38 +628,46 @@ class _AndroidMedia3TexturePlayerScreenState
         body: Center(child: Text('No hay canales para reproducir.')),
       );
     }
-    return Scaffold(
-      backgroundColor: Colors.black,
-      body: Focus(
-        focusNode: _rootFocus,
-        autofocus: true,
-        onKeyEvent: _onKey,
-        child: Stack(
-          fit: StackFit.expand,
-          children: [
-            Center(
-              child: AspectRatio(
-                aspectRatio: _aspectRatio,
-                child: _textureId == null
-                    ? const SizedBox.shrink()
-                    : Texture(
-                        textureId: _textureId!,
-                        filterQuality: FilterQuality.none,
-                      ),
-              ),
-            ),
-            if (_buffering && _friendlyError == null)
-              const Center(
-                child: SizedBox(
-                  width: 38,
-                  height: 38,
-                  child: CircularProgressIndicator(strokeWidth: 3),
+    return PopScope<void>(
+      canPop: !_channelListVisible,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop && _channelListVisible) {
+          _closeChannelList();
+        }
+      },
+      child: Scaffold(
+        backgroundColor: Colors.black,
+        body: Focus(
+          focusNode: _rootFocus,
+          autofocus: true,
+          onKeyEvent: _onKey,
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              Center(
+                child: AspectRatio(
+                  aspectRatio: _aspectRatio,
+                  child: _textureId == null
+                      ? const SizedBox.shrink()
+                      : Texture(
+                          textureId: _textureId!,
+                          filterQuality: FilterQuality.none,
+                        ),
                 ),
               ),
-            if (_friendlyError != null) _errorCard(),
-            if (_overlayVisible && _friendlyError == null) _liveHud(),
-            if (_channelListVisible) _channelDrawer(),
-          ],
+              if (_buffering && _friendlyError == null)
+                const Center(
+                  child: SizedBox(
+                    width: 38,
+                    height: 38,
+                    child: CircularProgressIndicator(strokeWidth: 3),
+                  ),
+                ),
+              if (_friendlyError != null) _errorCard(),
+              if (_overlayVisible && _friendlyError == null) _liveHud(),
+              if (_channelListVisible) _channelDrawer(),
+            ],
+          ),
         ),
       ),
     );

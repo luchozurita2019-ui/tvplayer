@@ -1,7 +1,7 @@
 name: iptv_player
 description: TV FULL PRO para Android TV, rápido, liviano y orientado a control remoto.
 publish_to: 'none'
-version: 1.4.2+34
+version: 1.4.3+35
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -58,3 +58,5 @@ flutter:
 # TV FULL PRO 1.4.1+33 validate/sync remote services only once at app startup
 
 # TV FULL PRO 1.4.2+34 EPG fallbacks, manual list refresh, double-back exit, and persistent in-player channel grid navigation.
+
+# TV FULL PRO 1.4.3+35 Android TV route Back closes player grid before leaving playback
