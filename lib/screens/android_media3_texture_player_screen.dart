@@ -137,7 +137,10 @@ class _AndroidMedia3TexturePlayerScreenState
     }
   }
 
-  Future<void> _prepareCurrent({bool preserveRetry = false}) async {
+  Future<void> _prepareCurrent({
+    bool preserveRetry = false,
+    bool keepChannelListOpen = false,
+  }) async {
     if (widget.playlist.isEmpty || _textureId == null) return;
     final generation = ++_openGeneration;
     _retryTimer?.cancel();
@@ -152,7 +155,7 @@ class _AndroidMedia3TexturePlayerScreenState
       setState(() {
         _buffering = true;
         _friendlyError = null;
-        _channelListVisible = false;
+        _channelListVisible = keepChannelListOpen && _channelListVisible;
         _audioTracks = const <_LiveAudioTrack>[];
       });
     }
@@ -294,7 +297,14 @@ class _AndroidMedia3TexturePlayerScreenState
         });
       }
       _retryTimer = Timer(const Duration(milliseconds: 650), () {
-        if (mounted) unawaited(_prepareCurrent(preserveRetry: true));
+        if (mounted) {
+          unawaited(
+            _prepareCurrent(
+              preserveRetry: true,
+              keepChannelListOpen: _channelListVisible,
+            ),
+          );
+        }
       });
       return;
     }
@@ -338,15 +348,21 @@ class _AndroidMedia3TexturePlayerScreenState
     debugPrint('TV FULL PRO LIVE error: $technical');
     if (!mounted) return;
     _overlayTimer?.cancel();
+    final keepChannelListOpen = _channelListVisible;
     setState(() {
       _buffering = false;
       _friendlyError = friendly;
-      _overlayVisible = false;
-      _channelListVisible = false;
+      _overlayVisible = keepChannelListOpen;
+      _channelListVisible = keepChannelListOpen;
       _audioTracks = const <_LiveAudioTrack>[];
     });
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted && _retryFocus.canRequestFocus) _retryFocus.requestFocus();
+      if (!mounted) return;
+      if (keepChannelListOpen) {
+        _scrollChannelListToCurrent();
+      } else if (_retryFocus.canRequestFocus) {
+        _retryFocus.requestFocus();
+      }
     });
   }
 
@@ -479,11 +495,11 @@ class _AndroidMedia3TexturePlayerScreenState
     if (index < 0 || index >= widget.playlist.length) return;
     setState(() {
       _index = index;
-      _channelListVisible = false;
+      _channelListVisible = true;
       _overlayVisible = true;
     });
-    _rootFocus.requestFocus();
-    unawaited(_prepareCurrent());
+    unawaited(_prepareCurrent(keepChannelListOpen: true));
+    _scrollChannelListToCurrent();
     _showOverlay();
   }
 
@@ -970,7 +986,7 @@ class _LiveHudAction extends StatelessWidget {
         visualDensity: VisualDensity.compact,
       ),
       onPressed: onTap,
-      icon: Icon(icon, size: 17, color: tvFullCyan),
+      icon: Icon(widget.icon, size: 17, color: tvFullCyan),
       label: Text(
         label,
         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
