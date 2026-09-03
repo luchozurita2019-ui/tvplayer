@@ -534,13 +534,17 @@ class _AndroidMedia3TexturePlayerScreenState
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
-    final isBack =
-        key == LogicalKeyboardKey.goBack || key == LogicalKeyboardKey.escape;
+    final isSystemBack = key == LogicalKeyboardKey.goBack;
+    final isEscape = key == LogicalKeyboardKey.escape;
 
-    // La lista abierta tiene prioridad total, incluso si el canal anterior
-    // dejó un error visible. Así el D-pad vuelve a navegar los canales normal.
+    // Android TV entrega BACK tanto como tecla goBack como navegación de ruta.
+    // La ruta es la única dueña de BACK para evitar cerrar la grilla y luego,
+    // en el mismo gesto, hacer pop del reproductor.
+    if (isSystemBack) return KeyEventResult.ignored;
+
+    // Escape se conserva para teclados físicos sin mezclarlo con BACK Android.
     if (_channelListVisible) {
-      if (isBack) {
+      if (isEscape) {
         _closeChannelList();
         return KeyEventResult.handled;
       }
@@ -548,7 +552,7 @@ class _AndroidMedia3TexturePlayerScreenState
     }
 
     if (_friendlyError != null) {
-      if (isBack) return KeyEventResult.ignored;
+      if (isEscape) return KeyEventResult.ignored;
       if (key == LogicalKeyboardKey.arrowDown) {
         _openChannelList();
         return KeyEventResult.handled;
@@ -568,7 +572,7 @@ class _AndroidMedia3TexturePlayerScreenState
       return KeyEventResult.handled;
     }
 
-    if (isBack && _overlayVisible) {
+    if (isEscape && _overlayVisible) {
       _overlayTimer?.cancel();
       setState(() => _overlayVisible = false);
       _rootFocus.requestFocus();
@@ -629,10 +633,18 @@ class _AndroidMedia3TexturePlayerScreenState
       );
     }
     return PopScope<void>(
-      canPop: !_channelListVisible,
+      canPop:
+          !_channelListVisible && !(_overlayVisible && _friendlyError == null),
       onPopInvokedWithResult: (didPop, result) {
-        if (!didPop && _channelListVisible) {
+        if (didPop) return;
+        if (_channelListVisible) {
           _closeChannelList();
+          return;
+        }
+        if (_overlayVisible && _friendlyError == null) {
+          _overlayTimer?.cancel();
+          setState(() => _overlayVisible = false);
+          _rootFocus.requestFocus();
         }
       },
       child: Scaffold(
