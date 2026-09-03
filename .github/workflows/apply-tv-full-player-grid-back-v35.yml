@@ -1,0 +1,92 @@
+name: Apply TV FULL PRO 1.4.3 Player Grid Back Fix
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/workflows/apply-tv-full-player-grid-back-v35.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout TV FULL PRO branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply player grid Back fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          player = Path('lib/screens/android_media3_texture_player_screen.dart')
+          text = player.read_text()
+
+          old_start = """    return Scaffold(\n      backgroundColor: Colors.black,\n      body: Focus(\n"""
+          new_start = """    return PopScope<void>(\n      canPop: !_channelListVisible,\n      onPopInvokedWithResult: (didPop, result) {\n        if (!didPop && _channelListVisible) {\n          _closeChannelList();\n        }\n      },\n      child: Scaffold(\n        backgroundColor: Colors.black,\n        body: Focus(\n"""
+          if old_start not in text:
+              raise SystemExit('No se encontró el inicio esperado del Scaffold LIVE.')
+          text = text.replace(old_start, new_start, 1)
+
+          old_end = """          ],\n        ),\n      ),\n    );\n  }\n\n  Widget _liveHud() => SafeArea(\n"""
+          new_end = """            ],\n          ),\n        ),\n      ),\n    );\n  }\n\n  Widget _liveHud() => SafeArea(\n"""
+          if old_end not in text:
+              raise SystemExit('No se encontró el cierre esperado del Scaffold LIVE.')
+          text = text.replace(old_end, new_end, 1)
+          player.write_text(text)
+
+          pubspec = Path('pubspec.yaml')
+          pub = pubspec.read_text()
+          if 'version: 1.4.2+34' not in pub:
+              raise SystemExit('La versión base no es 1.4.2+34.')
+          pub = pub.replace('version: 1.4.2+34', 'version: 1.4.3+35', 1)
+          marker = '# TV FULL PRO 1.4.3+35 Android TV route Back closes player grid before leaving playback\n'
+          if marker not in pub:
+              pub = pub.rstrip() + '\n\n' + marker
+          pubspec.write_text(pub)
+          PY
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format changed Dart file
+        run: dart format lib/screens/android_media3_texture_player_screen.dart
+
+      - name: Verify exact Back routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'canPop: !_channelListVisible' lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'if (!didPop && _channelListVisible)' lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'version: 1.4.3+35' pubspec.yaml
+
+      - name: Analyze source
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Commit fix
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/screens/android_media3_texture_player_screen.dart pubspec.yaml
+          git commit -m 'Fix player grid Back handling in TV FULL PRO 1.4.3+35'
+          git push origin HEAD:android-tv-full-pro-clean-source
