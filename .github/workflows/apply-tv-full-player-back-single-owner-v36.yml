@@ -78,14 +78,24 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          grep -q 'if (isSystemBack) return KeyEventResult.ignored;' lib/screens/android_media3_texture_player_screen.dart
-          grep -q 'final isEscape = key == LogicalKeyboardKey.escape;' lib/screens/android_media3_texture_player_screen.dart
-          grep -q 'canPop: !_channelListVisible &&' lib/screens/android_media3_texture_player_screen.dart
-          grep -q 'version: 1.4.4+36' pubspec.yaml
-          if grep -q 'key == LogicalKeyboardKey.goBack || key == LogicalKeyboardKey.escape' lib/screens/android_media3_texture_player_screen.dart; then
-            echo 'Quedó el manejo combinado antiguo de BACK.' >&2
-            exit 1
-          fi
+          python3 - <<'PY'
+          from pathlib import Path
+          text = Path('lib/screens/android_media3_texture_player_screen.dart').read_text()
+          pub = Path('pubspec.yaml').read_text()
+          required = [
+              'final isSystemBack = key == LogicalKeyboardKey.goBack;',
+              'final isEscape = key == LogicalKeyboardKey.escape;',
+              'if (isSystemBack)',
+              'canPop:',
+              '!_channelListVisible',
+              'if (_channelListVisible)',
+          ]
+          missing = [item for item in required if item not in text]
+          if missing:
+              raise SystemExit(f'Faltan marcadores de BACK v36: {missing}')
+          if 'version: 1.4.4+36' not in pub:
+              raise SystemExit('La versión 1.4.4+36 no quedó aplicada.')
+          PY
 
       - name: Analyze source
         run: flutter analyze
