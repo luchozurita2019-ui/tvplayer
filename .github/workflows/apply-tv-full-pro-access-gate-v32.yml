@@ -1,0 +1,143 @@
+name: Apply TV FULL PRO Access Gate v32
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/tv-full-pro-access-gate-v32-request.txt'
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout TV FULL PRO source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply server-first access gate and updater copy
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          provider = Path('lib/providers/iptv_provider.dart')
+          text = provider.read_text()
+          old = '''    _remoteSyncing = true;\n    _remoteSyncError = null;\n    notifyListeners();\n\n    try {\n'''
+          new = '''    _remoteSyncing = true;\n    // Si el servidor ya bloqueó el dispositivo, conservar ese bloqueo mientras\n    // se revalida evita reabrir el contenido guardado durante unos segundos.\n    notifyListeners();\n\n    try {\n'''
+          if old not in text:
+              raise SystemExit('IptvProvider sync start marker changed')
+          text = text.replace(old, new, 1)
+          old = '''      _remoteLastSyncedAt = configuration.syncedAt ?? DateTime.now();\n      _error = null;\n'''
+          new = '''      _remoteSyncError = null;\n      _remoteLastSyncedAt = configuration.syncedAt ?? DateTime.now();\n      _error = null;\n'''
+          if old not in text:
+              raise SystemExit('IptvProvider sync success marker changed')
+          text = text.replace(old, new, 1)
+          provider.write_text(text)
+
+          home = Path('lib/screens/home_screen.dart')
+          text = home.read_text()
+          marker = '''    final selected = provider.selectedPlaylist;\n'''
+          gate = '''    // En cada arranque de la APK el contenido permanece cerrado hasta que\n    // tvf-device-config responda correctamente. Una lista local o precargada\n    // nunca puede saltarse esta validación inicial del servidor.\n    if (provider.remoteProvisioningSupported &&\n        provider.remoteLastSyncedAt == null) {\n      final verificationError = provider.remoteSyncError;\n      return _StartupView(\n        message: verificationError == null\n            ? 'Verificando el estado de tu servicio…'\n            : 'No se pudo verificar el servicio. Revisá la conexión a Internet. TV FULL PRO se habilitará cuando el servidor confirme que este dispositivo está activo.',\n        deviceCode: provider.remoteDeviceCode,\n        busy: provider.remoteSyncing || verificationError == null,\n      );\n    }\n\n'''
+          if gate not in text:
+              if marker not in text:
+                  raise SystemExit('HomeScreen selected playlist marker changed')
+              text = text.replace(marker, gate + marker, 1)
+          home.write_text(text)
+
+          guard = Path('lib/services/remote_access_guard.dart')
+          text = guard.read_text()
+          old = '''    'suspended',\n  ];\n'''
+          new = '''    'suspended',\n    'vencido',\n    'vencida',\n    'expired',\n    'no autorizado',\n    'unauthorized',\n    'forbidden',\n  ];\n'''
+          if old not in text:
+              raise SystemExit('Remote access guard marker changed')
+          text = text.replace(old, new, 1)
+          guard.write_text(text)
+
+          screen = Path('lib/screens/source_content_screen.dart')
+          text = screen.read_text()
+          old = "'Mejoras de rendimiento, estabilidad y compatibilidad · versión $versionName'"
+          new = "'Nueva versión $versionName · Presioná para abrir TV FULL Installer.'"
+          if old not in text:
+              raise SystemExit('Update banner subtitle marker changed')
+          text = text.replace(old, new, 1)
+          old = "'ACTUALIZAR'"
+          new = "'INSTALAR ACTUALIZACIÓN'"
+          if old not in text:
+              raise SystemExit('Update banner button marker changed')
+          text = text.replace(old, new, 1)
+          screen.write_text(text)
+
+          pubspec = Path('pubspec.yaml')
+          text = pubspec.read_text()
+          if 'version: 1.3.9+31' not in text:
+              raise SystemExit('Unexpected TV FULL PRO version before v32 patch')
+          text = text.replace('version: 1.3.9+31', 'version: 1.4.0+32', 1)
+          text += '\n# TV FULL PRO 1.4.0+32 server-first access gate + installer update flow\n'
+          pubspec.write_text(text)
+          PY
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format touched Dart files
+        run: dart format lib/providers/iptv_provider.dart lib/screens/home_screen.dart lib/services/remote_access_guard.dart lib/screens/source_content_screen.dart
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Run automated tests
+        run: flutter test
+
+      - name: Compile Android TV debug validation
+        run: flutter build apk --debug --dart-define=TV_FULL_ANDROID_TV=true --target-platform android-arm
+
+      - name: Verify access gate, updater flow and playback guardrails
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q '^version: 1.4.0+32$' pubspec.yaml
+          grep -q 'provider.remoteLastSyncedAt == null' lib/screens/home_screen.dart
+          grep -q 'Verificando el estado de tu servicio' lib/screens/home_screen.dart
+          grep -q '_remoteSyncError = null;' lib/providers/iptv_provider.dart
+          grep -q 'INSTALAR ACTUALIZACIÓN' lib/screens/source_content_screen.dart
+          grep -q 'openInstaller()' lib/screens/source_content_screen.dart
+          grep -q 'falta de pago' lib/services/remote_access_guard.dart
+          grep -q 'LIVE_STARTUP_MAX_WAIT_MS = 25000L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'LIVE_STARTUP_NO_PROGRESS_MS = 9000L' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+          grep -q 'MAX_LIVE_ENDED_RECOVERIES = 5' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt
+
+      - name: Commit TV FULL PRO 1.4.0+32
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/providers/iptv_provider.dart \
+                  lib/screens/home_screen.dart \
+                  lib/services/remote_access_guard.dart \
+                  lib/screens/source_content_screen.dart \
+                  pubspec.yaml
+          git commit -m "TV FULL PRO 1.4.0+32: require server authorization before content"
+          git push origin HEAD:android-tv-full-pro-clean-source
