@@ -1,0 +1,3 @@
+TV FULL PRO 1.4.4+36 validation trigger.
+Purpose: verify single-owner Android TV BACK routing so one Back press closes the in-player channel grid without exiting playback.
+Source commit: c3710979dd28483bee1662c3e2a459e4c75f76fa
