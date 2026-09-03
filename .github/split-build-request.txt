@@ -1,7 +1,7 @@
-TV FULL PRO 1.4.2+34 split APK build requested.
-source_version=1.4.2+34
+TV FULL PRO 1.4.3+35 split APK build requested.
+source_version=1.4.3+35
 architectures=arm64-v8a,armeabi-v7a
 signing=historical TV FULL PRO certificate required
-includes=EPG fallback compatibility; manual list refresh; double-back exit; in-player channel grid remains open after channel selection until Back closes it
+includes=Android TV route-level Back interception: when the in-player channel grid is open, Back closes only the grid and preserves playback; all 1.4.2+34 fixes retained
 installer=publish stable ARM32/ARM64 assets and update tv_full_installer/latest.json
-requested_at=2026-09-03T03:43:00-03:00
+requested_at=2026-09-03T04:16:00-03:00
