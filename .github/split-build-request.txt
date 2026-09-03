@@ -1,7 +1,7 @@
-TV FULL PRO 1.4.3+35 split APK build requested.
-source_version=1.4.3+35
+TV FULL PRO 1.4.4+36 split APK build requested.
+source_version=1.4.4+36
 architectures=arm64-v8a,armeabi-v7a
 signing=historical TV FULL PRO certificate required
-includes=Android TV route-level Back interception: when the in-player channel grid is open, Back closes only the grid and preserves playback; all 1.4.2+34 fixes retained
+includes=single-owner Android TV BACK handling: goBack no longer mutates the grid from Focus; route-level Back closes only the in-player channel grid and preserves playback; all 1.4.3+35 and 1.4.2+34 fixes retained
 installer=publish stable ARM32/ARM64 assets and update tv_full_installer/latest.json
-requested_at=2026-09-03T04:16:00-03:00
+requested_at=2026-09-03T13:20:00-03:00
