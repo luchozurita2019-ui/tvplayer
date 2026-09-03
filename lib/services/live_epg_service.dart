@@ -6,6 +6,7 @@ import 'package:http/http.dart' as http;
 import '../models/channel.dart';
 import 'xtream_fast_catalog_service.dart';
 import 'xtream_http_client.dart';
+import 'xtream_service.dart';
 
 class LiveProgram {
   final String title;
@@ -70,11 +71,21 @@ class LiveEpgService {
     _pending[key] = future;
     try {
       final guide = await future;
-      _remember(key, guide);
+      if (guide != null && guide.hasPrograms) {
+        _remember(key, guide);
+      }
       return guide;
     } finally {
       if (identical(_pending[key], future)) _pending.remove(key);
     }
+  }
+
+  void clearPlaylist(String playlistUrl) {
+    final source = playlistUrl.trim();
+    if (source.isEmpty) return;
+    final prefix = '$source|';
+    _cache.removeWhere((key, value) => key.startsWith(prefix));
+    _pending.removeWhere((key, value) => key.startsWith(prefix));
   }
 
   Future<LiveProgramGuide?> _fetchXtream(
@@ -82,24 +93,62 @@ class LiveEpgService {
     String streamId,
   ) async {
     try {
-      final connection = await XtreamFastCatalogService.instance
+      var connection = await XtreamFastCatalogService.instance
           .connectionForPlaylist(playlistUrl);
-      final uri = _endpoint(
-        connection.apiServer,
-        username: connection.username,
-        password: connection.password,
-        streamId: streamId,
-      );
-      final http.Client client = XtreamHttpClient.instance;
-      final response = await client
-          .get(uri, headers: XtreamHttpClient.jsonHeaders)
-          .timeout(_timeout);
-      if (response.statusCode != 200 || response.body.isEmpty) return null;
-      final decoded = jsonDecode(response.body);
-      return parseXtreamEpgPayload(decoded);
+      for (var attempt = 0; attempt < 2; attempt++) {
+        try {
+          return await _fetchWithConnection(connection, streamId);
+        } on _XtreamEpgHttpException catch (error) {
+          if (attempt > 0 ||
+              (error.statusCode != 401 && error.statusCode != 403)) {
+            return null;
+          }
+          XtreamFastCatalogService.instance.invalidateSession(playlistUrl);
+          connection = await XtreamFastCatalogService.instance
+              .connectionForPlaylist(playlistUrl, forceRefresh: true);
+        }
+      }
+      return null;
     } catch (_) {
       return null;
     }
+  }
+
+  Future<LiveProgramGuide?> _fetchWithConnection(
+    XtreamConnectionResult connection,
+    String streamId,
+  ) async {
+    const actions = <String>['get_short_epg', 'get_simple_data_table'];
+    final http.Client client = XtreamHttpClient.instance;
+
+    for (final action in actions) {
+      try {
+        final uri = _endpoint(
+          connection.apiServer,
+          username: connection.username,
+          password: connection.password,
+          streamId: streamId,
+          action: action,
+        );
+        final response = await client
+            .get(uri, headers: XtreamHttpClient.jsonHeaders)
+            .timeout(_timeout);
+        if (response.statusCode == 401 || response.statusCode == 403) {
+          throw _XtreamEpgHttpException(response.statusCode);
+        }
+        if (response.statusCode != 200 || response.body.trim().isEmpty) {
+          continue;
+        }
+        final decoded = jsonDecode(response.body);
+        final guide = parseXtreamEpgPayload(decoded);
+        if (guide != null && guide.hasPrograms) return guide;
+      } on _XtreamEpgHttpException {
+        rethrow;
+      } catch (_) {
+        // Algunos paneles no implementan una de las variantes. Probamos la otra.
+      }
+    }
+    return null;
   }
 
   Uri _endpoint(
@@ -107,21 +156,19 @@ class LiveEpgService {
     required String username,
     required String password,
     required String streamId,
+    required String action,
   }) {
     var prefix = apiServer.path;
     if (prefix.endsWith('/')) prefix = prefix.substring(0, prefix.length - 1);
     final path = prefix.isEmpty ? '/player_api.php' : '$prefix/player_api.php';
-    return apiServer.replace(
-      path: path,
-      queryParameters: <String, String>{
-        'username': username,
-        'password': password,
-        'action': 'get_short_epg',
-        'stream_id': streamId,
-        'limit': '2',
-      },
-      fragment: '',
-    );
+    final query = <String, String>{
+      'username': username,
+      'password': password,
+      'action': action,
+      'stream_id': streamId,
+    };
+    if (action == 'get_short_epg') query['limit'] = '4';
+    return apiServer.replace(path: path, queryParameters: query, fragment: '');
   }
 
   String? _streamIdFromChannel(Channel channel) {
@@ -137,7 +184,7 @@ class LiveEpgService {
     return null;
   }
 
-  void _remember(String key, LiveProgramGuide? guide) {
+  void _remember(String key, LiveProgramGuide guide) {
     _cache.remove(key);
     _cache[key] = _LiveEpgCacheEntry(guide: guide, savedAt: DateTime.now());
     while (_cache.length > _maxCacheEntries) {
@@ -153,6 +200,12 @@ LiveProgramGuide? parseXtreamEpgPayload(
   Object? rawListings = decoded;
   if (decoded is Map) {
     rawListings = decoded['epg_listings'] ?? decoded['listings'];
+    final data = decoded['data'];
+    if (rawListings == null && data is Map) {
+      rawListings = data['epg_listings'] ?? data['listings'];
+    } else if (rawListings == null && data is List) {
+      rawListings = data;
+    }
   }
   if (rawListings is! List || rawListings.isEmpty) return null;
 
@@ -283,8 +336,13 @@ String _decodeXtreamText(Object? raw) {
 String? _nullableText(String value) =>
     value.trim().isEmpty ? null : value.trim();
 
+class _XtreamEpgHttpException implements Exception {
+  final int statusCode;
+  const _XtreamEpgHttpException(this.statusCode);
+}
+
 class _LiveEpgCacheEntry {
-  final LiveProgramGuide? guide;
+  final LiveProgramGuide guide;
   final DateTime savedAt;
 
   const _LiveEpgCacheEntry({required this.guide, required this.savedAt});

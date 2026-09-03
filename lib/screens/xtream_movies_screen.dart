@@ -11,6 +11,7 @@ import '../providers/iptv_provider.dart';
 import '../services/artwork_cache_service.dart';
 import '../services/catalog_index.dart';
 import '../services/device_performance_service.dart';
+import '../services/manual_playlist_refresh_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/section_catalog_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
@@ -141,7 +142,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
 
   Future<_MovieData> _loadInitial() async {
     if (widget.playlist.sourceType == PlaylistSourceType.xtream) {
-      final key = widget.playlist.source.trim();
+      final key = _preparedCacheKey();
       final prepared = _preparedData;
       if (!DevicePerformanceService.instance.lowRam &&
           _preparedKey == key &&
@@ -223,9 +224,15 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
     } catch (_) {}
   }
 
+  String _preparedCacheKey() {
+    final revision =
+        ManualPlaylistRefreshService.instance.revisionFor(widget.playlist);
+    return '${widget.playlist.source.trim()}|$revision';
+  }
+
   void _rememberPrepared(_MovieData data) {
     if (DevicePerformanceService.instance.lowRam) return;
-    _preparedKey = widget.playlist.source.trim();
+    _preparedKey = _preparedCacheKey();
     _preparedData = data;
   }
 

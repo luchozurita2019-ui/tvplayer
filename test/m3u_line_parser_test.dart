@@ -15,10 +15,8 @@ void main() {
       'https://stream.test/dos.mp4',
     ];
 
-    final channels = lines
-        .map(parser.addLine)
-        .whereType<Channel>()
-        .toList(growable: false);
+    final channels =
+        lines.map(parser.addLine).whereType<Channel>().toList(growable: false);
 
     expect(channels, hasLength(2));
     expect(channels.first.name, 'Canal Uno');

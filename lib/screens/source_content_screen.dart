@@ -9,6 +9,7 @@ import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/app_update_service.dart';
 import '../services/device_performance_service.dart';
+import '../services/manual_playlist_refresh_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
 import '../widgets/app_version_badge.dart';
@@ -34,6 +35,8 @@ class _SourceContentScreenState extends State<SourceContentScreen>
   final ParentalControlService _parental = ParentalControlService.instance;
   final AppUpdateService _updates = AppUpdateService.instance;
   Timer? _updatePollTimer;
+  bool _refreshingLists = false;
+  DateTime? _lastBackPressedAt;
 
   @override
   void initState() {
@@ -74,192 +77,274 @@ class _SourceContentScreenState extends State<SourceContentScreen>
     final active = provider.selectedPlaylist ?? widget.playlist;
     final update = _updates.availableUpdate;
 
-    return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: TvFullPremiumBackground(
-        child: SafeArea(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(52, 32, 52, 26),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          const Text(
-                            'TV FULL PRO',
-                            style: TextStyle(
-                              fontSize: 38,
-                              height: 1,
-                              fontWeight: FontWeight.w900,
-                              letterSpacing: 1.15,
-                            ),
-                          ),
-                          const SizedBox(height: 14),
-                          Row(
-                            children: [
-                              Container(
-                                width: 4,
-                                height: 26,
-                                decoration: BoxDecoration(
-                                  color: tvFullBlue,
-                                  borderRadius: BorderRadius.circular(10),
-                                ),
-                              ),
-                              const SizedBox(width: 12),
-                              Flexible(
-                                child: Text(
-                                  active.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: const TextStyle(
-                                    color: Colors.white70,
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ),
-                    ),
-                    ParentalLockButton(
-                      unlocked: !_parental.enabled || _parental.isUnlocked,
-                      hiddenCategoryCount: 0,
-                      onPressed: () => unawaited(_handleParentalLock()),
-                    ),
-                    const SizedBox(width: 8),
-                    if (provider.hasMultiplePlaylists) ...[
-                      OutlinedButton.icon(
-                        onPressed: () => unawaited(_choosePlaylist(context)),
-                        icon: const Icon(Icons.swap_horiz_rounded, size: 20),
-                        label: const Text('Cambiar lista'),
-                      ),
-                      const SizedBox(width: 18),
-                    ] else
-                      const SizedBox(width: 18),
-                    const TvFullClock(),
-                  ],
-                ),
-                if (update != null) ...[
-                  const SizedBox(height: 14),
-                  _UpdateBanner(
-                    versionName: update.versionName,
-                    onUpdate: () => unawaited(_openUpdate()),
-                  ),
-                ],
-                const Spacer(flex: 2),
-                const Text(
-                  '¿Qué querés ver?',
-                  style: TextStyle(
-                    color: Colors.white70,
-                    fontSize: 18,
-                    fontWeight: FontWeight.w800,
-                    letterSpacing: .2,
-                  ),
-                ),
-                const SizedBox(height: 18),
-                Expanded(
-                  flex: 10,
-                  child: Row(
+    return PopScope<void>(
+      canPop: false,
+      onPopInvokedWithResult: (didPop, result) {
+        if (!didPop) unawaited(_handleRootBack());
+      },
+      child: Scaffold(
+        backgroundColor: Colors.transparent,
+        body: TvFullPremiumBackground(
+          child: SafeArea(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(52, 32, 52, 26),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Expanded(
-                        child: _SectionButton(
-                          autofocus: true,
-                          eyebrow: 'EN DIRECTO',
-                          title: 'TV EN VIVO',
-                          subtitle: 'Disfrutá de la mejor programación en vivo',
-                          icon: Icons.live_tv_rounded,
-                          accent: tvFullCyan,
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  XtreamLiveScreen(playlist: active),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            const Text(
+                              'TV FULL PRO',
+                              style: TextStyle(
+                                fontSize: 38,
+                                height: 1,
+                                fontWeight: FontWeight.w900,
+                                letterSpacing: 1.15,
+                              ),
                             ),
-                          ),
+                            const SizedBox(height: 14),
+                            Row(
+                              children: [
+                                Container(
+                                  width: 4,
+                                  height: 26,
+                                  decoration: BoxDecoration(
+                                    color: tvFullBlue,
+                                    borderRadius: BorderRadius.circular(10),
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Flexible(
+                                  child: Text(
+                                    active.name,
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                    style: const TextStyle(
+                                      color: Colors.white70,
+                                      fontSize: 16,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                ),
+                              ],
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(width: 26),
-                      Expanded(
-                        child: _SectionButton(
-                          eyebrow: 'CATÁLOGO',
-                          title: 'PELÍCULAS',
-                          subtitle:
-                              'Miles de películas para ver cuando quieras',
-                          icon: Icons.movie_outlined,
-                          accent: tvFullViolet,
-                          onFocused: () => _prewarmMovies(active),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  XtreamMoviesScreen(playlist: active),
-                            ),
-                          ),
+                      ParentalLockButton(
+                        unlocked: !_parental.enabled || _parental.isUnlocked,
+                        hiddenCategoryCount: 0,
+                        onPressed: () => unawaited(_handleParentalLock()),
+                      ),
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: _refreshingLists
+                            ? null
+                            : () => unawaited(_refreshLists()),
+                        icon: _refreshingLists
+                            ? const SizedBox(
+                                width: 16,
+                                height: 16,
+                                child:
+                                    CircularProgressIndicator(strokeWidth: 2),
+                              )
+                            : const Icon(Icons.refresh_rounded, size: 20),
+                        label: Text(
+                          _refreshingLists
+                              ? 'Actualizando…'
+                              : 'Actualizar listas',
                         ),
                       ),
-                      const SizedBox(width: 26),
-                      Expanded(
-                        child: _SectionButton(
-                          eyebrow: 'TEMPORADAS',
-                          title: 'SERIES',
-                          subtitle: 'Las mejores series en un solo lugar',
-                          icon: Icons.ondemand_video_rounded,
-                          accent: const Color(0xFFA04CFF),
-                          onFocused: () => _prewarmSeries(active),
-                          onTap: () => Navigator.of(context).push(
-                            MaterialPageRoute(
-                              builder: (_) =>
-                                  XtreamSeriesScreen(playlist: active),
-                            ),
-                          ),
+                      const SizedBox(width: 8),
+                      if (provider.hasMultiplePlaylists) ...[
+                        OutlinedButton.icon(
+                          onPressed: () => unawaited(_choosePlaylist(context)),
+                          icon: const Icon(Icons.swap_horiz_rounded, size: 20),
+                          label: const Text('Cambiar lista'),
                         ),
-                      ),
+                        const SizedBox(width: 18),
+                      ] else
+                        const SizedBox(width: 18),
+                      const TvFullClock(),
                     ],
                   ),
-                ),
-                const Spacer(),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.verified_user_outlined,
-                      color: tvFullViolet,
-                      size: 28,
+                  if (update != null) ...[
+                    const SizedBox(height: 14),
+                    _UpdateBanner(
+                      versionName: update.versionName,
+                      onUpdate: () => unawaited(_openUpdate()),
                     ),
-                    const SizedBox(width: 12),
-                    const Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
+                  ],
+                  const Spacer(flex: 2),
+                  const Text(
+                    '¿Qué querés ver?',
+                    style: TextStyle(
+                      color: Colors.white70,
+                      fontSize: 18,
+                      fontWeight: FontWeight.w800,
+                      letterSpacing: .2,
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Expanded(
+                    flex: 10,
+                    child: Row(
                       children: [
-                        Text(
-                          'Contenido actualizado',
-                          style: TextStyle(
-                            fontSize: 13,
-                            fontWeight: FontWeight.w800,
+                        Expanded(
+                          child: _SectionButton(
+                            autofocus: true,
+                            eyebrow: 'EN DIRECTO',
+                            title: 'TV EN VIVO',
+                            subtitle:
+                                'Disfrutá de la mejor programación en vivo',
+                            icon: Icons.live_tv_rounded,
+                            accent: tvFullCyan,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    XtreamLiveScreen(playlist: active),
+                              ),
+                            ),
                           ),
                         ),
-                        SizedBox(height: 2),
-                        Text(
-                          'Tu contenido listo para disfrutar',
-                          style: TextStyle(
-                              color: Color(0x73FFFFFF), fontSize: 11.5),
+                        const SizedBox(width: 26),
+                        Expanded(
+                          child: _SectionButton(
+                            eyebrow: 'CATÁLOGO',
+                            title: 'PELÍCULAS',
+                            subtitle:
+                                'Miles de películas para ver cuando quieras',
+                            icon: Icons.movie_outlined,
+                            accent: tvFullViolet,
+                            onFocused: () => _prewarmMovies(active),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    XtreamMoviesScreen(playlist: active),
+                              ),
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 26),
+                        Expanded(
+                          child: _SectionButton(
+                            eyebrow: 'TEMPORADAS',
+                            title: 'SERIES',
+                            subtitle: 'Las mejores series en un solo lugar',
+                            icon: Icons.ondemand_video_rounded,
+                            accent: const Color(0xFFA04CFF),
+                            onFocused: () => _prewarmSeries(active),
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute(
+                                builder: (_) =>
+                                    XtreamSeriesScreen(playlist: active),
+                              ),
+                            ),
+                          ),
                         ),
                       ],
                     ),
-                    const Spacer(),
-                    const AppVersionBadge(),
-                  ],
-                ),
-              ],
+                  ),
+                  const Spacer(),
+                  Row(
+                    children: [
+                      const Icon(
+                        Icons.verified_user_outlined,
+                        color: tvFullViolet,
+                        size: 28,
+                      ),
+                      const SizedBox(width: 12),
+                      const Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            'Contenido actualizado',
+                            style: TextStyle(
+                              fontSize: 13,
+                              fontWeight: FontWeight.w800,
+                            ),
+                          ),
+                          SizedBox(height: 2),
+                          Text(
+                            'Tu contenido listo para disfrutar',
+                            style: TextStyle(
+                                color: Color(0x73FFFFFF), fontSize: 11.5),
+                          ),
+                        ],
+                      ),
+                      const Spacer(),
+                      const AppVersionBadge(),
+                    ],
+                  ),
+                ],
+              ),
             ),
           ),
         ),
       ),
     );
+  }
+
+  Future<void> _handleRootBack() async {
+    final now = DateTime.now();
+    final previous = _lastBackPressedAt;
+    if (previous != null &&
+        now.difference(previous) <= const Duration(seconds: 2)) {
+      await SystemNavigator.pop();
+      return;
+    }
+    _lastBackPressedAt = now;
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          duration: Duration(seconds: 2),
+          content: Text('Presioná Atrás nuevamente para salir de TV FULL PRO.'),
+        ),
+      );
+  }
+
+  Future<void> _refreshLists() async {
+    if (_refreshingLists) return;
+    setState(() => _refreshingLists = true);
+    try {
+      final provider = context.read<IptvProvider>();
+      final selectedId = provider.selectedPlaylistId ?? widget.playlist.id;
+      if (provider.remoteProvisioningSupported) {
+        await provider.syncRemoteServices();
+      }
+      final active = provider.playlistById(selectedId) ??
+          provider.selectedPlaylist ??
+          widget.playlist;
+      await ManualPlaylistRefreshService.instance.refresh(active);
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('Listas actualizadas correctamente.'),
+          ),
+        );
+    } catch (_) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+                'No se pudieron actualizar las listas. Revisá la conexión e intentá de nuevo.'),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _refreshingLists = false);
+    }
   }
 
   void _prewarmMovies(Playlist playlist) {
