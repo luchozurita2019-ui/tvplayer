@@ -17,48 +17,18 @@ class HomeScreen extends StatefulWidget {
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
-class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
-  Timer? _syncTimer;
-  int _tick = 0;
-
+class _HomeScreenState extends State<HomeScreen> {
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<IptvProvider>();
+      // La validación del dispositivo y la carga de servicios remotos se hacen
+      // una sola vez por arranque de la APK. Después de autorizar, la app
+      // trabaja con el contenido/caché local sin consultar el panel en bucle.
       unawaited(provider.init());
       unawaited(AppUpdateService.instance.checkOnce());
-      _syncTimer = Timer.periodic(const Duration(seconds: 3), (_) {
-        if (!mounted) return;
-        final current = context.read<IptvProvider>();
-        if (current.remoteSyncing) return;
-        _tick++;
-        // Sin listas: respuesta rápida del panel. Con listas: validación cada
-        // ~30 s sin volver a descargar catálogos que ya están guardados.
-        if (current.playlists.isEmpty || _tick % 10 == 0) {
-          unawaited(current.syncRemoteServices());
-        }
-        if (_tick % 100 == 0) {
-          unawaited(AppUpdateService.instance.checkOnce());
-        }
-      });
     });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state != AppLifecycleState.resumed || !mounted) return;
-    final provider = context.read<IptvProvider>();
-    if (!provider.remoteSyncing) unawaited(provider.syncRemoteServices());
-    unawaited(AppUpdateService.instance.checkOnce());
-  }
-
-  @override
-  void dispose() {
-    WidgetsBinding.instance.removeObserver(this);
-    _syncTimer?.cancel();
-    super.dispose();
   }
 
   @override
