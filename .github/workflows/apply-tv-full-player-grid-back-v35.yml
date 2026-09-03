@@ -90,3 +90,5 @@ jobs:
           git add lib/screens/android_media3_texture_player_screen.dart pubspec.yaml
           git commit -m 'Fix player grid Back handling in TV FULL PRO 1.4.3+35'
           git push origin HEAD:android-tv-full-pro-clean-source
+
+# Triggered for the confirmed Android TV Back-routing regression.
