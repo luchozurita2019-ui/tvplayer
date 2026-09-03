@@ -60,3 +60,4 @@ flutter:
 # TV FULL PRO 1.4.2+34 EPG fallbacks, manual list refresh, double-back exit, and persistent in-player channel grid navigation.
 
 # TV FULL PRO 1.4.3+35 Android TV route Back closes player grid before leaving playback
+# Validation trigger: route-level Back interception for the in-player channel grid.
