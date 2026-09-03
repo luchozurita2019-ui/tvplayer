@@ -1,0 +1,106 @@
+name: Apply TV FULL PRO 1.4.4 Single-owner Player Back Fix
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/workflows/apply-tv-full-player-back-single-owner-v36.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout TV FULL PRO branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+          fetch-depth: 0
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Apply single-owner Android TV Back routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          from pathlib import Path
+
+          player = Path('lib/screens/android_media3_texture_player_screen.dart')
+          text = player.read_text()
+
+          old_keys = """    final isBack =\n        key == LogicalKeyboardKey.goBack || key == LogicalKeyboardKey.escape;\n\n    // La lista abierta tiene prioridad total, incluso si el canal anterior\n    // dejó un error visible. Así el D-pad vuelve a navegar los canales normal.\n    if (_channelListVisible) {\n      if (isBack) {\n        _closeChannelList();\n        return KeyEventResult.handled;\n      }\n      return KeyEventResult.ignored;\n    }\n\n    if (_friendlyError != null) {\n      if (isBack) return KeyEventResult.ignored;\n"""
+          new_keys = """    final isSystemBack = key == LogicalKeyboardKey.goBack;\n    final isEscape = key == LogicalKeyboardKey.escape;\n\n    // Android TV entrega BACK tanto como tecla goBack como navegación de ruta.\n    // La ruta es la única dueña de BACK para evitar cerrar la grilla y luego,\n    // en el mismo gesto, hacer pop del reproductor.\n    if (isSystemBack) return KeyEventResult.ignored;\n\n    // Escape se conserva para teclados físicos sin mezclarlo con BACK Android.\n    if (_channelListVisible) {\n      if (isEscape) {\n        _closeChannelList();\n        return KeyEventResult.handled;\n      }\n      return KeyEventResult.ignored;\n    }\n\n    if (_friendlyError != null) {\n      if (isEscape) return KeyEventResult.ignored;\n"""
+          if old_keys not in text:
+              raise SystemExit('No se encontró el bloque de BACK v35 esperado.')
+          text = text.replace(old_keys, new_keys, 1)
+
+          old_overlay = """    if (isBack && _overlayVisible) {\n      _overlayTimer?.cancel();\n      setState(() => _overlayVisible = false);\n      _rootFocus.requestFocus();\n      return KeyEventResult.handled;\n    }\n"""
+          new_overlay = """    if (isEscape && _overlayVisible) {\n      _overlayTimer?.cancel();\n      setState(() => _overlayVisible = false);\n      _rootFocus.requestFocus();\n      return KeyEventResult.handled;\n    }\n"""
+          if old_overlay not in text:
+              raise SystemExit('No se encontró el manejo de overlay v35 esperado.')
+          text = text.replace(old_overlay, new_overlay, 1)
+
+          old_pop = """    return PopScope<void>(\n      canPop: !_channelListVisible,\n      onPopInvokedWithResult: (didPop, result) {\n        if (!didPop && _channelListVisible) {\n          _closeChannelList();\n        }\n      },\n"""
+          new_pop = """    return PopScope<void>(\n      canPop: !_channelListVisible &&\n          !(_overlayVisible && _friendlyError == null),\n      onPopInvokedWithResult: (didPop, result) {\n        if (didPop) return;\n        if (_channelListVisible) {\n          _closeChannelList();\n          return;\n        }\n        if (_overlayVisible && _friendlyError == null) {\n          _overlayTimer?.cancel();\n          setState(() => _overlayVisible = false);\n          _rootFocus.requestFocus();\n        }\n      },\n"""
+          if old_pop not in text:
+              raise SystemExit('No se encontró el PopScope v35 esperado.')
+          text = text.replace(old_pop, new_pop, 1)
+          player.write_text(text)
+
+          pubspec = Path('pubspec.yaml')
+          pub = pubspec.read_text()
+          if 'version: 1.4.3+35' not in pub:
+              raise SystemExit('La versión base no es 1.4.3+35.')
+          pub = pub.replace('version: 1.4.3+35', 'version: 1.4.4+36', 1)
+          marker = '# TV FULL PRO 1.4.4+36 Android TV BACK is route-owned so one press closes only the player grid.\n'
+          if marker not in pub:
+              pub = pub.rstrip() + '\n\n' + marker
+          pubspec.write_text(pub)
+          PY
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Format changed Dart file
+        run: dart format lib/screens/android_media3_texture_player_screen.dart
+
+      - name: Verify single-owner Back routing
+        shell: bash
+        run: |
+          set -euo pipefail
+          grep -q 'if (isSystemBack) return KeyEventResult.ignored;' lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'canPop: !_channelListVisible &&' lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'if (_channelListVisible)' lib/screens/android_media3_texture_player_screen.dart
+          grep -q 'version: 1.4.4+36' pubspec.yaml
+          if grep -q 'if (isBack)' lib/screens/android_media3_texture_player_screen.dart; then
+            echo 'Quedó manejo duplicado isBack en el reproductor LIVE.' >&2
+            exit 1
+          fi
+
+      - name: Analyze source
+        run: flutter analyze
+
+      - name: Run tests
+        run: flutter test
+
+      - name: Commit fix safely
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/screens/android_media3_texture_player_screen.dart pubspec.yaml
+          git commit -m 'Fix duplicate Android TV Back delivery in TV FULL PRO 1.4.4+36'
+          git fetch origin android-tv-full-pro-clean-source
+          git rebase origin/android-tv-full-pro-clean-source
+          git push origin HEAD:android-tv-full-pro-clean-source
