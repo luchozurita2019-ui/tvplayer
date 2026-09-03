@@ -57,4 +57,4 @@ flutter:
 
 # TV FULL PRO 1.4.1+33 validate/sync remote services only once at app startup
 
-# TV FULL PRO 1.4.2+34 EPG + manual refresh + double-back + player grid navigation
+# TV FULL PRO 1.4.2+34 EPG fallbacks, manual list refresh, double-back exit, and persistent in-player channel grid navigation.
