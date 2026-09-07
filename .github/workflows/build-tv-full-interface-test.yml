@@ -1,0 +1,167 @@
+name: Build TV FULL Interface Test
+
+on:
+  push:
+    branches:
+      - ui/cinematic-home-v36
+    paths:
+      - 'lib/**'
+      - 'test/interface/**'
+      - 'pubspec.yaml'
+      - '.github/workflows/build-tv-full-interface-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout clean source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.sha }}
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Verify source
+        run: |
+          dart format --output=none lib test
+          flutter analyze
+          flutter test
+          grep -Eq '^version: [0-9]+\.[0-9]+\.[0-9]+\+[0-9]+$' pubspec.yaml
+          test -f tv_full_installer/latest.json
+
+      - name: Configure persistent release signing
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          test -n "$TV_FULL_KEYSTORE_PASSWORD"
+          test -n "$TV_FULL_KEY_ALIAS"
+          test -n "$TV_FULL_KEY_PASSWORD"
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > android/tvfull-release.jks
+          cat > android/key.properties <<EOF
+          storeFile=tvfull-release.jks
+          storePassword=$TV_FULL_KEYSTORE_PASSWORD
+          keyAlias=$TV_FULL_KEY_ALIAS
+          keyPassword=$TV_FULL_KEY_PASSWORD
+          EOF
+
+      - name: Build signed split APKs
+        run: >-
+          flutter build apk --release --split-per-abi
+          --dart-define=TV_FULL_ANDROID_TV=true
+          --target-platform android-arm,android-arm64
+
+      - name: Prepare and verify split APKs
+        id: prepare
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="$(sed -n 's/^version: //p' pubspec.yaml | head -n1)"
+          VERSION_NAME="${VERSION%%+*}"
+          VERSION_CODE="${VERSION##*+}"
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk "artifact/TV-FULL-PRO-${VERSION}-ARM64.apk"
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk "artifact/TV-FULL-PRO-${VERSION}-ARM32.apk"
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-ARM32.apk
+
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          for apk in artifact/TV-FULL-PRO-ARM32.apk artifact/TV-FULL-PRO-ARM64.apk; do
+            "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
+            grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' "$apk.signature.txt"
+          done
+
+          ARM32_SHA="$(sha256sum artifact/TV-FULL-PRO-ARM32.apk | awk '{print $1}')"
+          ARM64_SHA="$(sha256sum artifact/TV-FULL-PRO-ARM64.apk | awk '{print $1}')"
+          ARM32_SIZE="$(stat -c '%s' artifact/TV-FULL-PRO-ARM32.apk)"
+          ARM64_SIZE="$(stat -c '%s' artifact/TV-FULL-PRO-ARM64.apk)"
+          printf '%s  %s\n' "$ARM32_SHA" 'TV-FULL-PRO-ARM32.apk' > artifact/TV-FULL-PRO-ARM32.apk.sha256.txt
+          printf '%s  %s\n' "$ARM64_SHA" 'TV-FULL-PRO-ARM64.apk' > artifact/TV-FULL-PRO-ARM64.apk.sha256.txt
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "version_name=$VERSION_NAME" >> "$GITHUB_OUTPUT"
+          echo "version_code=$VERSION_CODE" >> "$GITHUB_OUTPUT"
+          echo "arm32_sha=$ARM32_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm64_sha=$ARM64_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm32_size=$ARM32_SIZE" >> "$GITHUB_OUTPUT"
+          echo "arm64_size=$ARM64_SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Generate test update manifest
+        env:
+          VERSION_NAME: ${{ steps.prepare.outputs.version_name }}
+          VERSION_CODE: ${{ steps.prepare.outputs.version_code }}
+          ARM32_SHA: ${{ steps.prepare.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.prepare.outputs.arm64_sha }}
+          ARM32_SIZE: ${{ steps.prepare.outputs.arm32_size }}
+          ARM64_SIZE: ${{ steps.prepare.outputs.arm64_size }}
+        run: |
+          python3 - <<'PY'
+          import json, os
+          base = 'https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-interface-37-' + os.environ['GITHUB_RUN_ID']
+          data = {'versionName': os.environ['VERSION_NAME'], 'versionCode': int(os.environ['VERSION_CODE']),
+                  'packageName': 'com.tvfull.pro.tv.v10safe',
+                  'certificateSha256': '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'}
+          for arch in ['arm32', 'arm64']:
+              data[arch] = {'url': base + '/TV-FULL-PRO-' + arch.upper() + '.apk',
+                            'sha256': os.environ[arch.upper() + '_SHA'],
+                            'size': int(os.environ[arch.upper() + '_SIZE'])}
+          with open('artifact/latest.json', 'w') as f: json.dump(data, f, indent=2)
+          PY
+
+      - name: Publish verified interface test APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG=tv-full-pro-interface-37-${{ github.run_id }}
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" \
+              artifact/TV-FULL-PRO-ARM32.apk \
+              artifact/TV-FULL-PRO-ARM64.apk \
+              artifact/latest.json \
+              --clobber
+          else
+            gh release create "$TAG" \
+              artifact/TV-FULL-PRO-ARM32.apk \
+              artifact/TV-FULL-PRO-ARM64.apk \
+              artifact/latest.json \
+              --prerelease --target "$GITHUB_SHA" --title "TV FULL PRO 1.4.5+37 - prueba de interfaz" \
+              --notes "Actualización de prueba de la interfaz. Firma histórica verificada. ARM32 y ARM64. Origen: $GITHUB_SHA."
+          fi
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f android/key.properties android/tvfull-release.jks
+
+      - name: Upload split APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-INTERFACE-37
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 30
