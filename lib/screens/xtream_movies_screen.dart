@@ -18,8 +18,7 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_service.dart';
 import '../services/xtream_vod_service.dart';
 import '../widgets/cached_artwork_image.dart';
-import '../widgets/tv_catalog_category_row.dart';
-import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_full_clean_ui.dart';
 import 'player_screen.dart';
 
 class XtreamMoviesScreen extends StatefulWidget {
@@ -276,7 +275,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: const Color(0xA3050910),
+          backgroundColor: tvCleanSurface,
           surfaceTintColor: Colors.transparent,
           title: _searchOpen
               ? TextField(
@@ -318,7 +317,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
             const SizedBox(width: 10),
           ],
         ),
-        body: TvFullPremiumBackground(
+        body: TvCleanBackground(
           compact: true,
           child: FutureBuilder<_MovieData>(
             future: _future,
@@ -372,7 +371,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
                 colors: [Color(0xD9101928), Color(0xCC07101D)],
               ),
               border: Border(
-                right: BorderSide(color: tvFullBlue, width: .35),
+                right: BorderSide(color: tvCleanBlue, width: .35),
               ),
             ),
             child: ListView.builder(
@@ -381,7 +380,7 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
               itemBuilder: (context, index) {
                 final value = index == 0 ? null : categories[index - 1];
                 final selected = value == _category;
-                return TvCatalogCategoryRow(
+                return TvCleanCategoryRow(
                   label: value ?? 'Todas',
                   selected: selected,
                   primary: index == 0,
@@ -586,11 +585,11 @@ class _MovieDetailScreen extends StatelessWidget {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: const Color(0xA3050910),
+        backgroundColor: tvCleanSurface,
         surfaceTintColor: Colors.transparent,
         title: const Text('Película'),
       ),
-      body: TvFullPremiumBackground(
+      body: TvCleanBackground(
         compact: true,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(44, 28, 44, 34),
@@ -739,10 +738,10 @@ class _MovieCardState extends State<_MovieCard> {
       curve: Curves.easeOutCubic,
       child: AnimatedContainer(
         duration: Duration(milliseconds: lowRam ? 80 : 140),
-        decoration: tvFullGlassDecoration(
+        decoration: tvCleanCardDecoration(
           focused: _focused,
           radius: 15,
-          accent: tvFullViolet,
+          accent: tvCleanViolet,
         ),
         child: Material(
           color: Colors.transparent,
@@ -800,7 +799,7 @@ class _MovieCardState extends State<_MovieCard> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: _focused
-                                ? tvFullCyan.withValues(alpha: .72)
+                                ? tvCleanCyan.withValues(alpha: .72)
                                 : Colors.white38,
                             fontSize: 10.5,
                           ),

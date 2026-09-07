@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 
-import 'tv_full_premium_ui.dart';
+import 'tv_full_clean_ui.dart';
 
 /// Marca visual compartida por las superficies Android TV.
 ///
@@ -41,7 +41,7 @@ class TvFullBrand extends StatelessWidget {
                   gradient: const LinearGradient(
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
-                    colors: [tvFullBlue, tvFullViolet],
+                    colors: [tvCleanBlue, tvCleanViolet],
                   ),
                 ),
                 child: Icon(
@@ -73,7 +73,7 @@ class TvFullBrand extends StatelessWidget {
                 Text(
                   'PRO',
                   style: TextStyle(
-                    color: tvFullCyan,
+                    color: tvCleanCyan,
                     fontSize: 9.5,
                     height: 1,
                     fontWeight: FontWeight.w900,

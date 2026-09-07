@@ -57,7 +57,10 @@ class CatalogFileWriter {
     _count++;
   }
 
-  Future<bool> commit({required List<String> categories}) async {
+  Future<bool> commit({
+    required List<String> categories,
+    bool allowEmpty = false,
+  }) async {
     if (_finished) return false;
     _finished = true;
 
@@ -69,7 +72,7 @@ class CatalogFileWriter {
       rethrow;
     }
 
-    if (_count == 0) {
+    if (_count == 0 && !allowEmpty) {
       await _owner._deleteDirectoryQuietly(_temp);
       return false;
     }

@@ -6,8 +6,7 @@ import '../models/channel.dart';
 import '../services/device_performance_service.dart';
 import '../services/live_epg_service.dart';
 import 'channel_logo_image.dart';
-import 'tv_catalog_category_row.dart';
-import 'tv_full_premium_ui.dart';
+import 'tv_full_clean_ui.dart';
 
 class TvLivePremiumCatalog extends StatefulWidget {
   final List<Channel> channels;
@@ -149,7 +148,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
               itemBuilder: (context, index) {
                 final category =
                     index == 0 ? null : widget.categories[index - 1];
-                return TvCatalogCategoryRow(
+                return TvCleanCategoryRow(
                   label: category ?? 'Todos',
                   selected: category == widget.selectedCategory,
                   primary: index == 0,
@@ -220,7 +219,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
   Widget _toolbar() {
     return Row(
       children: [
-        const Icon(Icons.live_tv_rounded, size: 21, color: tvFullCyan),
+        const Icon(Icons.live_tv_rounded, size: 21, color: tvCleanCyan),
         const SizedBox(width: 9),
         Expanded(
           child: Text(
@@ -297,7 +296,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                     color: Colors.black.withValues(alpha: .18),
                     borderRadius: BorderRadius.circular(15),
                     border: Border.all(
-                      color: tvFullCyan.withValues(alpha: .28),
+                      color: tvCleanCyan.withValues(alpha: .28),
                     ),
                   ),
                   child: ChannelLogoImage(
@@ -334,7 +333,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                             ),
                           ),
                           const SizedBox(width: 9),
-                          const TvFullLiveBadge(compact: true),
+                          const TvCleanLiveBadge(compact: true),
                         ],
                       ),
                       const SizedBox(height: 7),
@@ -416,7 +415,7 @@ class _ProgramGuidePanel extends StatelessWidget {
         const Text(
           'AHORA',
           style: TextStyle(
-            color: tvFullCyan,
+            color: tvCleanCyan,
             fontSize: 9.5,
             fontWeight: FontWeight.w900,
             letterSpacing: .7,
@@ -510,7 +509,7 @@ class _GuideFallback extends StatelessWidget {
         const Text(
           'AHORA',
           style: TextStyle(
-            color: tvFullCyan,
+            color: tvCleanCyan,
             fontSize: 9.5,
             fontWeight: FontWeight.w900,
             letterSpacing: .7,
@@ -552,7 +551,7 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Container(width: 3, height: 16, color: tvFullCyan),
+        Container(width: 3, height: 16, color: tvCleanCyan),
         const SizedBox(width: 8),
         Text(
           title,
@@ -595,10 +594,10 @@ class _LiveChannelCardState extends State<_LiveChannelCard> {
     final lowRam = DevicePerformanceService.instance.lowRam;
     return AnimatedContainer(
       duration: Duration(milliseconds: lowRam ? 55 : 95),
-      decoration: tvFullGlassDecoration(
+      decoration: tvCleanCardDecoration(
         focused: _focused,
         radius: 11,
-        accent: tvFullCyan,
+        accent: tvCleanCyan,
       ),
       child: Material(
         color: Colors.transparent,
@@ -649,7 +648,7 @@ class _LiveChannelCardState extends State<_LiveChannelCard> {
                           const Icon(
                             Icons.circle,
                             size: 5,
-                            color: tvFullLiveRed,
+                            color: tvCleanLiveRed,
                           ),
                           const SizedBox(width: 4),
                           const Text(

@@ -7,7 +7,6 @@ import '../providers/iptv_provider.dart';
 import '../services/app_update_service.dart';
 import '../services/remote_access_guard.dart';
 import '../widgets/app_version_badge.dart';
-import '../widgets/tv_full_premium_ui.dart';
 import 'source_content_screen.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -23,9 +22,6 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<IptvProvider>();
-      // La validación del dispositivo y la carga de servicios remotos se hacen
-      // una sola vez por arranque de la APK. Después de autorizar, la app
-      // trabaja con el contenido/caché local sin consultar el panel en bucle.
       unawaited(provider.init());
       unawaited(AppUpdateService.instance.checkOnce());
     });
@@ -48,16 +44,13 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
 
-    // En cada arranque de la APK el contenido permanece cerrado hasta que
-    // tvf-device-config responda correctamente. Una lista local o precargada
-    // nunca puede saltarse esta validación inicial del servidor.
     if (provider.remoteProvisioningSupported &&
         provider.remoteLastSyncedAt == null) {
       final verificationError = provider.remoteSyncError;
       return _StartupView(
         message: verificationError == null
             ? 'Verificando el estado de tu servicio…'
-            : 'No se pudo verificar el servicio. Revisá la conexión a Internet. TV FULL PRO se habilitará cuando el servidor confirme que este dispositivo está activo.',
+            : 'No se pudo verificar el servicio. Revisá la conexión a Internet.',
         deviceCode: provider.remoteDeviceCode,
         busy: provider.remoteSyncing || verificationError == null,
       );
@@ -92,106 +85,168 @@ class _StartupView extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final accent = blocked ? const Color(0xFFFF6F8F) : const Color(0xFF54D7FF);
+
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      body: TvFullPremiumBackground(
-        child: SafeArea(
-          child: Center(
-            child: Container(
-              constraints: const BoxConstraints(maxWidth: 650),
-              margin: const EdgeInsets.all(34),
-              padding: const EdgeInsets.fromLTRB(46, 38, 46, 32),
-              decoration: tvFullGlassDecoration(
-                focused: false,
-                radius: 24,
-                accent: blocked ? const Color(0xFFFF6B78) : tvFullCyan,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Container(
-                    width: 76,
-                    height: 76,
-                    decoration: BoxDecoration(
-                      shape: BoxShape.circle,
-                      color: (blocked ? const Color(0xFFFF6B78) : tvFullBlue)
-                          .withValues(alpha: .12),
-                      border: Border.all(
-                        color: (blocked ? const Color(0xFFFF6B78) : tvFullCyan)
-                            .withValues(alpha: .46),
+      backgroundColor: const Color(0xFF050B14),
+      body: Stack(
+        fit: StackFit.expand,
+        children: [
+          const _StartupBackground(),
+          SafeArea(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(maxWidth: 610),
+                child: Container(
+                  margin: const EdgeInsets.all(30),
+                  padding: const EdgeInsets.fromLTRB(40, 34, 40, 28),
+                  decoration: BoxDecoration(
+                    color: const Color(0xDB0A1422),
+                    borderRadius: BorderRadius.circular(22),
+                    border: Border.all(
+                      color: accent.withValues(alpha: .35),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: Colors.black.withValues(alpha: .35),
+                        blurRadius: 32,
+                        offset: const Offset(0, 14),
                       ),
-                    ),
-                    child: Icon(
-                      blocked
-                          ? Icons.lock_outline_rounded
-                          : Icons.live_tv_rounded,
-                      size: blocked ? 38 : 36,
-                      color: blocked ? const Color(0xFFFF8B94) : tvFullCyan,
-                    ),
+                    ],
                   ),
-                  const SizedBox(height: 18),
-                  const Text(
-                    'TV FULL PRO',
-                    style: TextStyle(
-                      fontSize: 38,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.2,
-                    ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Container(
+                        width: 68,
+                        height: 68,
+                        decoration: BoxDecoration(
+                          borderRadius: BorderRadius.circular(18),
+                          color: accent.withValues(alpha: .10),
+                          border: Border.all(
+                            color: accent.withValues(alpha: .28),
+                          ),
+                        ),
+                        child: Icon(
+                          blocked
+                              ? Icons.lock_outline_rounded
+                              : Icons.play_arrow_rounded,
+                          color: accent,
+                          size: 36,
+                        ),
+                      ),
+                      const SizedBox(height: 18),
+                      const Text(
+                        'TV FULL PRO',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 32,
+                          fontWeight: FontWeight.w900,
+                          letterSpacing: -.6,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Text(
+                        message,
+                        textAlign: TextAlign.center,
+                        style: const TextStyle(
+                          color: Colors.white60,
+                          fontSize: 16,
+                          height: 1.4,
+                        ),
+                      ),
+                      if (deviceCode != null &&
+                          deviceCode!.trim().isNotEmpty) ...[
+                        const SizedBox(height: 22),
+                        const Text(
+                          'CÓDIGO DE DISPOSITIVO',
+                          style: TextStyle(
+                            color: Colors.white38,
+                            fontSize: 10,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.3,
+                          ),
+                        ),
+                        const SizedBox(height: 7),
+                        SelectableText(
+                          deviceCode!,
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: accent,
+                            fontSize: 27,
+                            fontWeight: FontWeight.w900,
+                            letterSpacing: 1.5,
+                          ),
+                        ),
+                      ],
+                      if (busy) ...[
+                        const SizedBox(height: 24),
+                        SizedBox(
+                          width: 30,
+                          height: 30,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2.8,
+                            color: accent,
+                          ),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      const AppVersionBadge(),
+                    ],
                   ),
-                  const SizedBox(height: 14),
-                  Text(
-                    message,
-                    textAlign: TextAlign.center,
-                    style: const TextStyle(color: Colors.white70, fontSize: 18),
-                  ),
-                  if (blocked) ...[
-                    const SizedBox(height: 10),
-                    const Text(
-                      'El contenido guardado se conserva y se habilitará de nuevo al reactivar el servicio.',
-                      textAlign: TextAlign.center,
-                      style: TextStyle(color: Colors.white38, fontSize: 13),
-                    ),
-                  ],
-                  if (deviceCode != null && deviceCode!.trim().isNotEmpty) ...[
-                    const SizedBox(height: 26),
-                    const Text(
-                      'CÓDIGO DE DISPOSITIVO',
-                      style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12,
-                        fontWeight: FontWeight.w800,
-                        letterSpacing: 1.2,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      deviceCode!,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        color: tvFullCyan,
-                        fontSize: 28,
-                        fontWeight: FontWeight.w900,
-                      ),
-                    ),
-                  ],
-                  if (busy) ...[
-                    const SizedBox(height: 28),
-                    const SizedBox(
-                      width: 34,
-                      height: 34,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 3,
-                        color: tvFullCyan,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 20),
-                  const AppVersionBadge(),
-                ],
+                ),
               ),
             ),
           ),
-        ),
+        ],
+      ),
+    );
+  }
+}
+
+class _StartupBackground extends StatelessWidget {
+  const _StartupBackground();
+
+  @override
+  Widget build(BuildContext context) {
+    return IgnorePointer(
+      child: Stack(
+        children: [
+          Positioned(
+            left: -170,
+            top: -210,
+            child: Container(
+              width: 500,
+              height: 500,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF2D8CFF).withValues(alpha: .13),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: -220,
+            bottom: -250,
+            child: Container(
+              width: 600,
+              height: 600,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: RadialGradient(
+                  colors: [
+                    const Color(0xFF54D7FF).withValues(alpha: .08),
+                    Colors.transparent,
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

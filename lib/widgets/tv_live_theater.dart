@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 
 import 'tv_full_brand.dart';
-import 'tv_full_premium_ui.dart';
+import 'tv_full_clean_ui.dart';
 
 /// Presentación de TV en vivo. Reutiliza la textura Media3 y la lista de
 /// canales existentes; no modifica reproducción, buffers ni red.
@@ -113,7 +113,7 @@ class _Header extends StatelessWidget {
             child: const Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                Icon(Icons.circle, size: 7, color: tvFullCyan),
+                Icon(Icons.circle, size: 7, color: tvCleanCyan),
                 SizedBox(width: 7),
                 Text(
                   'TV EN VIVO',
@@ -129,7 +129,7 @@ class _Header extends StatelessWidget {
           ),
           if (!compact) ...[
             const SizedBox(width: 18),
-            const TvFullClock(),
+            const TvCleanClock(),
           ],
         ],
       ),
@@ -178,10 +178,10 @@ class _MenuRail extends StatelessWidget {
               ),
             ),
             _NavButton(
-              icon: Icons.live_tv_rounded,
-              label: 'TV EN VIVO',
-              selected: true,
+              icon: Icons.fullscreen_rounded,
+              label: 'PANTALLA COMPLETA',
               onPressed: onFullscreen,
+              selected: false,
             ),
             _NavButton(
               icon: Icons.grid_view_rounded,
@@ -189,8 +189,8 @@ class _MenuRail extends StatelessWidget {
               onPressed: onCategories,
             ),
             _NavButton(
-              icon: Icons.auto_awesome_rounded,
-              label: 'DESTACADOS',
+              icon: Icons.home_rounded,
+              label: 'INICIO',
               onPressed: onHome,
             ),
             if (onAudio != null)
@@ -264,7 +264,7 @@ class _VideoStage extends StatelessWidget {
             padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
             child: Row(
               children: [
-                const TvFullLiveBadge(compact: true),
+                const TvCleanLiveBadge(compact: true),
                 const SizedBox(width: 10),
                 Expanded(
                   child: Text(
@@ -312,7 +312,7 @@ class _ChannelsRail extends StatelessWidget {
                   width: 3,
                   height: 18,
                   decoration: BoxDecoration(
-                    color: tvFullCyan,
+                    color: tvCleanCyan,
                     borderRadius: BorderRadius.circular(4),
                   ),
                 ),
@@ -388,16 +388,16 @@ class _NavButtonState extends State<_NavButton> {
             : const Duration(milliseconds: 95),
         decoration: BoxDecoration(
           color: _focused
-              ? tvFullBlue.withValues(alpha: .24)
+              ? tvCleanBlue.withValues(alpha: .24)
               : widget.selected
-                  ? tvFullCyan.withValues(alpha: .10)
+                  ? tvCleanCyan.withValues(alpha: .10)
                   : Colors.transparent,
           borderRadius: BorderRadius.circular(9),
           border: Border.all(
             color: _focused
-                ? tvFullCyan
+                ? tvCleanCyan
                 : widget.selected
-                    ? tvFullCyan.withValues(alpha: .26)
+                    ? tvCleanCyan.withValues(alpha: .26)
                     : Colors.transparent,
             width: _focused ? 1.6 : 1,
           ),
@@ -416,7 +416,7 @@ class _NavButtonState extends State<_NavButton> {
                   Icon(
                     widget.icon,
                     size: 20,
-                    color: active ? tvFullCyan : Colors.white54,
+                    color: active ? tvCleanCyan : Colors.white54,
                   ),
                   const SizedBox(width: 9),
                   Expanded(
@@ -488,11 +488,11 @@ class _FocusIconButtonState extends State<_FocusIconButton> {
           : const Duration(milliseconds: 95),
       decoration: BoxDecoration(
         color: focused
-            ? tvFullCyan.withValues(alpha: .18)
+            ? tvCleanCyan.withValues(alpha: .18)
             : Colors.white.withValues(alpha: .035),
         borderRadius: BorderRadius.circular(9),
         border: Border.all(
-          color: focused ? tvFullCyan : Colors.white.withValues(alpha: .07),
+          color: focused ? tvCleanCyan : Colors.white.withValues(alpha: .07),
           width: focused ? 1.5 : 1,
         ),
       ),
@@ -502,7 +502,7 @@ class _FocusIconButtonState extends State<_FocusIconButton> {
         onPressed: widget.onPressed,
         icon: Icon(
           widget.icon,
-          color: focused ? tvFullCyan : Colors.white70,
+          color: focused ? tvCleanCyan : Colors.white70,
         ),
       ),
     );

@@ -10,7 +10,7 @@ import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/live_channel_usage_service.dart';
 import '../widgets/channel_logo_image.dart';
-import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_full_clean_ui.dart';
 import '../widgets/tv_live_theater.dart';
 
 const String _media3DefaultUserAgent =
@@ -214,7 +214,13 @@ class _AndroidMedia3TexturePlayerScreenState
         setState(() => _buffering = true);
         break;
       case 'prepared':
+        break;
       case 'bufferingEnd':
+        setState(() {
+          _buffering = false;
+          _friendlyError = null;
+        });
+        break;
       case 'playing':
         _autoRetryCount = 0;
         _recordHealthySignal();
@@ -292,7 +298,8 @@ class _AndroidMedia3TexturePlayerScreenState
         combined.contains('404') ||
         combined.contains('410');
     final transient = !permanentHttp &&
-        (combined.contains('network') ||
+        (combined.contains('tvfull_fast_io') ||
+            combined.contains('network') ||
             combined.contains('timeout') ||
             combined.contains('connection') ||
             combined.contains('io_bad_http_status') ||
@@ -319,14 +326,10 @@ class _AndroidMedia3TexturePlayerScreenState
       return;
     }
 
-    final shouldCooldown = permanentHttp ||
-        combined.contains('tvfull_no_progress') ||
-        combined.contains('tvfull_fast_io') ||
-        combined.contains('io_bad_http_status') ||
-        combined.contains('response_code_5') ||
-        combined.contains('network') ||
-        combined.contains('timeout') ||
-        combined.contains('connection');
+    // Sólo respuestas HTTP permanentes entran al cooldown largo. Una
+    // demora, un timeout, un 5xx o TVFULL_FAST_IO deben poder reintentarse sin
+    // hacer que el zapping saltee el canal durante diez minutos.
+    final shouldCooldown = permanentHttp;
     if (shouldCooldown) {
       _health.markDead(_channel, reason: code);
     }
@@ -342,7 +345,8 @@ class _AndroidMedia3TexturePlayerScreenState
     if (value.contains('decoder') || value.contains('codec')) {
       return 'Formato de video no compatible';
     }
-    if (value.contains('timeout') ||
+    if (value.contains('tvfull_fast_io') ||
+        value.contains('timeout') ||
         value.contains('network') ||
         value.contains('connection')) {
       return 'Problema de conexión';
@@ -759,10 +763,10 @@ class _AndroidMedia3TexturePlayerScreenState
                     color: Colors.black.withValues(alpha: .24),
                     borderRadius: BorderRadius.circular(14),
                     border:
-                        Border.all(color: tvFullCyan.withValues(alpha: .40)),
+                        Border.all(color: tvCleanCyan.withValues(alpha: .40)),
                     boxShadow: [
                       BoxShadow(
-                        color: tvFullCyan.withValues(alpha: .10),
+                        color: tvCleanCyan.withValues(alpha: .10),
                         blurRadius: 12,
                       ),
                     ],
@@ -807,7 +811,7 @@ class _AndroidMedia3TexturePlayerScreenState
                               ),
                             ),
                             const SizedBox(width: 10),
-                            const TvFullLiveBadge(),
+                            const TvCleanLiveBadge(),
                           ],
                         ),
                         const SizedBox(height: 5),
@@ -1050,7 +1054,7 @@ class _LiveHudAction extends StatelessWidget {
         visualDensity: VisualDensity.compact,
       ),
       onPressed: onTap,
-      icon: Icon(icon, size: 17, color: tvFullCyan),
+      icon: Icon(icon, size: 17, color: tvCleanCyan),
       label: Text(
         label,
         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),

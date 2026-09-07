@@ -18,8 +18,7 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_series_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
-import '../widgets/tv_catalog_category_row.dart';
-import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_full_clean_ui.dart';
 import 'player_screen.dart';
 
 class XtreamSeriesScreen extends StatefulWidget {
@@ -276,7 +275,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: const Color(0xA3050910),
+          backgroundColor: tvCleanSurface,
           surfaceTintColor: Colors.transparent,
           title: _searchOpen
               ? TextField(
@@ -318,7 +317,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
             const SizedBox(width: 10),
           ],
         ),
-        body: TvFullPremiumBackground(
+        body: TvCleanBackground(
           compact: true,
           child: FutureBuilder<_SeriesData>(
             future: _future,
@@ -371,7 +370,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
                 colors: [Color(0xD9101928), Color(0xCC07101D)],
               ),
               border: Border(
-                right: BorderSide(color: tvFullBlue, width: .35),
+                right: BorderSide(color: tvCleanBlue, width: .35),
               ),
             ),
             child: ListView.builder(
@@ -380,7 +379,7 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
               itemBuilder: (context, index) {
                 final value = index == 0 ? null : categories[index - 1];
                 final selected = value == _category;
-                return TvCatalogCategoryRow(
+                return TvCleanCategoryRow(
                   label: value ?? 'Todas',
                   selected: selected,
                   primary: index == 0,
@@ -580,11 +579,11 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
     return Scaffold(
       backgroundColor: Colors.transparent,
       appBar: AppBar(
-        backgroundColor: const Color(0xA3050910),
+        backgroundColor: tvCleanSurface,
         surfaceTintColor: Colors.transparent,
         title: const Text('Serie'),
       ),
-      body: TvFullPremiumBackground(
+      body: TvCleanBackground(
         compact: true,
         child: Padding(
           padding: const EdgeInsets.fromLTRB(32, 20, 32, 28),
@@ -682,7 +681,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                             child: ListView(
                               children: widget.model.seasons.keys.map((season) {
                                 final selected = season == _season;
-                                return TvCatalogCategoryRow(
+                                return TvCleanCategoryRow(
                                   label: 'Temporada $season',
                                   selected: selected,
                                   onTap: () => setState(() => _season = season),
@@ -787,10 +786,10 @@ class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
       curve: Curves.easeOutCubic,
       child: AnimatedContainer(
         duration: Duration(milliseconds: lowRam ? 80 : 130),
-        decoration: tvFullGlassDecoration(
+        decoration: tvCleanCardDecoration(
           focused: _focused,
           radius: 12,
-          accent: tvFullCyan,
+          accent: tvCleanCyan,
         ),
         child: Material(
           color: Colors.transparent,
@@ -814,7 +813,7 @@ class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
                             : '▶',
                         style: TextStyle(
                           color:
-                              _focused ? tvFullCyan : const Color(0xFF58B9FF),
+                              _focused ? tvCleanCyan : const Color(0xFF58B9FF),
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -848,7 +847,7 @@ class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
                     ),
                     Icon(
                       Icons.play_arrow_rounded,
-                      color: _focused ? tvFullCyan : Colors.white54,
+                      color: _focused ? tvCleanCyan : Colors.white54,
                     ),
                   ],
                 ),
@@ -888,7 +887,7 @@ class _SeriesCardState extends State<_SeriesCard> {
       curve: Curves.easeOutCubic,
       child: AnimatedContainer(
         duration: Duration(milliseconds: lowRam ? 80 : 140),
-        decoration: tvFullGlassDecoration(
+        decoration: tvCleanCardDecoration(
           focused: _focused,
           radius: 15,
           accent: const Color(0xFFA04CFF),

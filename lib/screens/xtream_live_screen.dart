@@ -20,8 +20,7 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_live_fast_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/channel_logo_image.dart';
-import '../widgets/tv_catalog_category_row.dart';
-import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_full_clean_ui.dart';
 import '../widgets/tv_live_premium_catalog.dart';
 import 'player_screen.dart';
 
@@ -51,10 +50,13 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   CatalogIndex<Channel>? _catalogIndex;
   _LiveData? _indexedData;
   _LiveData? _visibleData;
+  late final LiveProgramGuideLoader _programGuideLoader;
 
   @override
   void initState() {
     super.initState();
+    _programGuideLoader = (channel) => LiveEpgService.instance
+        .loadXtreamNowNext(widget.playlist.source, channel);
     _parental.addListener(_onParentalChanged);
     unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
@@ -288,7 +290,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: const Color(0xA3050910),
+          backgroundColor: tvCleanSurface,
           surfaceTintColor: Colors.transparent,
           titleSpacing: 24,
           title: _searchOpen
@@ -331,7 +333,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
             const SizedBox(width: 10),
           ],
         ),
-        body: TvFullPremiumBackground(
+        body: TvCleanBackground(
           compact: true,
           child: FutureBuilder<_LiveData>(
             future: _future,
@@ -392,8 +394,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         },
         isFavorite: provider.isFavorite,
         onFavoriteToggle: provider.toggleFavorite,
-        programGuideLoader: (channel) => LiveEpgService.instance
-            .loadXtreamNowNext(widget.playlist.source, channel),
+        programGuideLoader: _programGuideLoader,
       );
     }
 
@@ -409,7 +410,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                 colors: [Color(0xD9101928), Color(0xCC07101D)],
               ),
               border: Border(
-                right: BorderSide(color: tvFullBlue, width: .35),
+                right: BorderSide(color: tvCleanBlue, width: .35),
               ),
             ),
             child: ListView.builder(
@@ -418,7 +419,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               itemBuilder: (context, index) {
                 final category = index == 0 ? null : categories[index - 1];
                 final selected = category == _category;
-                return TvCatalogCategoryRow(
+                return TvCleanCategoryRow(
                   label: category ?? 'Todos',
                   selected: selected,
                   primary: index == 0,
@@ -542,10 +543,10 @@ class _ChannelRowState extends State<_ChannelRow> {
         curve: Curves.easeOutCubic,
         child: AnimatedContainer(
           duration: Duration(milliseconds: lowRam ? 70 : 120),
-          decoration: tvFullGlassDecoration(
+          decoration: tvCleanCardDecoration(
             focused: _focused,
             radius: 12,
-            accent: tvFullCyan,
+            accent: tvCleanCyan,
           ),
           child: Material(
             color: Colors.transparent,
@@ -609,7 +610,7 @@ class _ChannelRowState extends State<_ChannelRow> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: _focused
-                                ? tvFullCyan.withValues(alpha: .75)
+                                ? tvCleanCyan.withValues(alpha: .75)
                                 : Colors.white38,
                             fontSize: 11,
                           ),
@@ -702,18 +703,18 @@ class _BlockedCatalog extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: TvFullPremiumBackground(
+      body: TvCleanBackground(
         compact: true,
         child: Center(
           child: Container(
             constraints: const BoxConstraints(maxWidth: 540),
             padding: const EdgeInsets.all(32),
-            decoration: tvFullGlassDecoration(radius: 20),
+            decoration: tvCleanCardDecoration(radius: 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(Icons.lock_outline_rounded,
-                    size: 46, color: tvFullCyan),
+                    size: 46, color: tvCleanCyan),
                 const SizedBox(height: 14),
                 Text(message, textAlign: TextAlign.center),
                 const SizedBox(height: 16),

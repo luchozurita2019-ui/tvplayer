@@ -1,7 +1,7 @@
 name: iptv_player
 description: TV FULL PRO para Android TV, rápido, liviano y orientado a control remoto.
 publish_to: 'none'
-version: 1.4.5+37
+version: 1.4.6+38
 
 environment:
   sdk: '>=3.3.0 <4.0.0'
@@ -67,3 +67,5 @@ flutter:
 # Validation trigger v36: verify Android TV integration after removing duplicate Back ownership.
 
 # TV FULL PRO 1.4.5+37 cinematic Android TV interface; playback engine remains inherited from +36.
+
+# TV FULL PRO 1.4.6+38 clean remote-first dashboard, functional section shortcuts, and refreshed startup UI. Playback engine remains inherited unchanged.
