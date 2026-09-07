@@ -11,6 +11,7 @@ import '../services/device_performance_service.dart';
 import '../services/live_channel_usage_service.dart';
 import '../widgets/channel_logo_image.dart';
 import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_live_theater.dart';
 
 const String _media3DefaultUserAgent =
     'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -54,6 +55,7 @@ class _AndroidMedia3TexturePlayerScreenState
   late int _index;
   int? _textureId;
   double _aspectRatio = 16 / 9;
+  bool _theaterMode = true;
   bool _overlayVisible = false;
   bool _channelListVisible = false;
   bool _buffering = true;
@@ -85,7 +87,14 @@ class _AndroidMedia3TexturePlayerScreenState
               _finishWithError('Problema de reproducción', error.toString()),
         );
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _rootFocus.requestFocus();
+      if (mounted) {
+        if (_theaterMode) {
+          _channelListFocus.requestFocus();
+          _scrollChannelListToCurrent();
+        } else {
+          _rootFocus.requestFocus();
+        }
+      }
     });
     unawaited(_initialize());
   }
@@ -94,7 +103,8 @@ class _AndroidMedia3TexturePlayerScreenState
     try {
       final healthReady = _health.ensureLoaded();
       unawaited(
-          ChannelLogoResolverService.instance.primeChannels(widget.playlist));
+        ChannelLogoResolverService.instance.primeChannels(widget.playlist),
+      );
       final lowRam = DevicePerformanceService.instance.lowRam;
       var adaptiveLevel = 0;
       if (widget.playlist.isNotEmpty) {
@@ -417,9 +427,11 @@ class _AndroidMedia3TexturePlayerScreenState
                   title: Text(track.displayName(index + 1)),
                   subtitle: track.mimeType.isEmpty
                       ? null
-                      : Text(track.mimeType
-                          .replaceFirst('audio/', '')
-                          .toUpperCase()),
+                      : Text(
+                          track.mimeType
+                              .replaceFirst('audio/', '')
+                              .toUpperCase(),
+                        ),
                   trailing: track.selected
                       ? const Icon(
                           Icons.check_circle_rounded,
@@ -454,6 +466,11 @@ class _AndroidMedia3TexturePlayerScreenState
   }
 
   void _openChannelList() {
+    if (_theaterMode) {
+      _channelListFocus.requestFocus();
+      _scrollChannelListToCurrent();
+      return;
+    }
     _overlayTimer?.cancel();
     setState(() {
       _overlayVisible = true;
@@ -472,7 +489,7 @@ class _AndroidMedia3TexturePlayerScreenState
   void _scrollChannelListToCurrent() {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted ||
-          !_channelListVisible ||
+          (!_channelListVisible && !_theaterMode) ||
           !_channelScrollController.hasClients) {
         return;
       }
@@ -483,7 +500,7 @@ class _AndroidMedia3TexturePlayerScreenState
       _channelScrollController.jumpTo(target);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
-            _channelListVisible &&
+            (_channelListVisible || _theaterMode) &&
             _channelListFocus.canRequestFocus) {
           _channelListFocus.requestFocus();
         }
@@ -495,8 +512,8 @@ class _AndroidMedia3TexturePlayerScreenState
     if (index < 0 || index >= widget.playlist.length) return;
     setState(() {
       _index = index;
-      _channelListVisible = true;
-      _overlayVisible = true;
+      _channelListVisible = !_theaterMode;
+      _overlayVisible = !_theaterMode;
     });
     unawaited(_prepareCurrent(keepChannelListOpen: true));
     _scrollChannelListToCurrent();
@@ -534,6 +551,7 @@ class _AndroidMedia3TexturePlayerScreenState
   KeyEventResult _onKey(FocusNode node, KeyEvent event) {
     if (event is! KeyDownEvent) return KeyEventResult.ignored;
     final key = event.logicalKey;
+    if (_theaterMode) return KeyEventResult.ignored;
     final isSystemBack = key == LogicalKeyboardKey.goBack;
     final isEscape = key == LogicalKeyboardKey.escape;
 
@@ -632,57 +650,84 @@ class _AndroidMedia3TexturePlayerScreenState
         body: Center(child: Text('No hay canales para reproducir.')),
       );
     }
+    final video = Stack(
+      fit: StackFit.expand,
+      children: [
+        Center(
+          child: AspectRatio(
+            aspectRatio: _aspectRatio,
+            child: _textureId == null
+                ? const SizedBox.shrink()
+                : Texture(
+                    textureId: _textureId!,
+                    filterQuality: FilterQuality.none,
+                  ),
+          ),
+        ),
+        if (_buffering && _friendlyError == null)
+          const Center(
+            child: SizedBox(
+              width: 38,
+              height: 38,
+              child: CircularProgressIndicator(strokeWidth: 3),
+            ),
+          ),
+        if (_friendlyError != null) _errorCard(),
+        if (!_theaterMode && _overlayVisible && _friendlyError == null)
+          _liveHud(),
+        if (!_theaterMode && _channelListVisible) _channelDrawer(),
+      ],
+    );
     return PopScope<void>(
-      canPop:
-          !_channelListVisible && !(_overlayVisible && _friendlyError == null),
+      canPop: _theaterMode,
       onPopInvokedWithResult: (didPop, result) {
-        if (didPop) return;
+        if (didPop || _theaterMode) return;
         if (_channelListVisible) {
           _closeChannelList();
-          return;
-        }
-        if (_overlayVisible && _friendlyError == null) {
-          _overlayTimer?.cancel();
-          setState(() => _overlayVisible = false);
-          _rootFocus.requestFocus();
+        } else {
+          _setTheaterMode(true);
         }
       },
       child: Scaffold(
         backgroundColor: Colors.black,
         body: Focus(
           focusNode: _rootFocus,
-          autofocus: true,
+          autofocus: !_theaterMode,
           onKeyEvent: _onKey,
-          child: Stack(
-            fit: StackFit.expand,
-            children: [
-              Center(
-                child: AspectRatio(
-                  aspectRatio: _aspectRatio,
-                  child: _textureId == null
-                      ? const SizedBox.shrink()
-                      : Texture(
-                          textureId: _textureId!,
-                          filterQuality: FilterQuality.none,
-                        ),
-                ),
-              ),
-              if (_buffering && _friendlyError == null)
-                const Center(
-                  child: SizedBox(
-                    width: 38,
-                    height: 38,
-                    child: CircularProgressIndicator(strokeWidth: 3),
-                  ),
-                ),
-              if (_friendlyError != null) _errorCard(),
-              if (_overlayVisible && _friendlyError == null) _liveHud(),
-              if (_channelListVisible) _channelDrawer(),
-            ],
-          ),
+          child: _theaterMode
+              ? TvLiveTheater(
+                  video: video,
+                  channels: _channelDrawer(docked: true),
+                  channelName: _channel.name,
+                  onFullscreen: () => _setTheaterMode(false),
+                  onCategories: () => Navigator.of(context).pop(),
+                  onHome: () =>
+                      Navigator.of(context).popUntil((route) => route.isFirst),
+                  onAudio: _hasMultipleAudioTracks
+                      ? () => unawaited(_showAudioPicker())
+                      : null,
+                )
+              : video,
         ),
       ),
     );
+  }
+
+  void _setTheaterMode(bool enabled) {
+    _overlayTimer?.cancel();
+    setState(() {
+      _theaterMode = enabled;
+      _channelListVisible = false;
+      _overlayVisible = false;
+    });
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (enabled) {
+        _scrollChannelListToCurrent();
+      } else {
+        _rootFocus.requestFocus();
+      }
+    });
   }
 
   Widget _liveHud() => SafeArea(
@@ -698,7 +743,7 @@ class _AndroidMedia3TexturePlayerScreenState
                 colors: [
                   Color(0x00000000),
                   Color(0x3502080F),
-                  Color(0xA802060B),
+                  Color(0xA802060B)
                 ],
                 stops: [0, .42, 1],
               ),
@@ -713,9 +758,8 @@ class _AndroidMedia3TexturePlayerScreenState
                   decoration: BoxDecoration(
                     color: Colors.black.withValues(alpha: .24),
                     borderRadius: BorderRadius.circular(14),
-                    border: Border.all(
-                      color: tvFullCyan.withValues(alpha: .40),
-                    ),
+                    border:
+                        Border.all(color: tvFullCyan.withValues(alpha: .40)),
                     boxShadow: [
                       BoxShadow(
                         color: tvFullCyan.withValues(alpha: .10),
@@ -757,9 +801,7 @@ class _AndroidMedia3TexturePlayerScreenState
                                   fontWeight: FontWeight.w900,
                                   shadows: [
                                     Shadow(
-                                      color: Colors.black87,
-                                      blurRadius: 8,
-                                    ),
+                                        color: Colors.black87, blurRadius: 8),
                                   ],
                                 ),
                               ),
@@ -780,7 +822,7 @@ class _AndroidMedia3TexturePlayerScreenState
                             fontSize: 11,
                             fontWeight: FontWeight.w600,
                             shadows: [
-                              Shadow(color: Colors.black87, blurRadius: 6),
+                              Shadow(color: Colors.black87, blurRadius: 6)
                             ],
                           ),
                         ),
@@ -809,9 +851,7 @@ class _AndroidMedia3TexturePlayerScreenState
                       color: Colors.white38,
                       fontSize: 10,
                       fontWeight: FontWeight.w600,
-                      shadows: [
-                        Shadow(color: Colors.black87, blurRadius: 6),
-                      ],
+                      shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
                     ),
                   ),
                 ),
@@ -821,14 +861,14 @@ class _AndroidMedia3TexturePlayerScreenState
         ),
       );
 
-  Widget _channelDrawer() => Align(
+  Widget _channelDrawer({bool docked = false}) => Align(
         alignment: Alignment.centerRight,
         child: Material(
           color: const Color(0xF20A1119),
-          elevation: 16,
+          elevation: docked ? 0 : 16,
           child: SafeArea(
             child: SizedBox(
-              width: 350,
+              width: docked ? double.infinity : 350,
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
@@ -838,17 +878,18 @@ class _AndroidMedia3TexturePlayerScreenState
                       children: [
                         const Expanded(
                           child: Text(
-                            'Lista de canales',
+                            'Canales',
                             style: TextStyle(
                               fontSize: 20,
                               fontWeight: FontWeight.w900,
                             ),
                           ),
                         ),
-                        IconButton(
-                          onPressed: _closeChannelList,
-                          icon: const Icon(Icons.close_rounded),
-                        ),
+                        if (!docked)
+                          IconButton(
+                            onPressed: _closeChannelList,
+                            icon: const Icon(Icons.close_rounded),
+                          ),
                       ],
                     ),
                   ),
@@ -969,8 +1010,11 @@ class _AndroidMedia3TexturePlayerScreenState
               const Row(
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
-                  Icon(Icons.keyboard_arrow_down_rounded,
-                      size: 20, color: Colors.white54),
+                  Icon(
+                    Icons.keyboard_arrow_down_rounded,
+                    size: 20,
+                    color: Colors.white54,
+                  ),
                   SizedBox(width: 5),
                   Text(
                     'Flecha abajo: lista de canales',
@@ -1081,8 +1125,11 @@ class _LiveErrorButtonState extends State<_LiveErrorButton> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(widget.icon,
-                      size: 19, color: _focused ? accent : Colors.white70),
+                  Icon(
+                    widget.icon,
+                    size: 19,
+                    color: _focused ? accent : Colors.white70,
+                  ),
                   const SizedBox(width: 8),
                   Text(
                     widget.label,

@@ -8,12 +8,13 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
 import '../services/app_update_service.dart';
-import '../services/device_performance_service.dart';
+import '../services/artwork_cache_service.dart';
+import '../services/section_catalog_service.dart';
 import '../services/manual_playlist_refresh_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
 import '../widgets/app_version_badge.dart';
-import '../widgets/parental_lock_button.dart';
+import '../widgets/tv_cinematic_home.dart';
 import '../widgets/parental_unlock_dialog.dart';
 import '../widgets/tv_full_premium_ui.dart';
 import 'parental_control_screen.dart';
@@ -37,6 +38,10 @@ class _SourceContentScreenState extends State<SourceContentScreen>
   Timer? _updatePollTimer;
   bool _refreshingLists = false;
   DateTime? _lastBackPressedAt;
+  List<CinematicTile> _homeItems = const [];
+  String? _homeSourceKey;
+  int _homeGeneration = 0;
+  bool _openingSection = false;
 
   @override
   void initState() {
@@ -72,218 +77,206 @@ class _SourceContentScreenState extends State<SourceContentScreen>
   }
 
   @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final active =
+        context.watch<IptvProvider>().selectedPlaylist ?? widget.playlist;
+    final key = '${active.id}|${active.source}';
+    if (_homeSourceKey == key) return;
+    _homeSourceKey = key;
+    _homeItems = const [];
+    unawaited(_loadHomeArtwork(active));
+  }
+
+  Future<void> _loadHomeArtwork(Playlist playlist) async {
+    final generation = ++_homeGeneration;
+    final tiles = <CinematicTile>[];
+    try {
+      await _parental.init();
+      if (!mounted || generation != _homeGeneration) return;
+      await ArtworkCacheService.instance.switchProvider(playlist.id);
+      if (!mounted || generation != _homeGeneration) return;
+      // Cached catalogs only: entering Home never downloads the full provider.
+      if (playlist.sourceType == PlaylistSourceType.xtream) {
+        final service = XtreamFastCatalogService.instance;
+        final movies = await service.loadCachedMovies(playlist.source);
+        if (!mounted || generation != _homeGeneration) return;
+        for (final movie in movies?.movies ?? []) {
+          if (!_parental.canShowItem(name: movie.name, group: movie.category)) {
+            continue;
+          }
+          tiles.add(
+            CinematicTile(
+              id: 'movie:${movie.id}',
+              title: movie.name,
+              imageUrl: movie.cover,
+              category: movie.category,
+              section: CinematicSection.movies,
+            ),
+          );
+          if (tiles.length >= 6) break;
+        }
+        final series = await service.loadCachedSeries(playlist.source);
+        if (!mounted || generation != _homeGeneration) return;
+        var count = 0;
+        for (final item in series?.series ?? []) {
+          if (!_parental.canShowItem(name: item.name, group: item.category)) {
+            continue;
+          }
+          tiles.add(
+            CinematicTile(
+              id: 'series:${item.id}',
+              title: item.name,
+              imageUrl:
+                  item.backdrops.isNotEmpty ? item.backdrops.first : item.cover,
+              category: item.category,
+              section: CinematicSection.series,
+            ),
+          );
+          if (++count >= 6) break;
+        }
+      } else {
+        for (final kind in [TvSectionKind.movies, TvSectionKind.series]) {
+          final cached = await SectionCatalogService.instance.loadCached(
+            playlist,
+            kind,
+          );
+          if (!mounted || generation != _homeGeneration) return;
+          var count = 0;
+          for (final channel in cached?.channels ?? []) {
+            if (!_parental.canShowChannel(channel)) continue;
+            tiles.add(
+              CinematicTile(
+                id: '${kind.name}:${channel.uniqueKey}',
+                title: channel.name,
+                imageUrl: channel.logoUrl,
+                category: channel.group,
+                section: kind == TvSectionKind.movies
+                    ? CinematicSection.movies
+                    : CinematicSection.series,
+              ),
+            );
+            if (++count >= 6) break;
+          }
+        }
+      }
+    } catch (_) {
+      // Section shortcuts stay available when a cached catalog cannot be read.
+    }
+    if (!mounted || generation != _homeGeneration) return;
+    // Alternate movies and series so both sections appear above the fold.
+    final movies =
+        tiles.where((t) => t.section == CinematicSection.movies).toList();
+    final series =
+        tiles.where((t) => t.section == CinematicSection.series).toList();
+    final ordered = <CinematicTile>[];
+    for (var i = 0; i < 6; i++) {
+      if (i < movies.length) ordered.add(movies[i]);
+      if (i < series.length) ordered.add(series[i]);
+    }
+    setState(() => _homeItems = ordered);
+  }
+
+  Future<void> _openSection(
+    Playlist playlist,
+    CinematicSection section, {
+    String initialQuery = '',
+  }) async {
+    if (_openingSection) return;
+    _openingSection = true;
+    try {
+      final screen = switch (section) {
+        CinematicSection.live => XtreamLiveScreen(playlist: playlist),
+        CinematicSection.series => XtreamSeriesScreen(
+            playlist: playlist,
+            initialQuery: initialQuery,
+          ),
+        _ => XtreamMoviesScreen(playlist: playlist, initialQuery: initialQuery),
+      };
+      await Navigator.of(context)
+          .push(MaterialPageRoute(builder: (_) => screen));
+    } finally {
+      _openingSection = false;
+      if (mounted) {
+        final active =
+            context.read<IptvProvider>().selectedPlaylist ?? widget.playlist;
+        unawaited(_loadHomeArtwork(active));
+      }
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
     final active = provider.selectedPlaylist ?? widget.playlist;
     final update = _updates.availableUpdate;
-
     return PopScope<void>(
       canPop: false,
       onPopInvokedWithResult: (didPop, result) {
         if (!didPop) unawaited(_handleRootBack());
       },
       child: Scaffold(
-        backgroundColor: Colors.transparent,
-        body: TvFullPremiumBackground(
-          child: SafeArea(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(52, 32, 52, 26),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            const Text(
-                              'TV FULL PRO',
-                              style: TextStyle(
-                                fontSize: 38,
-                                height: 1,
-                                fontWeight: FontWeight.w900,
-                                letterSpacing: 1.15,
-                              ),
-                            ),
-                            const SizedBox(height: 14),
-                            Row(
-                              children: [
-                                Container(
-                                  width: 4,
-                                  height: 26,
-                                  decoration: BoxDecoration(
-                                    color: tvFullBlue,
-                                    borderRadius: BorderRadius.circular(10),
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Flexible(
-                                  child: Text(
-                                    active.name,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: const TextStyle(
-                                      color: Colors.white70,
-                                      fontSize: 16,
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                      ParentalLockButton(
-                        unlocked: !_parental.enabled || _parental.isUnlocked,
-                        hiddenCategoryCount: 0,
-                        onPressed: () => unawaited(_handleParentalLock()),
-                      ),
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: _refreshingLists
-                            ? null
-                            : () => unawaited(_refreshLists()),
-                        icon: _refreshingLists
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child:
-                                    CircularProgressIndicator(strokeWidth: 2),
-                              )
-                            : const Icon(Icons.refresh_rounded, size: 20),
-                        label: Text(
-                          _refreshingLists
-                              ? 'Actualizando…'
-                              : 'Actualizar listas',
-                        ),
-                      ),
-                      const SizedBox(width: 8),
-                      if (provider.hasMultiplePlaylists) ...[
-                        OutlinedButton.icon(
-                          onPressed: () => unawaited(_choosePlaylist(context)),
-                          icon: const Icon(Icons.swap_horiz_rounded, size: 20),
-                          label: const Text('Cambiar lista'),
-                        ),
-                        const SizedBox(width: 18),
-                      ] else
-                        const SizedBox(width: 18),
-                      const TvFullClock(),
-                    ],
+        backgroundColor: const Color(0xFF08090B),
+        body: SafeArea(
+          child: TvCinematicHome(
+            key: ValueKey(_homeSourceKey),
+            playlistName: active.name,
+            items: _homeItems
+                .where(
+                  (item) => _parental.canShowItem(
+                    name: item.title,
+                    group: item.category,
                   ),
-                  if (update != null) ...[
-                    const SizedBox(height: 14),
-                    _UpdateBanner(
-                      versionName: update.versionName,
-                      onUpdate: () => unawaited(_openUpdate()),
-                    ),
-                  ],
-                  const Spacer(flex: 2),
-                  const Text(
-                    '¿Qué querés ver?',
-                    style: TextStyle(
-                      color: Colors.white70,
-                      fontSize: 18,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: .2,
-                    ),
-                  ),
-                  const SizedBox(height: 18),
-                  Expanded(
-                    flex: 10,
-                    child: Row(
-                      children: [
-                        Expanded(
-                          child: _SectionButton(
-                            autofocus: true,
-                            eyebrow: 'EN DIRECTO',
-                            title: 'TV EN VIVO',
-                            subtitle:
-                                'Disfrutá de la mejor programación en vivo',
-                            icon: Icons.live_tv_rounded,
-                            accent: tvFullCyan,
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    XtreamLiveScreen(playlist: active),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 26),
-                        Expanded(
-                          child: _SectionButton(
-                            eyebrow: 'CATÁLOGO',
-                            title: 'PELÍCULAS',
-                            subtitle:
-                                'Miles de películas para ver cuando quieras',
-                            icon: Icons.movie_outlined,
-                            accent: tvFullViolet,
-                            onFocused: () => _prewarmMovies(active),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    XtreamMoviesScreen(playlist: active),
-                              ),
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 26),
-                        Expanded(
-                          child: _SectionButton(
-                            eyebrow: 'TEMPORADAS',
-                            title: 'SERIES',
-                            subtitle: 'Las mejores series en un solo lugar',
-                            icon: Icons.ondemand_video_rounded,
-                            accent: const Color(0xFFA04CFF),
-                            onFocused: () => _prewarmSeries(active),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    XtreamSeriesScreen(playlist: active),
-                              ),
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const Spacer(),
-                  Row(
-                    children: [
-                      const Icon(
-                        Icons.verified_user_outlined,
-                        color: tvFullViolet,
-                        size: 28,
-                      ),
-                      const SizedBox(width: 12),
-                      const Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
-                        children: [
-                          Text(
-                            'Contenido actualizado',
-                            style: TextStyle(
-                              fontSize: 13,
-                              fontWeight: FontWeight.w800,
-                            ),
-                          ),
-                          SizedBox(height: 2),
-                          Text(
-                            'Tu contenido listo para disfrutar',
-                            style: TextStyle(
-                                color: Color(0x73FFFFFF), fontSize: 11.5),
-                          ),
-                        ],
-                      ),
-                      const Spacer(),
-                      const AppVersionBadge(),
-                    ],
-                  ),
-                ],
+                )
+                .toList(growable: false),
+            onOpenSection: (section) =>
+                unawaited(_openSection(active, section)),
+            onOpenItem: (item) => unawaited(
+              _openSection(active, item.section, initialQuery: item.title),
+            ),
+            actions: [
+              IconButton(
+                tooltip: 'Control parental',
+                onPressed: () => unawaited(_handleParentalLock()),
+                icon: Icon(
+                  !_parental.enabled || _parental.isUnlocked
+                      ? Icons.lock_open_outlined
+                      : Icons.lock_outline,
+                ),
               ),
+              IconButton(
+                tooltip:
+                    _refreshingLists ? 'Actualizando…' : 'Actualizar listas',
+                onPressed:
+                    _refreshingLists ? null : () => unawaited(_refreshLists()),
+                icon: _refreshingLists
+                    ? const SizedBox(
+                        width: 19,
+                        height: 19,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.refresh_rounded),
+              ),
+              if (provider.hasMultiplePlaylists)
+                IconButton(
+                  tooltip: 'Cambiar lista',
+                  icon: const Icon(Icons.swap_horiz),
+                  onPressed: () => unawaited(_choosePlaylist(context)),
+                ),
+              if (MediaQuery.sizeOf(context).width >= 900) ...[
+                const SizedBox(width: 20),
+                const TvFullClock(),
+              ],
+            ],
+            notice: update == null
+                ? null
+                : _UpdateBanner(
+                    versionName: update.versionName,
+                    onUpdate: () => unawaited(_openUpdate()),
+                  ),
+            footer: const Align(
+              alignment: Alignment.centerRight,
+              child: AppVersionBadge(),
             ),
           ),
         ),
@@ -324,13 +317,12 @@ class _SourceContentScreenState extends State<SourceContentScreen>
           provider.selectedPlaylist ??
           widget.playlist;
       await ManualPlaylistRefreshService.instance.refresh(active);
+      if (mounted) unawaited(_loadHomeArtwork(active));
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('Listas actualizadas correctamente.'),
-          ),
+          const SnackBar(content: Text('Listas actualizadas correctamente.')),
         );
     } catch (_) {
       if (!mounted) return;
@@ -339,7 +331,8 @@ class _SourceContentScreenState extends State<SourceContentScreen>
         ..showSnackBar(
           const SnackBar(
             content: Text(
-                'No se pudieron actualizar las listas. Revisá la conexión e intentá de nuevo.'),
+              'No se pudieron actualizar las listas. Revisá la conexión e intentá de nuevo.',
+            ),
           ),
         );
     } finally {
@@ -347,28 +340,14 @@ class _SourceContentScreenState extends State<SourceContentScreen>
     }
   }
 
-  void _prewarmMovies(Playlist playlist) {
-    if (playlist.sourceType != PlaylistSourceType.xtream) return;
-    unawaited(
-      XtreamFastCatalogService.instance.prewarmCachedMovies(playlist.source),
-    );
-  }
-
-  void _prewarmSeries(Playlist playlist) {
-    if (playlist.sourceType != PlaylistSourceType.xtream) return;
-    unawaited(
-      XtreamFastCatalogService.instance.prewarmCachedSeries(playlist.source),
-    );
-  }
-
   Future<void> _handleParentalLock() async {
     await _parental.init();
     if (!mounted) return;
 
     if (!_parental.pinConfigured || !_parental.enabled) {
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => const ParentalControlScreen()),
-      );
+      await Navigator.of(
+        context,
+      ).push(MaterialPageRoute(builder: (_) => const ParentalControlScreen()));
       return;
     }
 
@@ -395,7 +374,8 @@ class _SourceContentScreenState extends State<SourceContentScreen>
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(
-              content: Text('No hay un código de actualización válido.')),
+            content: Text('No hay un código de actualización válido.'),
+          ),
         );
       return;
     }
@@ -456,7 +436,8 @@ class _SourceContentScreenState extends State<SourceContentScreen>
                 ScaffoldMessenger.of(dialogContext)
                   ..hideCurrentSnackBar()
                   ..showSnackBar(
-                      const SnackBar(content: Text('Código copiado.')));
+                    const SnackBar(content: Text('Código copiado.')),
+                  );
               }
             },
             icon: const Icon(Icons.copy_rounded),
@@ -594,131 +575,6 @@ class _UpdateBanner extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _SectionButton extends StatefulWidget {
-  final String eyebrow;
-  final String title;
-  final String subtitle;
-  final IconData icon;
-  final Color accent;
-  final VoidCallback onTap;
-  final VoidCallback? onFocused;
-  final bool autofocus;
-
-  const _SectionButton({
-    required this.eyebrow,
-    required this.title,
-    required this.subtitle,
-    required this.icon,
-    required this.accent,
-    required this.onTap,
-    this.onFocused,
-    this.autofocus = false,
-  });
-
-  @override
-  State<_SectionButton> createState() => _SectionButtonState();
-}
-
-class _SectionButtonState extends State<_SectionButton> {
-  bool _focused = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final lowRam = DevicePerformanceService.instance.lowRam;
-    final scale = _focused ? (lowRam ? 1.035 : 1.065) : 1.0;
-    return AnimatedScale(
-      scale: scale,
-      duration: Duration(milliseconds: lowRam ? 90 : 150),
-      curve: Curves.easeOutCubic,
-      child: AnimatedContainer(
-        duration: Duration(milliseconds: lowRam ? 90 : 150),
-        curve: Curves.easeOutCubic,
-        decoration: tvFullGlassDecoration(
-          focused: _focused,
-          radius: 22,
-          accent: widget.accent,
-        ),
-        child: Material(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.circular(22),
-          clipBehavior: Clip.antiAlias,
-          child: InkWell(
-            autofocus: widget.autofocus,
-            borderRadius: BorderRadius.circular(22),
-            onFocusChange: (value) {
-              if (_focused != value) setState(() => _focused = value);
-              if (value) widget.onFocused?.call();
-            },
-            onTap: widget.onTap,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(28, 28, 28, 26),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Container(
-                    width: 68,
-                    height: 68,
-                    decoration: BoxDecoration(
-                      borderRadius: BorderRadius.circular(18),
-                      gradient: LinearGradient(
-                        begin: Alignment.topLeft,
-                        end: Alignment.bottomRight,
-                        colors: [
-                          widget.accent.withValues(alpha: _focused ? .28 : .16),
-                          tvFullViolet.withValues(alpha: _focused ? .20 : .09),
-                        ],
-                      ),
-                      border: Border.all(
-                        color: widget.accent
-                            .withValues(alpha: _focused ? .75 : .28),
-                      ),
-                    ),
-                    child: Icon(
-                      widget.icon,
-                      size: 37,
-                      color: _focused ? widget.accent : Colors.white70,
-                    ),
-                  ),
-                  const Spacer(),
-                  Text(
-                    widget.eyebrow,
-                    style: TextStyle(
-                      color: _focused ? widget.accent : Color(0x73FFFFFF),
-                      fontSize: 11,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: 1.25,
-                    ),
-                  ),
-                  const SizedBox(height: 7),
-                  Text(
-                    widget.title,
-                    style: const TextStyle(
-                      fontSize: 25,
-                      height: 1,
-                      fontWeight: FontWeight.w900,
-                    ),
-                  ),
-                  const SizedBox(height: 11),
-                  Text(
-                    widget.subtitle,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: const TextStyle(
-                      color: Colors.white54,
-                      fontSize: 13,
-                      height: 1.35,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
       ),
     );
   }

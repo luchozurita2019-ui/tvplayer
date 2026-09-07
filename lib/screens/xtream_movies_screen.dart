@@ -24,7 +24,12 @@ import 'player_screen.dart';
 
 class XtreamMoviesScreen extends StatefulWidget {
   final Playlist playlist;
-  const XtreamMoviesScreen({super.key, required this.playlist});
+  final String initialQuery;
+  const XtreamMoviesScreen({
+    super.key,
+    required this.playlist,
+    this.initialQuery = '',
+  });
 
   @override
   State<XtreamMoviesScreen> createState() => _XtreamMoviesScreenState();
@@ -53,6 +58,9 @@ class _XtreamMoviesScreenState extends State<XtreamMoviesScreen> {
   @override
   void initState() {
     super.initState();
+    _query = widget.initialQuery;
+    _searchController.text = _query;
+    _searchOpen = _query.isNotEmpty;
     _parental.addListener(_onParentalChanged);
     unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
