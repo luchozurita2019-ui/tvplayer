@@ -1,0 +1,215 @@
+name: Promote TV FULL PRO V38 to Updater
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/promote-v38-to-updater-request.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - name: Checkout stable source
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+          fetch-depth: 0
+
+      - name: Wait for verified V38 build
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V38_RUN_ID: '34160135784'
+        shell: bash
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 90); do
+            STATUS="$(gh run view "$V38_RUN_ID" --repo "$GITHUB_REPOSITORY" --json status --jq '.status')"
+            CONCLUSION="$(gh run view "$V38_RUN_ID" --repo "$GITHUB_REPOSITORY" --json conclusion --jq '.conclusion // ""')"
+            echo "V38 run: status=$STATUS conclusion=$CONCLUSION"
+            if [ "$STATUS" = "completed" ]; then
+              if [ "$CONCLUSION" = "success" ]; then
+                exit 0
+              fi
+              echo "V38 build finished without success; updater will not be changed."
+              exit 1
+            fi
+            sleep 20
+          done
+          echo "Timed out waiting for V38 build; updater will not be changed."
+          exit 1
+
+      - name: Download verified V38 APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          V38_RUN_ID: '34160135784'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v38
+          gh run download "$V38_RUN_ID" --repo "$GITHUB_REPOSITORY" --name TV-FULL-PRO-V38 --dir /tmp/v38
+          test -f /tmp/v38/TV-FULL-PRO-V38-ARM32.apk
+          test -f /tmp/v38/TV-FULL-PRO-V38-ARM64.apk
+          test -f /tmp/v38/TV-FULL-PRO-V38-ARM32.apk.signature.txt
+          test -f /tmp/v38/TV-FULL-PRO-V38-ARM64.apk.signature.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' /tmp/v38/TV-FULL-PRO-V38-ARM32.apk.signature.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' /tmp/v38/TV-FULL-PRO-V38-ARM64.apk.signature.txt
+
+      - name: Verify V38 source identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin ui/full-pro-redesign-v38
+          git show origin/ui/full-pro-redesign-v38:pubspec.yaml | grep -q '^version: 1.4.6+38$'
+
+      - name: Prepare stable APK metadata
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARM32=/tmp/v38/TV-FULL-PRO-V38-ARM32.apk
+          ARM64=/tmp/v38/TV-FULL-PRO-V38-ARM64.apk
+          ARM32_SHA="$(sha256sum "$ARM32" | awk '{print $1}')"
+          ARM64_SHA="$(sha256sum "$ARM64" | awk '{print $1}')"
+          ARM32_SIZE="$(stat -c '%s' "$ARM32")"
+          ARM64_SIZE="$(stat -c '%s' "$ARM64")"
+          echo "arm32_sha=$ARM32_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm64_sha=$ARM64_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm32_size=$ARM32_SIZE" >> "$GITHUB_OUTPUT"
+          echo "arm64_size=$ARM64_SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish stable APK files
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp /tmp/v38/TV-FULL-PRO-V38-ARM32.apk /tmp/v38/TV-FULL-PRO-ARM32.apk
+          cp /tmp/v38/TV-FULL-PRO-V38-ARM64.apk /tmp/v38/TV-FULL-PRO-ARM64.apk
+
+          BASE='https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest'
+          if gh release upload tv-full-pro-latest \
+               /tmp/v38/TV-FULL-PRO-ARM32.apk \
+               /tmp/v38/TV-FULL-PRO-ARM64.apk \
+               --clobber --repo "$GITHUB_REPOSITORY"; then
+            echo "mode=release" >> "$GITHUB_OUTPUT"
+            echo "base=$BASE" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          echo 'Release upload was blocked; using the public stable APK branch fallback.'
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          WORKTREE="$(mktemp -d)"
+          git worktree add --detach "$WORKTREE" HEAD
+          cd "$WORKTREE"
+          git checkout --orphan tv-full-apk-stable-next
+          git rm -rf . >/dev/null 2>&1 || true
+          cp /tmp/v38/TV-FULL-PRO-ARM32.apk TV-FULL-PRO-ARM32.apk
+          cp /tmp/v38/TV-FULL-PRO-ARM64.apk TV-FULL-PRO-ARM64.apk
+          git add TV-FULL-PRO-ARM32.apk TV-FULL-PRO-ARM64.apk
+          git commit -m 'TV FULL PRO 1.4.6+38 stable APKs'
+          git push --force origin HEAD:tv-full-apk-stable
+          cd - >/dev/null
+          BASE='https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/tv-full-apk-stable'
+          curl -L --fail --silent --show-error --range 0-32 "$BASE/TV-FULL-PRO-ARM32.apk" >/dev/null
+          curl -L --fail --silent --show-error --range 0-32 "$BASE/TV-FULL-PRO-ARM64.apk" >/dev/null
+          echo "mode=raw-branch" >> "$GITHUB_OUTPUT"
+          echo "base=$BASE" >> "$GITHUB_OUTPUT"
+
+      - name: Promote validated V38 source and updater manifest
+        env:
+          PUBLIC_BASE: ${{ steps.publish.outputs.base }}
+          ARM32_SHA: ${{ steps.meta.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.meta.outputs.arm64_sha }}
+          ARM32_SIZE: ${{ steps.meta.outputs.arm32_size }}
+          ARM64_SIZE: ${{ steps.meta.outputs.arm64_size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git checkout android-tv-full-pro-clean-source
+          git reset --hard origin/android-tv-full-pro-clean-source
+          git fetch origin ui/full-pro-redesign-v38
+
+          git checkout origin/ui/full-pro-redesign-v38 -- \
+            lib/screens/android_media3_texture_player_screen.dart \
+            lib/screens/filtered_live_screen.dart \
+            lib/screens/home_screen.dart \
+            lib/screens/source_content_screen.dart \
+            lib/screens/tv_full_dashboard_screen.dart \
+            lib/screens/xtream_live_screen.dart \
+            lib/screens/xtream_movies_screen.dart \
+            lib/screens/xtream_series_screen.dart \
+            lib/services/catalog_file_store.dart \
+            lib/services/manual_playlist_refresh_service.dart \
+            lib/services/section_catalog_service.dart \
+            lib/widgets/tv_full_brand.dart \
+            lib/widgets/tv_full_clean_ui.dart \
+            lib/widgets/tv_live_premium_catalog.dart \
+            lib/widgets/tv_live_theater.dart \
+            pubspec.yaml \
+            test/interface/tv_interface_test.dart
+          git rm -f lib/widgets/tv_cinematic_home.dart 2>/dev/null || true
+          grep -q '^version: 1.4.6+38$' pubspec.yaml
+
+          cat > tv_full_installer/latest.json <<EOF
+          {
+            "versionName": "1.4.6",
+            "versionCode": 38,
+            "packageName": "com.tvfull.pro.tv.v10safe",
+            "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
+            "arm32": {
+              "url": "$PUBLIC_BASE/TV-FULL-PRO-ARM32.apk",
+              "sha256": "$ARM32_SHA",
+              "size": $ARM32_SIZE
+            },
+            "arm64": {
+              "url": "$PUBLIC_BASE/TV-FULL-PRO-ARM64.apk",
+              "sha256": "$ARM64_SHA",
+              "size": $ARM64_SIZE
+            }
+          }
+          EOF
+
+          printf '%s\n' \
+            'TV FULL PRO 1.4.6+38 promoted to stable updater.' \
+            'verified_build_run=34160135784' \
+            "arm32_sha256=$ARM32_SHA" \
+            "arm64_sha256=$ARM64_SHA" \
+            > .github/v38-updater-promoted.txt
+
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib pubspec.yaml test/interface/tv_interface_test.dart tv_full_installer/latest.json .github/v38-updater-promoted.txt
+          git commit -m 'Promote TV FULL PRO 1.4.6+38 to stable updater'
+          git push origin HEAD:android-tv-full-pro-clean-source
+
+      - name: Verify public updater manifest
+        env:
+          ARM32_SHA: ${{ steps.meta.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.meta.outputs.arm64_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/android-tv-full-pro-clean-source/tv_full_installer/latest.json'
+          for attempt in $(seq 1 20); do
+            BODY="$(curl -L --fail --silent --show-error "$URL" || true)"
+            if printf '%s' "$BODY" | grep -q '"versionCode": 38' && \
+               printf '%s' "$BODY" | grep -q "$ARM32_SHA" && \
+               printf '%s' "$BODY" | grep -q "$ARM64_SHA"; then
+              echo 'Updater manifest 1.4.6+38 is public and verified.'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Updater manifest was not observable after promotion.'
+          exit 1
