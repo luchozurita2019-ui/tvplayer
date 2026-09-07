@@ -3,11 +3,8 @@ import 'package:flutter/material.dart';
 import 'tv_full_brand.dart';
 import 'tv_full_premium_ui.dart';
 
-/// Vista TV en vivo estilo teatro.
-///
-/// Es sólo presentación: recibe la misma textura Media3 y la misma lista de
-/// canales que ya usa el reproductor. Cambiar entre esta vista y pantalla
-/// completa no recrea el player ni modifica su estrategia de red.
+/// Presentación de TV en vivo. Reutiliza la textura Media3 y la lista de
+/// canales existentes; no modifica reproducción, buffers ni red.
 class TvLiveTheater extends StatelessWidget {
   final Widget video;
   final Widget channels;
@@ -36,22 +33,21 @@ class TvLiveTheater extends StatelessWidget {
         child: LayoutBuilder(
           builder: (context, constraints) {
             final compact = constraints.maxWidth < 1050;
-            final railWidth = compact ? 150.0 : 194.0;
-            final channelWidth = compact ? 216.0 : 286.0;
             final outer = compact ? 12.0 : 20.0;
+            final menuWidth = compact ? 150.0 : 194.0;
+            final channelsWidth = compact ? 216.0 : 286.0;
 
             return Column(
               children: [
-                _TopBar(compact: compact, outer: outer),
+                _Header(compact: compact, outer: outer),
                 Expanded(
                   child: Padding(
                     padding: EdgeInsets.fromLTRB(outer, 0, outer, outer),
                     child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         SizedBox(
-                          width: railWidth,
-                          child: _LeftRail(
+                          width: menuWidth,
+                          child: _MenuRail(
                             compact: compact,
                             onFullscreen: onFullscreen,
                             onCategories: onCategories,
@@ -61,17 +57,17 @@ class TvLiveTheater extends StatelessWidget {
                         ),
                         SizedBox(width: compact ? 10 : 16),
                         Expanded(
-                          child: _CenterStage(
+                          child: _VideoStage(
                             video: video,
                             channelName: channelName,
-                            onFullscreen: onFullscreen,
                             compact: compact,
+                            onFullscreen: onFullscreen,
                           ),
                         ),
                         SizedBox(width: compact ? 10 : 16),
                         SizedBox(
-                          width: channelWidth,
-                          child: _ChannelRail(channels: channels),
+                          width: channelsWidth,
+                          child: _ChannelsRail(channels: channels),
                         ),
                       ],
                     ),
@@ -86,11 +82,11 @@ class TvLiveTheater extends StatelessWidget {
   }
 }
 
-class _TopBar extends StatelessWidget {
+class _Header extends StatelessWidget {
   final bool compact;
   final double outer;
 
-  const _TopBar({required this.compact, required this.outer});
+  const _Header({required this.compact, required this.outer});
 
   @override
   Widget build(BuildContext context) {
@@ -125,7 +121,7 @@ class _TopBar extends StatelessWidget {
                     color: Colors.white70,
                     fontSize: 10.5,
                     fontWeight: FontWeight.w900,
-                    letterSpacing: 1.25,
+                    letterSpacing: 1.2,
                   ),
                 ),
               ],
@@ -141,14 +137,14 @@ class _TopBar extends StatelessWidget {
   }
 }
 
-class _LeftRail extends StatelessWidget {
+class _MenuRail extends StatelessWidget {
   final bool compact;
   final VoidCallback onFullscreen;
   final VoidCallback onCategories;
   final VoidCallback onHome;
   final VoidCallback? onAudio;
 
-  const _LeftRail({
+  const _MenuRail({
     required this.compact,
     required this.onFullscreen,
     required this.onCategories,
@@ -158,12 +154,7 @@ class _LeftRail extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFF080D15),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: .055)),
-      ),
+    return _Panel(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           compact ? 7 : 9,
@@ -175,7 +166,7 @@ class _LeftRail extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             Padding(
-              padding: EdgeInsets.fromLTRB(compact ? 8 : 10, 0, 8, 12),
+              padding: const EdgeInsets.fromLTRB(9, 0, 8, 12),
               child: Text(
                 compact ? 'MENÚ' : 'NAVEGACIÓN',
                 style: const TextStyle(
@@ -186,39 +177,33 @@ class _LeftRail extends StatelessWidget {
                 ),
               ),
             ),
-            _RailAction(
+            _NavButton(
               icon: Icons.live_tv_rounded,
               label: 'TV EN VIVO',
               selected: true,
-              onTap: onFullscreen,
+              onPressed: onFullscreen,
             ),
-            const SizedBox(height: 6),
-            _RailAction(
+            _NavButton(
               icon: Icons.grid_view_rounded,
               label: 'CATEGORÍAS',
-              onTap: onCategories,
+              onPressed: onCategories,
             ),
-            const SizedBox(height: 6),
-            _RailAction(
+            _NavButton(
               icon: Icons.auto_awesome_rounded,
               label: 'DESTACADOS',
-              onTap: onHome,
+              onPressed: onHome,
             ),
-            if (onAudio != null) ...[
-              const SizedBox(height: 6),
-              _RailAction(
+            if (onAudio != null)
+              _NavButton(
                 icon: Icons.audiotrack_rounded,
                 label: 'AUDIO',
-                onTap: onAudio!,
+                onPressed: onAudio!,
               ),
-            ],
             const Spacer(),
             Padding(
               padding: const EdgeInsets.fromLTRB(9, 8, 9, 4),
               child: Text(
-                compact
-                    ? 'OK seleccionar'
-                    : 'Usá el control remoto para navegar',
+                compact ? 'OK seleccionar' : 'Control remoto · OK seleccionar',
                 maxLines: 2,
                 style: const TextStyle(
                   color: Colors.white24,
@@ -234,17 +219,17 @@ class _LeftRail extends StatelessWidget {
   }
 }
 
-class _CenterStage extends StatelessWidget {
+class _VideoStage extends StatelessWidget {
   final Widget video;
   final String channelName;
-  final VoidCallback onFullscreen;
   final bool compact;
+  final VoidCallback onFullscreen;
 
-  const _CenterStage({
+  const _VideoStage({
     required this.video,
     required this.channelName,
-    required this.onFullscreen,
     required this.compact,
+    required this.onFullscreen,
   });
 
   @override
@@ -273,33 +258,34 @@ class _CenterStage extends StatelessWidget {
           ),
         ),
         SizedBox(height: compact ? 8 : 10),
-        Container(
+        _Panel(
           height: compact ? 48 : 56,
-          padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
-          decoration: BoxDecoration(
-            color: const Color(0xFF080D15),
-            borderRadius: BorderRadius.circular(11),
-            border: Border.all(color: Colors.white.withValues(alpha: .055)),
-          ),
-          child: Row(
-            children: [
-              const TvFullLiveBadge(compact: true),
-              const SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  channelName,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: compact ? 13 : 14.5,
-                    fontWeight: FontWeight.w800,
+          child: Padding(
+            padding: EdgeInsets.symmetric(horizontal: compact ? 12 : 16),
+            child: Row(
+              children: [
+                const TvFullLiveBadge(compact: true),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    channelName,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: compact ? 13 : 14.5,
+                      fontWeight: FontWeight.w800,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 10),
-              _FullscreenButton(onPressed: onFullscreen),
-            ],
+                const SizedBox(width: 10),
+                _FocusIconButton(
+                  tooltip: 'Pantalla completa',
+                  icon: Icons.fullscreen_rounded,
+                  onPressed: onFullscreen,
+                ),
+              ],
+            ),
           ),
         ),
       ],
@@ -307,19 +293,14 @@ class _CenterStage extends StatelessWidget {
   }
 }
 
-class _ChannelRail extends StatelessWidget {
+class _ChannelsRail extends StatelessWidget {
   final Widget channels;
 
-  const _ChannelRail({required this.channels});
+  const _ChannelsRail({required this.channels});
 
   @override
   Widget build(BuildContext context) {
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: const Color(0xFF080D15),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: Colors.white.withValues(alpha: .055)),
-      ),
+    return _Panel(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -336,15 +317,13 @@ class _ChannelRail extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 9),
-                const Expanded(
-                  child: Text(
-                    'CANALES',
-                    style: TextStyle(
-                      color: Colors.white,
-                      fontSize: 13,
-                      fontWeight: FontWeight.w900,
-                      letterSpacing: .65,
-                    ),
+                const Text(
+                  'CANALES',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 13,
+                    fontWeight: FontWeight.w900,
+                    letterSpacing: .65,
                   ),
                 ),
               ],
@@ -358,123 +337,172 @@ class _ChannelRail extends StatelessWidget {
   }
 }
 
-class _FullscreenButton extends StatefulWidget {
-  final VoidCallback onPressed;
+class _Panel extends StatelessWidget {
+  final Widget child;
+  final double? height;
 
-  const _FullscreenButton({required this.onPressed});
+  const _Panel({required this.child, this.height});
 
   @override
-  State<_FullscreenButton> createState() => _FullscreenButtonState();
+  Widget build(BuildContext context) {
+    return Container(
+      height: height,
+      decoration: BoxDecoration(
+        color: const Color(0xFF080D15),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: Colors.white.withValues(alpha: .055)),
+      ),
+      child: child,
+    );
+  }
 }
 
-class _FullscreenButtonState extends State<_FullscreenButton> {
+class _NavButton extends StatefulWidget {
+  final IconData icon;
+  final String label;
+  final VoidCallback onPressed;
+  final bool selected;
+
+  const _NavButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    this.selected = false,
+  });
+
+  @override
+  State<_NavButton> createState() => _NavButtonState();
+}
+
+class _NavButtonState extends State<_NavButton> {
   bool _focused = false;
 
   @override
   Widget build(BuildContext context) {
-    return AnimatedContainer(
-      duration: MediaQuery.disableAnimationsOf(context)
-          ? Duration.zero
-          : const Duration(milliseconds: 95),
-      decoration: BoxDecoration(
-        color: _focused
-            ? tvFullCyan.withValues(alpha: .18)
-            : Colors.white.withValues(alpha: .035),
-        borderRadius: BorderRadius.circular(9),
-        border: Border.all(
-          color: _focused ? tvFullCyan : Colors.white.withValues(alpha: .07),
-          width: _focused ? 1.5 : 1,
+    final active = _focused || widget.selected;
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 6),
+      child: AnimatedContainer(
+        duration: MediaQuery.disableAnimationsOf(context)
+            ? Duration.zero
+            : const Duration(milliseconds: 95),
+        decoration: BoxDecoration(
+          color: _focused
+              ? tvFullBlue.withValues(alpha: .24)
+              : widget.selected
+                  ? tvFullCyan.withValues(alpha: .10)
+                  : Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+          border: Border.all(
+            color: _focused
+                ? tvFullCyan
+                : widget.selected
+                    ? tvFullCyan.withValues(alpha: .26)
+                    : Colors.transparent,
+            width: _focused ? 1.6 : 1,
+          ),
         ),
-      ),
-      child: IconButton(
-        tooltip: 'Pantalla completa',
-        onPressed: widget.onPressed,
-        onFocusChange: (value) => setState(() => _focused = value),
-        icon: Icon(
-          Icons.fullscreen_rounded,
-          color: _focused ? tvFullCyan : Colors.white70,
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(9),
+          clipBehavior: Clip.antiAlias,
+          child: InkWell(
+            onTap: widget.onPressed,
+            onFocusChange: (value) => setState(() => _focused = value),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
+              child: Row(
+                children: [
+                  Icon(
+                    widget.icon,
+                    size: 20,
+                    color: active ? tvFullCyan : Colors.white54,
+                  ),
+                  const SizedBox(width: 9),
+                  Expanded(
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        color: active ? Colors.white : Colors.white60,
+                        fontSize: 11.5,
+                        fontWeight: active ? FontWeight.w900 : FontWeight.w600,
+                        letterSpacing: .25,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         ),
       ),
     );
   }
 }
 
-class _RailAction extends StatefulWidget {
+class _FocusIconButton extends StatefulWidget {
+  final String tooltip;
   final IconData icon;
-  final String label;
-  final VoidCallback onTap;
-  final bool selected;
+  final VoidCallback onPressed;
 
-  const _RailAction({
+  const _FocusIconButton({
+    required this.tooltip,
     required this.icon,
-    required this.label,
-    required this.onTap,
-    this.selected = false,
+    required this.onPressed,
   });
 
   @override
-  State<_RailAction> createState() => _RailActionState();
+  State<_FocusIconButton> createState() => _FocusIconButtonState();
 }
 
-class _RailActionState extends State<_RailAction> {
-  bool _focused = false;
+class _FocusIconButtonState extends State<_FocusIconButton> {
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _focusNode = FocusNode(debugLabel: widget.tooltip)
+      ..addListener(_handleFocusChanged);
+  }
+
+  void _handleFocusChanged() {
+    if (mounted) setState(() {});
+  }
+
+  @override
+  void dispose() {
+    _focusNode
+      ..removeListener(_handleFocusChanged)
+      ..dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final active = _focused || widget.selected;
+    final focused = _focusNode.hasFocus;
     return AnimatedContainer(
       duration: MediaQuery.disableAnimationsOf(context)
           ? Duration.zero
           : const Duration(milliseconds: 95),
       decoration: BoxDecoration(
-        color: _focused
-            ? tvFullBlue.withValues(alpha: .24)
-            : widget.selected
-                ? tvFullCyan.withValues(alpha: .10)
-                : Colors.transparent,
+        color: focused
+            ? tvFullCyan.withValues(alpha: .18)
+            : Colors.white.withValues(alpha: .035),
         borderRadius: BorderRadius.circular(9),
         border: Border.all(
-          color: _focused
-              ? tvFullCyan
-              : widget.selected
-                  ? tvFullCyan.withValues(alpha: .26)
-                  : Colors.transparent,
-          width: _focused ? 1.6 : 1,
+          color: focused ? tvFullCyan : Colors.white.withValues(alpha: .07),
+          width: focused ? 1.5 : 1,
         ),
       ),
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(9),
-        clipBehavior: Clip.antiAlias,
-        child: InkWell(
-          onTap: widget.onTap,
-          onFocusChange: (value) => setState(() => _focused = value),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
-            child: Row(
-              children: [
-                Icon(
-                  widget.icon,
-                  size: 20,
-                  color: active ? tvFullCyan : Colors.white54,
-                ),
-                const SizedBox(width: 9),
-                Expanded(
-                  child: Text(
-                    widget.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      color: active ? Colors.white : Colors.white60,
-                      fontSize: 11.5,
-                      fontWeight: active ? FontWeight.w900 : FontWeight.w600,
-                      letterSpacing: .25,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
+      child: IconButton(
+        focusNode: _focusNode,
+        tooltip: widget.tooltip,
+        onPressed: widget.onPressed,
+        icon: Icon(
+          widget.icon,
+          color: focused ? tvFullCyan : Colors.white70,
         ),
       ),
     );
