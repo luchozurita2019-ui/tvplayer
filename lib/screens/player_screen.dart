@@ -23,6 +23,9 @@ class PlayerScreen extends StatefulWidget {
   final int initialIndex;
   final PlaybackSettings settings;
   final bool isLiveContent;
+  final VoidCallback? onChangeList;
+  final VoidCallback? onRefreshLists;
+  final VoidCallback? onParentalControl;
 
   const PlayerScreen({
     super.key,
@@ -31,6 +34,9 @@ class PlayerScreen extends StatefulWidget {
     required this.initialIndex,
     required this.settings,
     this.isLiveContent = true,
+    this.onChangeList,
+    this.onRefreshLists,
+    this.onParentalControl,
   });
 
   @override
@@ -71,6 +77,9 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return AndroidMedia3TexturePlayerScreen(
           playlist: widget.playlist,
           initialIndex: widget.initialIndex,
+          onChangeList: widget.onChangeList,
+          onRefreshLists: widget.onRefreshLists,
+          onParentalControl: widget.onParentalControl,
         );
       }
       // Android TV usa Media3 también para VOD: evita el cierre nativo observado

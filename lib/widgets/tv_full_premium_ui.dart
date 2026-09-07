@@ -2,11 +2,99 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
-const Color tvFullCyan = Color(0xFF39C5FF);
-const Color tvFullBlue = Color(0xFF245CFF);
-const Color tvFullViolet = Color(0xFF8A48FF);
-const Color tvFullPanel = Color(0xD90A1220);
-const Color tvFullLiveRed = Color(0xFFFF304A);
+const Color tvFullBackground = Color(0xFF07111F);
+const Color tvFullCyan = Color(0xFF42D6FF);
+const Color tvFullBlue = Color(0xFF1677FF);
+const Color tvFullViolet = Color(0xFF755CFF);
+const Color tvFullPanel = Color(0x99101C2D);
+const Color tvFullPanelStrong = Color(0xC7121F31);
+const Color tvFullLiveRed = Color(0xFFFF4059);
+const Color tvFullMuted = Color(0xFF91A5BE);
+
+class TvFullPremiumBackground extends StatelessWidget {
+  final Widget child;
+  final bool compact;
+
+  const TvFullPremiumBackground({
+    super.key,
+    required this.child,
+    this.compact = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: tvFullBackground,
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          const DecoratedBox(
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0xFF0A1627),
+                  Color(0xFF07111F),
+                  Color(0xFF06101D),
+                ],
+              ),
+            ),
+          ),
+          IgnorePointer(
+            child: Align(
+              alignment: const Alignment(.35, -.78),
+              child: Container(
+                width: compact ? 520 : 760,
+                height: compact ? 180 : 230,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(999),
+                  gradient: RadialGradient(
+                    colors: [
+                      tvFullBlue.withValues(alpha: .065),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ),
+          child,
+        ],
+      ),
+    );
+  }
+}
+
+BoxDecoration tvFullGlassDecoration({
+  bool focused = false,
+  double radius = 16,
+  Color accent = tvFullCyan,
+}) {
+  return BoxDecoration(
+    color: focused ? const Color(0xC8192B43) : const Color(0x8F101C2D),
+    borderRadius: BorderRadius.circular(radius),
+    border: Border.all(
+      color: focused
+          ? accent.withValues(alpha: .95)
+          : Colors.white.withValues(alpha: .10),
+      width: focused ? 1.8 : 1,
+    ),
+    boxShadow: [
+      if (focused)
+        BoxShadow(
+          color: accent.withValues(alpha: .24),
+          blurRadius: 22,
+          spreadRadius: 1,
+        ),
+      BoxShadow(
+        color: Colors.black.withValues(alpha: .18),
+        blurRadius: 18,
+        offset: const Offset(0, 8),
+      ),
+    ],
+  );
+}
 
 class TvFullLiveBadge extends StatelessWidget {
   final bool compact;
@@ -22,115 +110,37 @@ class TvFullLiveBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     return Container(
       padding: EdgeInsets.symmetric(
-        horizontal: compact ? 7 : 10,
-        vertical: compact ? 4 : 6,
+        horizontal: compact ? 7 : 9,
+        vertical: compact ? 3 : 4,
       ),
       decoration: BoxDecoration(
-        color: tvFullLiveRed.withValues(alpha: compact ? .10 : .13),
+        color: tvFullLiveRed.withValues(alpha: .13),
         borderRadius: BorderRadius.circular(999),
-        border: Border.all(
-          color: tvFullLiveRed.withValues(alpha: compact ? .66 : .82),
-          width: compact ? .8 : 1,
-        ),
-        boxShadow: compact
-            ? const []
-            : [
-                BoxShadow(
-                  color: tvFullLiveRed.withValues(alpha: .30),
-                  blurRadius: 14,
-                  spreadRadius: .5,
-                ),
-              ],
+        border: Border.all(color: tvFullLiveRed.withValues(alpha: .48)),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
           Container(
-            width: compact ? 5 : 7,
-            height: compact ? 5 : 7,
+            width: compact ? 5 : 6,
+            height: compact ? 5 : 6,
             decoration: const BoxDecoration(
               color: tvFullLiveRed,
               shape: BoxShape.circle,
             ),
           ),
-          SizedBox(width: compact ? 5 : 7),
+          SizedBox(width: compact ? 5 : 6),
           Text(
             label,
             style: TextStyle(
               color: const Color(0xFFFFD9DE),
-              fontSize: compact ? 9 : 11,
+              fontSize: compact ? 8.5 : 10,
               fontWeight: FontWeight.w900,
-              letterSpacing: .45,
+              letterSpacing: .55,
             ),
           ),
         ],
       ),
-    );
-  }
-}
-
-class TvFullPremiumBackground extends StatelessWidget {
-  final Widget child;
-  final bool compact;
-
-  const TvFullPremiumBackground({
-    super.key,
-    required this.child,
-    this.compact = false,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Stack(
-      fit: StackFit.expand,
-      children: [
-        const DecoratedBox(
-          decoration: BoxDecoration(
-            gradient: RadialGradient(
-              center: Alignment(.68, -.72),
-              radius: 1.25,
-              colors: [
-                Color(0xFF101A43),
-                Color(0xFF070C1B),
-                Color(0xFF02050C),
-              ],
-              stops: [0, .52, 1],
-            ),
-          ),
-        ),
-        Positioned(
-          right: compact ? -70 : -100,
-          top: compact ? -70 : -105,
-          child: IgnorePointer(
-            child: Opacity(
-              opacity: .07,
-              child: Icon(
-                Icons.movie_filter_rounded,
-                size: compact ? 260 : 390,
-                color: tvFullViolet,
-              ),
-            ),
-          ),
-        ),
-        Positioned(
-          left: compact ? -45 : -75,
-          bottom: compact ? -65 : -95,
-          child: IgnorePointer(
-            child: Opacity(
-              opacity: .055,
-              child: Icon(
-                Icons.location_city_rounded,
-                size: compact ? 220 : 330,
-                color: tvFullCyan,
-              ),
-            ),
-          ),
-        ),
-        const IgnorePointer(
-          child: CustomPaint(painter: _NeonWavePainter()),
-        ),
-        child,
-      ],
     );
   }
 }
@@ -146,34 +156,10 @@ class _TvFullClockState extends State<TvFullClock> {
   Timer? _timer;
   DateTime _now = DateTime.now();
 
-  static const _days = <String>[
-    'Lunes',
-    'Martes',
-    'Miércoles',
-    'Jueves',
-    'Viernes',
-    'Sábado',
-    'Domingo',
-  ];
-  static const _months = <String>[
-    'Enero',
-    'Febrero',
-    'Marzo',
-    'Abril',
-    'Mayo',
-    'Junio',
-    'Julio',
-    'Agosto',
-    'Septiembre',
-    'Octubre',
-    'Noviembre',
-    'Diciembre',
-  ];
-
   @override
   void initState() {
     super.initState();
-    _timer = Timer.periodic(const Duration(seconds: 30), (_) {
+    _timer = Timer.periodic(const Duration(seconds: 20), (_) {
       if (mounted) setState(() => _now = DateTime.now());
     });
   }
@@ -188,165 +174,41 @@ class _TvFullClockState extends State<TvFullClock> {
   Widget build(BuildContext context) {
     final hour = _now.hour.toString().padLeft(2, '0');
     final minute = _now.minute.toString().padLeft(2, '0');
-    final day = _days[_now.weekday - 1];
-    final month = _months[_now.month - 1];
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        Container(
-          width: 42,
-          height: 42,
-          decoration: BoxDecoration(
-            shape: BoxShape.circle,
-            color: Colors.white.withValues(alpha: .035),
-            border: Border.all(color: Colors.white.withValues(alpha: .14)),
-          ),
-          child: const Icon(Icons.schedule_rounded, size: 21),
-        ),
-        const SizedBox(width: 12),
-        Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              '$hour:$minute',
-              style: const TextStyle(
-                fontSize: 20,
-                height: 1,
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const SizedBox(height: 5),
-            Text(
-              '$day, ${_now.day} de $month',
-              style: const TextStyle(
-                color: Colors.white54,
-                fontSize: 11.5,
-              ),
-            ),
-          ],
-        ),
-      ],
+    return Text(
+      '$hour:$minute',
+      style: const TextStyle(
+        color: Colors.white,
+        fontSize: 16,
+        fontWeight: FontWeight.w800,
+        letterSpacing: .4,
+      ),
     );
   }
 }
 
-BoxDecoration tvFullGlassDecoration({
-  bool focused = false,
-  double radius = 16,
-  Color accent = tvFullCyan,
-}) {
-  return BoxDecoration(
-    borderRadius: BorderRadius.circular(radius),
-    gradient: LinearGradient(
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-      colors: focused
-          ? [
-              accent.withValues(alpha: .16),
-              tvFullViolet.withValues(alpha: .10),
-              const Color(0xEE09111E),
-            ]
-          : const [
-              Color(0xE6111927),
-              Color(0xE9080E19),
-            ],
-    ),
-    border: Border.all(
-      color: focused ? accent : Colors.white.withValues(alpha: .105),
-      width: focused ? 2.1 : 1,
-    ),
-    boxShadow: focused
-        ? [
-            BoxShadow(
-              color: accent.withValues(alpha: .28),
-              blurRadius: 20,
-              spreadRadius: 1,
-            ),
-            BoxShadow(
-              color: tvFullViolet.withValues(alpha: .14),
-              blurRadius: 34,
-              spreadRadius: 2,
-            ),
-          ]
-        : const [],
-  );
-}
+class TvFullGlassPanel extends StatelessWidget {
+  final Widget child;
+  final EdgeInsetsGeometry? padding;
+  final double radius;
+  final bool focused;
 
-class _NeonWavePainter extends CustomPainter {
-  const _NeonWavePainter();
+  const TvFullGlassPanel({
+    super.key,
+    required this.child,
+    this.padding,
+    this.radius = 16,
+    this.focused = false,
+  });
 
   @override
-  void paint(Canvas canvas, Size size) {
-    if (size.width <= 0 || size.height <= 0) return;
-    final y = size.height * .82;
-    final bluePath = Path()
-      ..moveTo(-30, y)
-      ..cubicTo(
-        size.width * .20,
-        y - size.height * .06,
-        size.width * .45,
-        y + size.height * .08,
-        size.width * .67,
-        y - size.height * .015,
-      )
-      ..cubicTo(
-        size.width * .82,
-        y - size.height * .07,
-        size.width * .91,
-        y + size.height * .04,
-        size.width + 40,
-        y - size.height * .13,
-      );
-    final purplePath = Path()
-      ..moveTo(-20, y + size.height * .045)
-      ..cubicTo(
-        size.width * .24,
-        y - size.height * .01,
-        size.width * .45,
-        y + size.height * .10,
-        size.width * .68,
-        y + size.height * .025,
-      )
-      ..cubicTo(
-        size.width * .83,
-        y - size.height * .025,
-        size.width * .91,
-        y + size.height * .07,
-        size.width + 30,
-        y - size.height * .055,
-      );
-
-    canvas.drawPath(
-      bluePath,
-      Paint()
-        ..color = tvFullBlue.withValues(alpha: .34)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
-    canvas.drawPath(
-      purplePath,
-      Paint()
-        ..color = tvFullViolet.withValues(alpha: .36)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2,
-    );
-    canvas.drawPath(
-      bluePath,
-      Paint()
-        ..color = tvFullCyan.withValues(alpha: .10)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 10,
-    );
-    canvas.drawPath(
-      purplePath,
-      Paint()
-        ..color = tvFullViolet.withValues(alpha: .08)
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 12,
+  Widget build(BuildContext context) {
+    return Container(
+      padding: padding,
+      decoration: tvFullGlassDecoration(
+        focused: focused,
+        radius: radius,
+      ),
+      child: child,
     );
   }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }

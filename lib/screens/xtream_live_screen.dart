@@ -13,6 +13,7 @@ import '../services/catalog_index.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/live_epg_service.dart';
+import '../services/live_channel_usage_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/remote_access_guard.dart';
 import '../services/section_catalog_service.dart';
@@ -20,13 +21,35 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_live_fast_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/channel_logo_image.dart';
-import '../widgets/tv_full_clean_ui.dart';
+import '../widgets/tv_catalog_category_row.dart';
+import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_full_section_shell.dart';
 import '../widgets/tv_live_premium_catalog.dart';
 import 'player_screen.dart';
 
 class XtreamLiveScreen extends StatefulWidget {
   final Playlist playlist;
-  const XtreamLiveScreen({super.key, required this.playlist});
+  final String title;
+  final List<String> filterKeywords;
+  final bool autoOpenFirstChannel;
+  final bool sportsPresentation;
+  final VoidCallback? onChangeList;
+  final VoidCallback? onRefreshLists;
+  final VoidCallback? onParentalControl;
+  final ValueChanged<String>? onSectionRequested;
+
+  const XtreamLiveScreen({
+    super.key,
+    required this.playlist,
+    this.title = 'TV EN VIVO',
+    this.filterKeywords = const <String>[],
+    this.autoOpenFirstChannel = false,
+    this.sportsPresentation = false,
+    this.onChangeList,
+    this.onRefreshLists,
+    this.onParentalControl,
+    this.onSectionRequested,
+  });
 
   @override
   State<XtreamLiveScreen> createState() => _XtreamLiveScreenState();
@@ -46,17 +69,15 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   String _query = '';
   bool _searchOpen = false;
   bool _openingPlayer = false;
+  bool _initialPlayerOpened = false;
   Timer? _searchDebounce;
   CatalogIndex<Channel>? _catalogIndex;
   _LiveData? _indexedData;
   _LiveData? _visibleData;
-  late final LiveProgramGuideLoader _programGuideLoader;
 
   @override
   void initState() {
     super.initState();
-    _programGuideLoader = (channel) => LiveEpgService.instance
-        .loadXtreamNowNext(widget.playlist.source, channel);
     _parental.addListener(_onParentalChanged);
     unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
@@ -136,7 +157,14 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       categoryOrder: data.categories,
       nameOf: (item) => item.name,
       categoryOf: (item) => item.group,
-      include: (item) => _parental.canShowChannel(item),
+      include: (item) {
+        if (!_parental.canShowChannel(item)) return false;
+        if (widget.filterKeywords.isEmpty) return true;
+        final haystack = '${item.name} ${item.group ?? ''}'.toLowerCase();
+        return widget.filterKeywords.any(
+          (keyword) => haystack.contains(keyword.toLowerCase()),
+        );
+      },
     );
     unawaited(ChannelLogoResolverService.instance.primeChannels(data.channels));
     _indexedData = data;
@@ -277,6 +305,10 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       return _BlockedCatalog(message: blocked);
     }
 
+    if (widget.sportsPresentation) {
+      return _buildSportsScreen(provider);
+    }
+
     return PopScope<void>(
       canPop: !_searchOpen,
       onPopInvokedWithResult: (didPop, result) {
@@ -290,7 +322,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       child: Scaffold(
         backgroundColor: Colors.transparent,
         appBar: AppBar(
-          backgroundColor: tvCleanSurface,
+          backgroundColor: const Color(0xA3050910),
           surfaceTintColor: Colors.transparent,
           titleSpacing: 24,
           title: _searchOpen
@@ -309,9 +341,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               : Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    const Text(
-                      'TV EN VIVO',
-                      style: TextStyle(fontWeight: FontWeight.w900),
+                    Text(
+                      widget.title,
+                      style: const TextStyle(fontWeight: FontWeight.w900),
                     ),
                     Text(
                       widget.playlist.name,
@@ -333,7 +365,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
             const SizedBox(width: 10),
           ],
         ),
-        body: TvCleanBackground(
+        body: TvFullPremiumBackground(
           compact: true,
           child: FutureBuilder<_LiveData>(
             future: _future,
@@ -359,9 +391,180 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                   onRetry: () => setState(() => _future = _loadInitial()),
                 );
               }
+              if (widget.autoOpenFirstChannel && !_initialPlayerOpened) {
+                final firstVisible = _catalogIndexFor(data).forCategory(null);
+                if (firstVisible.isNotEmpty) {
+                  _initialPlayerOpened = true;
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (mounted) unawaited(_openPlayer(firstVisible, 0));
+                  });
+                }
+              }
               return _buildCatalog(data);
             },
           ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSportsScreen(IptvProvider provider) {
+    return Scaffold(
+      backgroundColor: tvFullBackground,
+      body: TvFullSectionShell(
+        activeSection: TvFullSection.sports,
+        onChangeList: widget.onChangeList,
+        onRefreshLists: widget.onRefreshLists,
+        onParentalControl: widget.onParentalControl,
+        onSectionSelected: (section) =>
+            widget.onSectionRequested?.call(section.name),
+        child: FutureBuilder<_LiveData>(
+          future: _future,
+          builder: (context, snapshot) {
+            final data = _visibleData ?? snapshot.data;
+            if (data == null &&
+                snapshot.connectionState != ConnectionState.done) {
+              return _Loading(message: _status);
+            }
+            if (data == null && snapshot.hasError) {
+              return _ErrorView(
+                message: 'No se pudo cargar Deportes.',
+                onRetry: () => setState(() {
+                  _visibleData = null;
+                  _future = _loadInitial();
+                }),
+              );
+            }
+            if (data == null || data.channels.isEmpty) {
+              return _ErrorView(
+                message: 'Esta lista no contiene canales deportivos.',
+                onRetry: () => setState(() => _future = _loadInitial()),
+              );
+            }
+            return _buildSportsCatalog(data, provider);
+          },
+        ),
+      ),
+    );
+  }
+
+  Widget _buildSportsCatalog(_LiveData data, IptvProvider provider) {
+    final visible = _catalogIndexFor(data).forCategory(null);
+    if (visible.isEmpty) {
+      return const Center(
+        child: Text(
+          'No se encontraron canales deportivos.',
+          style: TextStyle(color: Colors.white54),
+        ),
+      );
+    }
+    final featured = LiveChannelUsageService.instance.featuredChannels(
+      visible,
+      isFavorite: provider.isFavorite,
+      limit: 5,
+    );
+    final hero = featured.isEmpty ? visible.first : featured.first;
+    final secondary = featured.skip(1).take(4).toList(growable: false);
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0x3D101C2D),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: .07)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text(
+              'DEPORTES',
+              style: TextStyle(
+                color: tvFullCyan,
+                fontSize: 10,
+                fontWeight: FontWeight.w900,
+                letterSpacing: 1.8,
+              ),
+            ),
+            const SizedBox(height: 6),
+            const Text(
+              'Eventos y canales destacados',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 22,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            const SizedBox(height: 14),
+            SizedBox(
+              height: 180,
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    flex: 7,
+                    child: _SportsHeroCard(
+                      channel: hero,
+                      onTap: () => unawaited(
+                        _openPlayer(visible, visible.indexOf(hero)),
+                      ),
+                    ),
+                  ),
+                  if (secondary.isNotEmpty) ...[
+                    const SizedBox(width: 10),
+                    Expanded(
+                      flex: 5,
+                      child: GridView.builder(
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate:
+                            const SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: 2,
+                          crossAxisSpacing: 8,
+                          mainAxisSpacing: 8,
+                          childAspectRatio: 2.2,
+                        ),
+                        itemCount: secondary.length,
+                        itemBuilder: (context, index) {
+                          final channel = secondary[index];
+                          return _SportsSmallCard(
+                            channel: channel,
+                            onTap: () => unawaited(
+                              _openPlayer(visible, visible.indexOf(channel)),
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+            const SizedBox(height: 16),
+            Text(
+              'Todos los deportes · ${visible.length}',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Expanded(
+              child: ListView.builder(
+                controller: _catalogScrollController,
+                padding: EdgeInsets.zero,
+                scrollCacheExtent: DevicePerformanceService.instance.lowRam
+                    ? const ScrollCacheExtent.pixels(36)
+                    : const ScrollCacheExtent.pixels(80),
+                itemCount: visible.length,
+                itemBuilder: (context, index) => _ChannelRow(
+                  channel: visible[index],
+                  autofocus: false,
+                  onTap: () => unawaited(_openPlayer(visible, index)),
+                ),
+              ),
+            ),
+          ],
         ),
       ),
     );
@@ -394,7 +597,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         },
         isFavorite: provider.isFavorite,
         onFavoriteToggle: provider.toggleFavorite,
-        programGuideLoader: _programGuideLoader,
+        programGuideLoader: (channel) => LiveEpgService.instance
+            .loadXtreamNowNext(widget.playlist.source, channel),
       );
     }
 
@@ -410,7 +614,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                 colors: [Color(0xD9101928), Color(0xCC07101D)],
               ),
               border: Border(
-                right: BorderSide(color: tvCleanBlue, width: .35),
+                right: BorderSide(color: tvFullBlue, width: .35),
               ),
             ),
             child: ListView.builder(
@@ -419,7 +623,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
               itemBuilder: (context, index) {
                 final category = index == 0 ? null : categories[index - 1];
                 final selected = category == _category;
-                return TvCleanCategoryRow(
+                return TvCatalogCategoryRow(
                   label: category ?? 'Todos',
                   selected: selected,
                   primary: index == 0,
@@ -497,7 +701,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     _openingPlayer = true;
     try {
       final provider = context.read<IptvProvider>();
-      await Navigator.of(context).push(
+      final section = await Navigator.of(context).push<String>(
         MaterialPageRoute(
           builder: (_) => PlayerScreen(
             channel: channels[index],
@@ -505,13 +709,190 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
             initialIndex: index,
             settings: provider.playbackSettings,
             isLiveContent: true,
+            onChangeList: widget.onChangeList,
+            onRefreshLists: widget.onRefreshLists,
+            onParentalControl: widget.onParentalControl,
           ),
         ),
       );
+      if (section != null && mounted) {
+        widget.onSectionRequested?.call(section);
+      }
     } finally {
       _openingPlayer = false;
       if (mounted) setState(() {});
     }
+  }
+}
+
+class _SportsHeroCard extends StatefulWidget {
+  final Channel channel;
+  final VoidCallback onTap;
+
+  const _SportsHeroCard({required this.channel, required this.onTap});
+
+  @override
+  State<_SportsHeroCard> createState() => _SportsHeroCardState();
+}
+
+class _SportsHeroCardState extends State<_SportsHeroCard> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 100),
+      decoration: tvFullGlassDecoration(
+        focused: _focused,
+        radius: 16,
+        accent: tvFullCyan,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(16),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          autofocus: true,
+          onFocusChange: (value) => setState(() => _focused = value),
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.all(18),
+            child: Row(
+              children: [
+                Container(
+                  width: 92,
+                  height: 92,
+                  padding: const EdgeInsets.all(9),
+                  decoration: BoxDecoration(
+                    color: Colors.white.withValues(alpha: .035),
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: ChannelLogoImage(
+                    channel: widget.channel,
+                    fit: BoxFit.contain,
+                    cacheWidth: 184,
+                    cacheHeight: 184,
+                    priority: 220,
+                    prefetchExtent: 0,
+                    fallback: const Icon(
+                      Icons.sports_soccer_rounded,
+                      size: 42,
+                      color: tvFullCyan,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 18),
+                Expanded(
+                  child: Column(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      const TvFullLiveBadge(compact: true),
+                      const SizedBox(height: 9),
+                      Text(
+                        widget.channel.name,
+                        maxLines: 2,
+                        overflow: TextOverflow.ellipsis,
+                        style: const TextStyle(
+                          color: Colors.white,
+                          fontSize: 21,
+                          height: 1.08,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
+                      if ((widget.channel.group ?? '').trim().isNotEmpty) ...[
+                        const SizedBox(height: 6),
+                        Text(
+                          widget.channel.group!,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white54,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SportsSmallCard extends StatefulWidget {
+  final Channel channel;
+  final VoidCallback onTap;
+
+  const _SportsSmallCard({required this.channel, required this.onTap});
+
+  @override
+  State<_SportsSmallCard> createState() => _SportsSmallCardState();
+}
+
+class _SportsSmallCardState extends State<_SportsSmallCard> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return AnimatedContainer(
+      duration: const Duration(milliseconds: 90),
+      decoration: tvFullGlassDecoration(
+        focused: _focused,
+        radius: 12,
+        accent: tvFullCyan,
+      ),
+      child: Material(
+        color: Colors.transparent,
+        borderRadius: BorderRadius.circular(12),
+        clipBehavior: Clip.antiAlias,
+        child: InkWell(
+          onFocusChange: (value) => setState(() => _focused = value),
+          onTap: widget.onTap,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 7),
+            child: Row(
+              children: [
+                SizedBox(
+                  width: 32,
+                  height: 32,
+                  child: ChannelLogoImage(
+                    channel: widget.channel,
+                    fit: BoxFit.contain,
+                    cacheWidth: 64,
+                    cacheHeight: 64,
+                    prefetchExtent: 0,
+                    fallback: const Icon(
+                      Icons.sports_rounded,
+                      size: 18,
+                      color: Colors.white54,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.channel.name,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 10.5,
+                      height: 1.1,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -543,10 +924,10 @@ class _ChannelRowState extends State<_ChannelRow> {
         curve: Curves.easeOutCubic,
         child: AnimatedContainer(
           duration: Duration(milliseconds: lowRam ? 70 : 120),
-          decoration: tvCleanCardDecoration(
+          decoration: tvFullGlassDecoration(
             focused: _focused,
             radius: 12,
-            accent: tvCleanCyan,
+            accent: tvFullCyan,
           ),
           child: Material(
             color: Colors.transparent,
@@ -610,7 +991,7 @@ class _ChannelRowState extends State<_ChannelRow> {
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
                             color: _focused
-                                ? tvCleanCyan.withValues(alpha: .75)
+                                ? tvFullCyan.withValues(alpha: .75)
                                 : Colors.white38,
                             fontSize: 11,
                           ),
@@ -703,18 +1084,18 @@ class _BlockedCatalog extends StatelessWidget {
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: Colors.transparent,
-      body: TvCleanBackground(
+      body: TvFullPremiumBackground(
         compact: true,
         child: Center(
           child: Container(
             constraints: const BoxConstraints(maxWidth: 540),
             padding: const EdgeInsets.all(32),
-            decoration: tvCleanCardDecoration(radius: 20),
+            decoration: tvFullGlassDecoration(radius: 20),
             child: Column(
               mainAxisSize: MainAxisSize.min,
               children: [
                 const Icon(Icons.lock_outline_rounded,
-                    size: 46, color: tvCleanCyan),
+                    size: 46, color: tvFullCyan),
                 const SizedBox(height: 14),
                 Text(message, textAlign: TextAlign.center),
                 const SizedBox(height: 16),

@@ -18,16 +18,27 @@ import '../services/xtream_fast_catalog_service.dart';
 import '../services/xtream_series_service.dart';
 import '../services/xtream_service.dart';
 import '../widgets/cached_artwork_image.dart';
-import '../widgets/tv_full_clean_ui.dart';
+import '../widgets/tv_catalog_category_row.dart';
+import '../widgets/tv_full_premium_ui.dart';
+import '../widgets/tv_full_section_shell.dart';
 import 'player_screen.dart';
 
 class XtreamSeriesScreen extends StatefulWidget {
   final Playlist playlist;
   final String initialQuery;
+  final ValueChanged<String>? onSectionRequested;
+  final VoidCallback? onChangeList;
+  final VoidCallback? onRefreshLists;
+  final VoidCallback? onParentalControl;
+
   const XtreamSeriesScreen({
     super.key,
     required this.playlist,
     this.initialQuery = '',
+    this.onSectionRequested,
+    this.onChangeList,
+    this.onRefreshLists,
+    this.onParentalControl,
   });
 
   @override
@@ -98,16 +109,6 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   }
 
   void _resetCatalogScroll() => _resetScroll(_catalogScrollController);
-  void _resetSearchScroll() => _resetScroll(_searchScrollController);
-
-  void _openSearch() {
-    if (_searchOpen) return;
-    setState(() => _searchOpen = true);
-    _resetSearchScroll();
-    WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) _searchFocus.requestFocus();
-    });
-  }
 
   void _closeSearch() {
     if (!_searchOpen) return;
@@ -119,16 +120,6 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
       _searchOpen = false;
     });
     _resetCatalogScroll();
-  }
-
-  void _scheduleSearch(String value) {
-    _searchDebounce?.cancel();
-    _searchDebounce = Timer(const Duration(milliseconds: 120), () {
-      if (mounted && value != _query) {
-        setState(() => _query = value);
-        _resetSearchScroll();
-      }
-    });
   }
 
   CatalogIndex<_SeriesItem> _catalogIndexFor(_SeriesData data) {
@@ -268,57 +259,19 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
         if (didPop || !_searchOpen) return;
         if (_searchFocus.hasFocus) {
           _searchFocus.unfocus();
-          return;
+        } else {
+          _closeSearch();
         }
-        _closeSearch();
       },
       child: Scaffold(
-        backgroundColor: Colors.transparent,
-        appBar: AppBar(
-          backgroundColor: tvCleanSurface,
-          surfaceTintColor: Colors.transparent,
-          title: _searchOpen
-              ? TextField(
-                  controller: _searchController,
-                  focusNode: _searchFocus,
-                  autofocus: true,
-                  textInputAction: TextInputAction.search,
-                  decoration: const InputDecoration(
-                    hintText: 'Buscar en todas las series…',
-                    border: InputBorder.none,
-                    prefixIcon: Icon(Icons.search_rounded),
-                  ),
-                  onChanged: _scheduleSearch,
-                )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'SERIES',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    Text(
-                      widget.playlist.name,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
-          actions: [
-            IconButton(
-              tooltip: _searchOpen ? 'Cerrar búsqueda' : 'Buscar series',
-              onPressed: _searchOpen ? _closeSearch : _openSearch,
-              icon: Icon(
-                _searchOpen ? Icons.close_rounded : Icons.search_rounded,
-              ),
-            ),
-            const SizedBox(width: 10),
-          ],
-        ),
-        body: TvCleanBackground(
-          compact: true,
+        backgroundColor: tvFullBackground,
+        body: TvFullSectionShell(
+          activeSection: TvFullSection.series,
+          onChangeList: widget.onChangeList,
+          onRefreshLists: widget.onRefreshLists,
+          onParentalControl: widget.onParentalControl,
+          onSectionSelected: (section) =>
+              widget.onSectionRequested?.call(section.name),
           child: FutureBuilder<_SeriesData>(
             future: _future,
             builder: (context, snapshot) {
@@ -358,32 +311,120 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
     final categories = index.categories;
     final visible =
         _searchOpen ? index.search(_query) : index.forCategory(_category);
-    return Row(
-      children: [
-        SizedBox(
-          width: 250,
-          child: DecoratedBox(
-            decoration: BoxDecoration(
-              gradient: const LinearGradient(
-                begin: Alignment.topCenter,
-                end: Alignment.bottomCenter,
-                colors: [Color(0xD9101928), Color(0xCC07101D)],
-              ),
-              border: Border(
-                right: BorderSide(color: tvCleanBlue, width: .35),
+    final hero = visible.isEmpty ? null : visible.first;
+
+    return Container(
+      decoration: BoxDecoration(
+        color: const Color(0x3D101C2D),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white.withValues(alpha: .07)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          if (hero != null)
+            SizedBox(
+              height: 190,
+              child: ClipRRect(
+                borderRadius:
+                    const BorderRadius.vertical(top: Radius.circular(18)),
+                child: Stack(
+                  fit: StackFit.expand,
+                  children: [
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: SizedBox(
+                        width: 330,
+                        child: CachedArtworkImage(
+                          url: hero.cover,
+                          fit: BoxFit.cover,
+                          cacheWidth: 660,
+                          cacheHeight: 380,
+                          priority: 250,
+                          prefetchExtent: 0,
+                          fallback: const ColoredBox(color: Color(0xFF101C2D)),
+                        ),
+                      ),
+                    ),
+                    const DecoratedBox(
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          begin: Alignment.centerLeft,
+                          end: Alignment.centerRight,
+                          colors: [
+                            Color(0xFF0D192A),
+                            Color(0xF00D192A),
+                            Color(0x66101C2D),
+                          ],
+                          stops: [0, .48, 1],
+                        ),
+                      ),
+                    ),
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(24, 22, 350, 20),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Text(
+                            'SERIES',
+                            style: TextStyle(
+                              color: tvFullCyan,
+                              fontSize: 10,
+                              fontWeight: FontWeight.w900,
+                              letterSpacing: 1.8,
+                            ),
+                          ),
+                          const SizedBox(height: 8),
+                          Text(
+                            hero.name,
+                            maxLines: 2,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 28,
+                              height: 1.02,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                          if ((hero.category ?? '').trim().isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(hero.category!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                    color: Colors.white60, fontSize: 12)),
+                          ],
+                          const SizedBox(height: 15),
+                          SizedBox(
+                            height: 38,
+                            child: FilledButton.icon(
+                              autofocus: true,
+                              onPressed: () =>
+                                  unawaited(_openSeries(data, hero)),
+                              icon: const Icon(Icons.play_arrow_rounded,
+                                  size: 19),
+                              label: const Text('Ver serie'),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
               ),
             ),
+          SizedBox(
+            height: 52,
             child: ListView.builder(
-              padding: const EdgeInsets.fromLTRB(12, 16, 12, 20),
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(18, 9, 18, 7),
               itemCount: categories.length + 1,
-              itemBuilder: (context, index) {
-                final value = index == 0 ? null : categories[index - 1];
-                final selected = value == _category;
-                return TvCleanCategoryRow(
+              itemBuilder: (context, chipIndex) {
+                final value = chipIndex == 0 ? null : categories[chipIndex - 1];
+                return _SeriesCategoryChip(
                   label: value ?? 'Todas',
-                  selected: selected,
-                  primary: index == 0,
-                  autofocus: !_searchOpen && index == 0,
+                  selected: value == _category,
                   onTap: () {
                     if (_searchOpen) _closeSearch();
                     setState(() => _category = value);
@@ -393,75 +434,60 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
               },
             ),
           ),
-        ),
-        Container(width: 1, color: Colors.white10),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(22, 16, 22, 10),
-                child: Text(
-                  _searchOpen
-                      ? 'Búsqueda global  ·  ${visible.length} series'
-                      : '${_category ?? 'Todas'}  ·  ${visible.length}',
-                  style: const TextStyle(
-                    color: Colors.white54,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 3, 20, 9),
+            child: Text(
+              _searchOpen
+                  ? 'Resultados · ${visible.length}'
+                  : 'Series destacadas · ${visible.length}',
+              style: const TextStyle(
+                color: Colors.white70,
+                fontSize: 13,
+                fontWeight: FontWeight.w800,
               ),
-              Expanded(
-                child: visible.isEmpty
-                    ? const Center(
-                        child: Text(
-                          'No se encontraron series.',
-                          style: TextStyle(color: Colors.white54),
-                        ),
-                      )
-                    : LayoutBuilder(
-                        builder: (context, constraints) {
-                          final columns = constraints.maxWidth >= 850
-                              ? 5
-                              : constraints.maxWidth >= 620
-                                  ? 4
-                                  : 3;
-                          return GridView.builder(
-                            key: ValueKey<String>(
-                              _searchOpen
-                                  ? 'series-search:$_query'
-                                  : 'series-category:${_category ?? 'all'}',
-                            ),
-                            controller: _searchOpen
-                                ? _searchScrollController
-                                : _catalogScrollController,
-                            padding: const EdgeInsets.fromLTRB(20, 4, 24, 30),
-                            scrollCacheExtent:
-                                DevicePerformanceService.instance.lowRam
-                                    ? const ScrollCacheExtent.pixels(48)
-                                    : const ScrollCacheExtent.pixels(120),
-                            gridDelegate:
-                                SliverGridDelegateWithFixedCrossAxisCount(
-                              crossAxisCount: columns,
-                              crossAxisSpacing: 18,
-                              mainAxisSpacing: 20,
-                              childAspectRatio: 0.62,
-                            ),
-                            itemCount: visible.length,
-                            itemBuilder: (context, index) => _SeriesCard(
-                              item: visible[index],
-                              autofocus: !_searchOpen && index == 0,
-                              onTap: () =>
-                                  unawaited(_openSeries(data, visible[index])),
-                            ),
-                          );
-                        },
-                      ),
-              ),
-            ],
+            ),
           ),
-        ),
-      ],
+          Expanded(
+            child: visible.isEmpty
+                ? const Center(
+                    child: Text('No se encontraron series.',
+                        style: TextStyle(color: Colors.white54)),
+                  )
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      final columns = constraints.maxWidth >= 980 ? 6 : 5;
+                      return GridView.builder(
+                        key: ValueKey<String>(
+                          _searchOpen
+                              ? 'series-search:$_query'
+                              : 'series-category:${_category ?? 'all'}',
+                        ),
+                        controller: _searchOpen
+                            ? _searchScrollController
+                            : _catalogScrollController,
+                        padding: const EdgeInsets.fromLTRB(18, 0, 18, 20),
+                        scrollCacheExtent:
+                            DevicePerformanceService.instance.lowRam
+                                ? const ScrollCacheExtent.pixels(40)
+                                : const ScrollCacheExtent.pixels(100),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: columns,
+                          crossAxisSpacing: 13,
+                          mainAxisSpacing: 14,
+                          childAspectRatio: .64,
+                        ),
+                        itemCount: visible.length,
+                        itemBuilder: (context, itemIndex) => _SeriesCard(
+                          item: visible[itemIndex],
+                          onTap: () =>
+                              unawaited(_openSeries(data, visible[itemIndex])),
+                        ),
+                      );
+                    },
+                  ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -556,6 +582,69 @@ class _XtreamSeriesScreenState extends State<XtreamSeriesScreen> {
   }
 }
 
+class _SeriesCategoryChip extends StatefulWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  const _SeriesCategoryChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+
+  @override
+  State<_SeriesCategoryChip> createState() => _SeriesCategoryChipState();
+}
+
+class _SeriesCategoryChipState extends State<_SeriesCategoryChip> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final active = _focused || widget.selected;
+    return Padding(
+      padding: const EdgeInsets.only(right: 8),
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 90),
+        decoration: BoxDecoration(
+          color: active
+              ? tvFullBlue.withValues(alpha: _focused ? .24 : .13)
+              : Colors.white.withValues(alpha: .025),
+          borderRadius: BorderRadius.circular(999),
+          border: Border.all(
+            color: _focused
+                ? tvFullCyan
+                : widget.selected
+                    ? tvFullCyan.withValues(alpha: .30)
+                    : Colors.white.withValues(alpha: .08),
+          ),
+        ),
+        child: Material(
+          color: Colors.transparent,
+          borderRadius: BorderRadius.circular(999),
+          child: InkWell(
+            onFocusChange: (value) => setState(() => _focused = value),
+            onTap: widget.onTap,
+            borderRadius: BorderRadius.circular(999),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 7),
+              child: Text(
+                widget.label,
+                style: TextStyle(
+                  color: active ? Colors.white : Colors.white54,
+                  fontSize: 10.5,
+                  fontWeight: active ? FontWeight.w800 : FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _SeriesDetailScreen extends StatefulWidget {
   final _SeriesDetailModel model;
   const _SeriesDetailScreen({required this.model});
@@ -577,92 +666,129 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
   Widget build(BuildContext context) {
     final episodes = widget.model.seasons[_season] ?? const <_EpisodeItem>[];
     return Scaffold(
-      backgroundColor: Colors.transparent,
-      appBar: AppBar(
-        backgroundColor: tvCleanSurface,
-        surfaceTintColor: Colors.transparent,
-        title: const Text('Serie'),
-      ),
-      body: TvCleanBackground(
+      backgroundColor: tvFullBackground,
+      body: TvFullPremiumBackground(
         compact: true,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(32, 20, 32, 28),
+        child: SafeArea(
+          minimum: const EdgeInsets.fromLTRB(24, 18, 24, 22),
           child: Column(
             children: [
-              SizedBox(
-                height: 145,
+              Row(
+                children: [
+                  const Text(
+                    'SERIE',
+                    style: TextStyle(
+                      color: tvFullCyan,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.8,
+                    ),
+                  ),
+                  const Spacer(),
+                  const TvFullClock(),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                height: 170,
+                decoration: BoxDecoration(
+                  color: const Color(0x5C101C2D),
+                  borderRadius: BorderRadius.circular(18),
+                  border:
+                      Border.all(color: Colors.white.withValues(alpha: .08)),
+                ),
                 child: Row(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     SizedBox(
-                      width: 96,
-                      height: 140,
+                      width: 116,
                       child: ClipRRect(
-                        borderRadius: BorderRadius.circular(10),
+                        borderRadius: const BorderRadius.horizontal(
+                          left: Radius.circular(18),
+                        ),
                         child: CachedArtworkImage(
                           url: widget.model.cover,
                           fit: BoxFit.cover,
-                          cacheWidth: 192,
-                          cacheHeight: 280,
+                          cacheWidth: 232,
+                          cacheHeight: 340,
+                          priority: 240,
                           prefetchExtent: 0,
                           fallback: const ColoredBox(
                             color: Color(0xFF101B25),
                             child: Icon(
                               Icons.video_library_outlined,
-                              size: 34,
+                              size: 38,
                               color: Colors.white30,
                             ),
                           ),
                         ),
                       ),
                     ),
-                    const SizedBox(width: 22),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            widget.model.title,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 28,
-                              fontWeight: FontWeight.w900,
-                            ),
-                          ),
-                          if ((widget.model.meta ?? '').isNotEmpty) ...[
-                            const SizedBox(height: 7),
+                      child: Padding(
+                        padding: const EdgeInsets.fromLTRB(24, 20, 26, 18),
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
                             Text(
-                              widget.model.meta!,
-                              maxLines: 1,
+                              widget.model.title,
+                              maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: const TextStyle(color: Colors.white54),
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 29,
+                                height: 1.04,
+                                fontWeight: FontWeight.w900,
+                              ),
+                            ),
+                            if ((widget.model.meta ?? '')
+                                .trim()
+                                .isNotEmpty) ...[
+                              const SizedBox(height: 7),
+                              Text(
+                                widget.model.meta!,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  color: tvFullMuted,
+                                  fontSize: 12,
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 9),
+                            Text(
+                              (widget.model.plot ?? '').trim().isEmpty
+                                  ? 'Elegí una temporada y un episodio.'
+                                  : widget.model.plot!,
+                              maxLines: 3,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white60,
+                                fontSize: 13,
+                                height: 1.35,
+                              ),
                             ),
                           ],
-                          const SizedBox(height: 10),
-                          Text(
-                            (widget.model.plot ?? '').trim().isEmpty
-                                ? 'Seleccioná una temporada y un episodio.'
-                                : widget.model.plot!,
-                            maxLines: 3,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              color: Color(0xA6FFFFFF),
-                              height: 1.35,
-                            ),
-                          ),
-                        ],
+                        ),
                       ),
                     ),
                   ],
                 ),
               ),
-              const SizedBox(height: 14),
+              const SizedBox(height: 12),
               Expanded(
                 child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    SizedBox(
+                    Container(
                       width: 190,
+                      padding: const EdgeInsets.fromLTRB(10, 12, 10, 10),
+                      decoration: BoxDecoration(
+                        color: const Color(0x4A101C2D),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(
+                            color: Colors.white.withValues(alpha: .07)),
+                      ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -671,9 +797,10 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                             child: Text(
                               'TEMPORADAS',
                               style: TextStyle(
-                                color: Color(0x73FFFFFF),
-                                fontSize: 12,
+                                color: Colors.white54,
+                                fontSize: 10,
                                 fontWeight: FontWeight.w900,
+                                letterSpacing: 1.1,
                               ),
                             ),
                           ),
@@ -681,7 +808,7 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                             child: ListView(
                               children: widget.model.seasons.keys.map((season) {
                                 final selected = season == _season;
-                                return TvCleanCategoryRow(
+                                return TvCatalogCategoryRow(
                                   label: 'Temporada $season',
                                   selected: selected,
                                   onTap: () => setState(() => _season = season),
@@ -692,45 +819,52 @@ class _SeriesDetailScreenState extends State<_SeriesDetailScreen> {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 16),
-                    Container(width: 1, color: Colors.white10),
-                    const SizedBox(width: 16),
+                    const SizedBox(width: 10),
                     Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Padding(
-                            padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-                            child: Text(
-                              'EPISODIOS  ·  ${episodes.length}',
-                              style: const TextStyle(
-                                color: Color(0x73FFFFFF),
-                                fontSize: 12,
-                                fontWeight: FontWeight.w900,
+                      child: Container(
+                        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+                        decoration: BoxDecoration(
+                          color: const Color(0x4A101C2D),
+                          borderRadius: BorderRadius.circular(16),
+                          border: Border.all(
+                              color: Colors.white.withValues(alpha: .07)),
+                        ),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(6, 0, 6, 8),
+                              child: Text(
+                                'EPISODIOS  ·  ${episodes.length}',
+                                style: const TextStyle(
+                                  color: Colors.white54,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w900,
+                                  letterSpacing: 1.1,
+                                ),
                               ),
                             ),
-                          ),
-                          Expanded(
-                            child: ListView.builder(
-                              key: ValueKey<int>(_season),
-                              itemCount: episodes.length,
-                              itemBuilder: (context, index) {
-                                final episode = episodes[index];
-                                return Padding(
-                                  padding: const EdgeInsets.symmetric(
-                                    vertical: 3,
-                                  ),
-                                  child: _EpisodeFocusTile(
-                                    episode: episode,
-                                    autofocus: index == 0,
-                                    onTap: () =>
-                                        _play(context, episode.channel),
-                                  ),
-                                );
-                              },
+                            Expanded(
+                              child: ListView.builder(
+                                key: ValueKey<int>(_season),
+                                itemCount: episodes.length,
+                                itemBuilder: (context, index) {
+                                  final episode = episodes[index];
+                                  return Padding(
+                                    padding:
+                                        const EdgeInsets.symmetric(vertical: 3),
+                                    child: _EpisodeFocusTile(
+                                      episode: episode,
+                                      autofocus: index == 0,
+                                      onTap: () =>
+                                          _play(context, episode.channel),
+                                    ),
+                                  );
+                                },
+                              ),
                             ),
-                          ),
-                        ],
+                          ],
+                        ),
                       ),
                     ),
                   ],
@@ -786,10 +920,10 @@ class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
       curve: Curves.easeOutCubic,
       child: AnimatedContainer(
         duration: Duration(milliseconds: lowRam ? 80 : 130),
-        decoration: tvCleanCardDecoration(
+        decoration: tvFullGlassDecoration(
           focused: _focused,
           radius: 12,
-          accent: tvCleanCyan,
+          accent: tvFullCyan,
         ),
         child: Material(
           color: Colors.transparent,
@@ -813,7 +947,7 @@ class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
                             : '▶',
                         style: TextStyle(
                           color:
-                              _focused ? tvCleanCyan : const Color(0xFF58B9FF),
+                              _focused ? tvFullCyan : const Color(0xFF58B9FF),
                           fontWeight: FontWeight.w900,
                         ),
                       ),
@@ -847,7 +981,7 @@ class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
                     ),
                     Icon(
                       Icons.play_arrow_rounded,
-                      color: _focused ? tvCleanCyan : Colors.white54,
+                      color: _focused ? tvFullCyan : Colors.white54,
                     ),
                   ],
                 ),
@@ -862,13 +996,11 @@ class _EpisodeFocusTileState extends State<_EpisodeFocusTile> {
 
 class _SeriesCard extends StatefulWidget {
   final _SeriesItem item;
-  final bool autofocus;
   final VoidCallback onTap;
 
   const _SeriesCard({
     required this.item,
     required this.onTap,
-    this.autofocus = false,
   });
 
   @override
@@ -887,7 +1019,7 @@ class _SeriesCardState extends State<_SeriesCard> {
       curve: Curves.easeOutCubic,
       child: AnimatedContainer(
         duration: Duration(milliseconds: lowRam ? 80 : 140),
-        decoration: tvCleanCardDecoration(
+        decoration: tvFullGlassDecoration(
           focused: _focused,
           radius: 15,
           accent: const Color(0xFFA04CFF),
@@ -897,7 +1029,6 @@ class _SeriesCardState extends State<_SeriesCard> {
           borderRadius: BorderRadius.circular(15),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            autofocus: widget.autofocus,
             borderRadius: BorderRadius.circular(15),
             onFocusChange: (value) => setState(() => _focused = value),
             onTap: widget.onTap,

@@ -6,18 +6,19 @@ import 'package:provider/provider.dart';
 
 import '../models/playlist.dart';
 import '../providers/iptv_provider.dart';
-import '../services/app_update_service.dart';
 import '../services/manual_playlist_refresh_service.dart';
 import '../services/parental_control_service.dart';
-import '../widgets/app_version_badge.dart';
 import '../widgets/parental_unlock_dialog.dart';
-import 'filtered_live_screen.dart';
+import '../widgets/tv_full_premium_ui.dart';
 import 'parental_control_screen.dart';
-import 'tv_full_dashboard_screen.dart';
 import 'xtream_live_screen.dart';
 import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
 
+/// Raíz de contenido de TV FULL PRO V39.
+///
+/// No existe pantalla Inicio: al terminar la carga de la lista se entra directo
+/// a TV en Vivo y se abre la vista teatro con el primer canal disponible.
 class SourceContentScreen extends StatefulWidget {
   final Playlist playlist;
 
@@ -27,42 +28,22 @@ class SourceContentScreen extends StatefulWidget {
   State<SourceContentScreen> createState() => _SourceContentScreenState();
 }
 
-class _SourceContentScreenState extends State<SourceContentScreen>
-    with WidgetsBindingObserver {
+class _SourceContentScreenState extends State<SourceContentScreen> {
   final ParentalControlService _parental = ParentalControlService.instance;
-  final AppUpdateService _updates = AppUpdateService.instance;
-
-  Timer? _updatePollTimer;
-  DateTime? _lastBackPressedAt;
   bool _refreshingLists = false;
   bool _openingSection = false;
+  DateTime? _lastBackPressedAt;
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addObserver(this);
     _parental.addListener(_refresh);
-    _updates.addListener(_refresh);
     unawaited(_parental.init());
-    unawaited(_updates.checkOnce(force: true));
-    _updatePollTimer = Timer.periodic(const Duration(minutes: 5), (_) {
-      unawaited(_updates.checkOnce(force: true));
-    });
-  }
-
-  @override
-  void didChangeAppLifecycleState(AppLifecycleState state) {
-    if (state == AppLifecycleState.resumed) {
-      unawaited(_updates.checkOnce(force: true));
-    }
   }
 
   @override
   void dispose() {
-    _updatePollTimer?.cancel();
-    WidgetsBinding.instance.removeObserver(this);
     _parental.removeListener(_refresh);
-    _updates.removeListener(_refresh);
     super.dispose();
   }
 
@@ -74,46 +55,6 @@ class _SourceContentScreenState extends State<SourceContentScreen>
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
     final active = provider.selectedPlaylist ?? widget.playlist;
-    final update = _updates.availableUpdate;
-
-    final actions = <TvFullDashboardAction>[
-      if (provider.hasMultiplePlaylists)
-        TvFullDashboardAction(
-          icon: Icons.swap_horiz_rounded,
-          tooltip: 'Cambiar lista',
-          onPressed: () => unawaited(_choosePlaylist(context)),
-        ),
-      TvFullDashboardAction(
-        icon: Icons.refresh_rounded,
-        tooltip: _refreshingLists ? 'Actualizando listas' : 'Actualizar listas',
-        onPressed: _refreshingLists ? null : () => unawaited(_refreshLists()),
-        child: _refreshingLists
-            ? const SizedBox(
-                width: 19,
-                height: 19,
-                child: CircularProgressIndicator(
-                  strokeWidth: 2.2,
-                  color: Color(0xFF54D7FF),
-                ),
-              )
-            : null,
-      ),
-      TvFullDashboardAction(
-        icon: _parental.enabled && _parental.isLocked
-            ? Icons.lock_rounded
-            : Icons.lock_open_rounded,
-        tooltip: _parental.enabled && _parental.isLocked
-            ? 'Desbloquear control parental'
-            : 'Control parental',
-        onPressed: () => unawaited(_handleParentalControl()),
-      ),
-      if (update != null)
-        TvFullDashboardAction(
-          icon: Icons.system_update_alt_rounded,
-          tooltip: 'Actualizar a ${update.versionName}',
-          onPressed: () => unawaited(_openUpdate()),
-        ),
-    ];
 
     return PopScope<void>(
       canPop: false,
@@ -121,42 +62,65 @@ class _SourceContentScreenState extends State<SourceContentScreen>
         if (!didPop) unawaited(_handleRootBack());
       },
       child: Scaffold(
-        backgroundColor: const Color(0xFF050B14),
-        body: TvFullDashboardScreen(
-          key: ValueKey('${active.id}|${active.source}'),
-          playlistName: active.name,
-          actions: actions,
-          footer: const AppVersionBadge(),
-          onOpenSection: (section) => unawaited(_openSection(active, section)),
+        backgroundColor: tvFullBackground,
+        body: XtreamLiveScreen(
+          key: ValueKey('root-live:${active.id}|${active.source}'),
+          playlist: active,
+          autoOpenFirstChannel: true,
+          onChangeList: provider.hasMultiplePlaylists
+              ? () => unawaited(_choosePlaylist(context))
+              : null,
+          onRefreshLists:
+              _refreshingLists ? null : () => unawaited(_refreshLists()),
+          onParentalControl: () => unawaited(_handleParentalLock()),
+          onSectionRequested: (section) =>
+              unawaited(_openNamedSection(active, section)),
         ),
       ),
     );
   }
 
-  Future<void> _openSection(
-    Playlist playlist,
-    TvFullDashboardSection section,
-  ) async {
-    if (_openingSection) return;
+  Future<void> _openNamedSection(Playlist playlist, String section) async {
+    if (section == 'live' || _openingSection) return;
     _openingSection = true;
     try {
-      Widget screen;
+      Widget? screen;
       switch (section) {
-        case TvFullDashboardSection.live:
-          screen = XtreamLiveScreen(playlist: playlist);
+        case 'movies':
+          screen = XtreamMoviesScreen(
+            playlist: playlist,
+            onSectionRequested: (next) =>
+                unawaited(_replaceSection(playlist, next)),
+            onChangeList: context.read<IptvProvider>().hasMultiplePlaylists
+                ? () => unawaited(_changeListFromSection())
+                : null,
+            onRefreshLists: () => unawaited(_refreshLists()),
+            onParentalControl: () => unawaited(_handleParentalLock()),
+          );
           break;
-        case TvFullDashboardSection.movies:
-          screen = XtreamMoviesScreen(playlist: playlist);
+        case 'series':
+          screen = XtreamSeriesScreen(
+            playlist: playlist,
+            onSectionRequested: (next) =>
+                unawaited(_replaceSection(playlist, next)),
+            onChangeList: context.read<IptvProvider>().hasMultiplePlaylists
+                ? () => unawaited(_changeListFromSection())
+                : null,
+            onRefreshLists: () => unawaited(_refreshLists()),
+            onParentalControl: () => unawaited(_handleParentalLock()),
+          );
           break;
-        case TvFullDashboardSection.series:
-          screen = XtreamSeriesScreen(playlist: playlist);
-          break;
-        case TvFullDashboardSection.sports:
-          screen = FilteredLiveScreen(
+        case 'sports':
+          screen = XtreamLiveScreen(
             playlist: playlist,
             title: 'DEPORTES',
-            icon: Icons.sports_soccer_rounded,
-            keywords: const [
+            sportsPresentation: true,
+            onChangeList: context.read<IptvProvider>().hasMultiplePlaylists
+                ? () => unawaited(_changeListFromSection())
+                : null,
+            onRefreshLists: () => unawaited(_refreshLists()),
+            onParentalControl: () => unawaited(_handleParentalLock()),
+            filterKeywords: const [
               'deporte',
               'sport',
               'futbol',
@@ -169,67 +133,97 @@ class _SourceContentScreenState extends State<SourceContentScreen>
               'tenis',
               'tennis',
               'basket',
-              'racing',
               'motor',
+              'racing',
+              'mma',
+              'boxeo',
             ],
+            autoOpenFirstChannel: false,
+            onSectionRequested: (next) =>
+                unawaited(_replaceSection(playlist, next)),
           );
           break;
-        case TvFullDashboardSection.kids:
-          screen = FilteredLiveScreen(
+        case 'kids':
+          screen = XtreamLiveScreen(
             playlist: playlist,
             title: 'INFANTILES',
-            icon: Icons.child_care_rounded,
-            keywords: const [
+            onChangeList: context.read<IptvProvider>().hasMultiplePlaylists
+                ? () => unawaited(_changeListFromSection())
+                : null,
+            onRefreshLists: () => unawaited(_refreshLists()),
+            onParentalControl: () => unawaited(_handleParentalLock()),
+            filterKeywords: const [
               'infantil',
               'infantiles',
               'kids',
               'kid',
               'niños',
               'ninos',
-              'niño',
-              'nino',
               'cartoon',
               'dibujos',
               'disney',
               'nick',
               'boomerang',
             ],
+            autoOpenFirstChannel: true,
+            onSectionRequested: (next) =>
+                unawaited(_replaceSection(playlist, next)),
           );
           break;
-        case TvFullDashboardSection.adults:
+        case 'adults':
           if (!await _unlockAdultsIfNeeded()) return;
-          screen = FilteredLiveScreen(
+          screen = XtreamLiveScreen(
             playlist: playlist,
             title: 'ADULTOS',
-            icon: Icons.lock_rounded,
-            requireParentalUnlock: true,
-            keywords: const [
+            onChangeList: context.read<IptvProvider>().hasMultiplePlaylists
+                ? () => unawaited(_changeListFromSection())
+                : null,
+            onRefreshLists: () => unawaited(_refreshLists()),
+            onParentalControl: () => unawaited(_handleParentalLock()),
+            filterKeywords: const [
               'adult',
               'adulto',
               'adultos',
               'xxx',
               '18+',
               '+18',
-              'porno',
-              'porn',
               'erotic',
               'erotico',
               'erótica',
               'erotica',
-              'playboy',
-              'hentai',
             ],
+            autoOpenFirstChannel: true,
+            onSectionRequested: (next) =>
+                unawaited(_replaceSection(playlist, next)),
           );
           break;
       }
 
-      if (!mounted) return;
-      await Navigator.of(context).push(
-        MaterialPageRoute(builder: (_) => screen),
-      );
+      if (screen != null && mounted) {
+        await Navigator.of(context).push(
+          MaterialPageRoute(builder: (_) => screen!),
+        );
+      }
     } finally {
       _openingSection = false;
     }
+  }
+
+  Future<void> _replaceSection(Playlist playlist, String section) async {
+    if (!mounted) return;
+    _openingSection = false;
+    Navigator.of(context).pop();
+    await Future<void>.delayed(Duration.zero);
+    if (mounted) await _openNamedSection(playlist, section);
+  }
+
+  Future<void> _changeListFromSection() async {
+    if (!mounted) return;
+    final provider = context.read<IptvProvider>();
+    if (!provider.hasMultiplePlaylists) return;
+    await _choosePlaylist(context);
+    if (!mounted) return;
+    Navigator.of(context).popUntil((route) => route.isFirst);
   }
 
   Future<bool> _unlockAdultsIfNeeded() async {
@@ -252,7 +246,7 @@ class _SourceContentScreenState extends State<SourceContentScreen>
     );
   }
 
-  Future<void> _handleParentalControl() async {
+  Future<void> _handleParentalLock() async {
     await _parental.init();
     if (!mounted) return;
 
@@ -286,16 +280,13 @@ class _SourceContentScreenState extends State<SourceContentScreen>
       final active = provider.playlistById(selectedId) ??
           provider.selectedPlaylist ??
           widget.playlist;
-      final refreshResult =
-          await ManualPlaylistRefreshService.instance.refresh(active);
+      await ManualPlaylistRefreshService.instance.refresh(active);
       if (!mounted) return;
-      final message = refreshResult.isPartial
-          ? 'Actualización parcial. No se pudo actualizar: '
-              '${refreshResult.failedSectionNames.join(', ')}.'
-          : 'Actualización de listas completada.';
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
-        ..showSnackBar(SnackBar(content: Text(message)));
+        ..showSnackBar(
+          const SnackBar(content: Text('Lista actualizada correctamente.')),
+        );
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
@@ -303,7 +294,7 @@ class _SourceContentScreenState extends State<SourceContentScreen>
         ..showSnackBar(
           const SnackBar(
             content: Text(
-              'No se pudieron actualizar las listas. Revisá la conexión e intentá de nuevo.',
+              'No se pudo actualizar la lista. Revisá la conexión e intentá de nuevo.',
             ),
           ),
         );
@@ -318,125 +309,69 @@ class _SourceContentScreenState extends State<SourceContentScreen>
     final chosen = await showDialog<String>(
       context: context,
       builder: (dialogContext) => Dialog(
-        backgroundColor: const Color(0xFF08111C),
-        child: ConstrainedBox(
-          constraints: const BoxConstraints(maxWidth: 560, maxHeight: 520),
-          child: Padding(
-            padding: const EdgeInsets.all(22),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const Text(
-                  'Cambiar lista',
-                  style: TextStyle(
-                    color: Colors.white,
-                    fontSize: 22,
-                    fontWeight: FontWeight.w900,
-                  ),
+        backgroundColor: Colors.transparent,
+        child: Container(
+          width: 560,
+          constraints: const BoxConstraints(maxHeight: 520),
+          padding: const EdgeInsets.all(20),
+          decoration: tvFullGlassDecoration(radius: 18),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                'Cambio de lista',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 21,
+                  fontWeight: FontWeight.w900,
                 ),
-                const SizedBox(height: 14),
-                Flexible(
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    itemCount: provider.playlists.length,
-                    itemBuilder: (context, index) {
-                      final item = provider.playlists[index];
-                      final selected = item.id == currentId;
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(vertical: 4),
-                        child: ListTile(
-                          autofocus:
-                              selected || (currentId == null && index == 0),
-                          selected: selected,
-                          selectedTileColor:
-                              const Color(0xFF2D8CFF).withValues(alpha: .16),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(12),
+              ),
+              const SizedBox(height: 14),
+              Flexible(
+                child: ListView.builder(
+                  shrinkWrap: true,
+                  itemCount: provider.playlists.length,
+                  itemBuilder: (context, index) {
+                    final item = provider.playlists[index];
+                    final selected = item.id == currentId;
+                    return Padding(
+                      padding: const EdgeInsets.symmetric(vertical: 3),
+                      child: ListTile(
+                        autofocus:
+                            selected || (currentId == null && index == 0),
+                        selected: selected,
+                        selectedTileColor: tvFullBlue.withValues(alpha: .20),
+                        focusColor: tvFullBlue.withValues(alpha: .20),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(11),
+                          side: BorderSide(
+                            color: selected
+                                ? tvFullCyan.withValues(alpha: .45)
+                                : Colors.transparent,
                           ),
-                          title: Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontWeight: FontWeight.w800),
-                          ),
-                          subtitle: Text(
-                            item.sourceType.name.toUpperCase(),
-                            style: const TextStyle(color: Colors.white38),
-                          ),
-                          trailing:
-                              selected ? const Icon(Icons.check_rounded) : null,
-                          onTap: () => Navigator.of(dialogContext).pop(item.id),
                         ),
-                      );
-                    },
-                  ),
+                        title: Text(
+                          item.name,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontWeight: FontWeight.w700),
+                        ),
+                        trailing: selected
+                            ? const Icon(Icons.check_rounded, color: tvFullCyan)
+                            : null,
+                        onTap: () => Navigator.of(dialogContext).pop(item.id),
+                      ),
+                    );
+                  },
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
         ),
       ),
     );
     if (chosen != null) await provider.selectPlaylist(chosen);
-  }
-
-  Future<void> _openUpdate() async {
-    final openedInstaller = await _updates.openInstaller();
-    if (openedInstaller) return;
-
-    final update = _updates.availableUpdate;
-    final code = update?.downloaderCode ?? '';
-    if (!mounted) return;
-    if (code.isEmpty) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('No hay una actualización válida.')),
-        );
-      return;
-    }
-
-    await Clipboard.setData(ClipboardData(text: code));
-    if (!mounted) return;
-    await showDialog<void>(
-      context: context,
-      builder: (dialogContext) => AlertDialog(
-        backgroundColor: const Color(0xFF08111C),
-        title: const Text('Actualizar TV FULL PRO'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(
-              'Nueva versión ${update?.versionName ?? ''}',
-              style: const TextStyle(color: Colors.white70),
-            ),
-            const SizedBox(height: 14),
-            const Text(
-              'Código para Downloader',
-              style: TextStyle(color: Colors.white38),
-            ),
-            const SizedBox(height: 7),
-            SelectableText(
-              code,
-              style: const TextStyle(
-                color: Color(0xFF54D7FF),
-                fontSize: 32,
-                fontWeight: FontWeight.w900,
-                letterSpacing: 3,
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          FilledButton(
-            autofocus: true,
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('Entendido'),
-          ),
-        ],
-      ),
-    );
   }
 
   Future<void> _handleRootBack() async {

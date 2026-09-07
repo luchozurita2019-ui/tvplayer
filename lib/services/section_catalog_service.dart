@@ -233,13 +233,16 @@ class SectionCatalogService {
 
       for (final kind in TvSectionKind.values) {
         final writer = writers[kind]!;
-        final committed = await writer.commit(
-          categories: categories[kind]!,
-          allowEmpty: true,
-        );
+        if (writer.count == 0) {
+          // Conservamos la última generación funcional de una sección si una
+          // actualización válida no trae entradas para ella.
+          await writer.abort();
+          continue;
+        }
+        final committed = await writer.commit(categories: categories[kind]!);
         if (committed) {
-          // La próxima lectura debe materializar la generación nueva, incluso
-          // cuando la sección válida ahora está vacía.
+          // La próxima lectura debe materializar la generación nueva, no una
+          // instantánea RAM anterior que todavía estaba visible en pantalla.
           _forget('${playlist.id}|m3u_${kind.name}');
         }
       }
@@ -335,13 +338,7 @@ class SectionCatalogService {
     } catch (_) {
       return null;
     }
-    if (channels.isEmpty) {
-      return SectionCatalogSnapshot(
-        channels: const <Channel>[],
-        categories: List<String>.unmodifiable(source.categories),
-        fromCache: true,
-      );
-    }
+    if (channels.isEmpty) return null;
     return SectionCatalogSnapshot(
       channels: List<Channel>.unmodifiable(channels),
       categories: List<String>.unmodifiable(

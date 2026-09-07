@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
+import '../widgets/tv_full_premium_ui.dart';
 
 const String _vodUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -719,9 +720,9 @@ class _AndroidMedia3VodPlayerScreenState
                   constraints: const BoxConstraints(maxWidth: 620),
                   margin: const EdgeInsets.all(30),
                   padding: const EdgeInsets.all(22),
-                  decoration: BoxDecoration(
-                    color: const Color(0xE814202D),
-                    borderRadius: BorderRadius.circular(16),
+                  decoration: tvFullGlassDecoration(
+                    radius: 16,
+                    accent: tvFullCyan,
                   ),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
@@ -767,10 +768,9 @@ class _AndroidMedia3VodPlayerScreenState
                   child: Container(
                     margin: const EdgeInsets.fromLTRB(20, 0, 20, 18),
                     padding: const EdgeInsets.fromLTRB(16, 12, 16, 12),
-                    decoration: BoxDecoration(
-                      color: const Color(0xD90A1018),
-                      borderRadius: BorderRadius.circular(14),
-                      border: Border.all(color: Colors.white12),
+                    decoration: tvFullGlassDecoration(
+                      radius: 14,
+                      accent: tvFullCyan,
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -868,16 +868,19 @@ class _AndroidMedia3VodPlayerScreenState
                                     : null,
                                 onFocus: _showOverlay,
                               ),
-                              const SizedBox(width: 18),
-                              _VodControlButton(
-                                focusNode: _tracksFocus,
-                                tooltip: 'Idioma de audio y subtítulos',
-                                icon: Icons.tune_rounded,
-                                onPressed: _ready
-                                    ? () => unawaited(_showTrackMenu())
-                                    : null,
-                                onFocus: _showOverlay,
-                              ),
+                              if (_audioTracks.isNotEmpty ||
+                                  _subtitleTracks.isNotEmpty) ...[
+                                const SizedBox(width: 18),
+                                _VodControlButton(
+                                  focusNode: _tracksFocus,
+                                  tooltip: 'Idioma de audio y subtítulos',
+                                  icon: Icons.tune_rounded,
+                                  onPressed: _ready
+                                      ? () => unawaited(_showTrackMenu())
+                                      : null,
+                                  onFocus: _showOverlay,
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -925,7 +928,7 @@ class _VodTimeline extends StatelessWidget {
                   alignment: Alignment.centerLeft,
                   child: SizedBox(
                     width: playedWidth,
-                    child: const ColoredBox(color: Color(0xFF42AFFF)),
+                    child: const ColoredBox(color: tvFullCyan),
                   ),
                 ),
               ],
@@ -966,7 +969,8 @@ class _VodControlButtonState extends State<_VodControlButton> {
     return Tooltip(
       message: widget.tooltip,
       child: Material(
-        color: _focused ? const Color(0xFF12324A) : Colors.transparent,
+        color:
+            _focused ? tvFullBlue.withValues(alpha: .22) : Colors.transparent,
         borderRadius: BorderRadius.circular(12),
         child: InkWell(
           focusNode: widget.focusNode,
@@ -984,7 +988,7 @@ class _VodControlButtonState extends State<_VodControlButton> {
             decoration: BoxDecoration(
               borderRadius: BorderRadius.circular(12),
               border: Border.all(
-                color: _focused ? const Color(0xFF58B9FF) : Colors.transparent,
+                color: _focused ? tvFullCyan : Colors.transparent,
               ),
             ),
             child: Icon(

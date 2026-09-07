@@ -10,7 +10,7 @@ import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/live_channel_usage_service.dart';
 import '../widgets/channel_logo_image.dart';
-import '../widgets/tv_full_clean_ui.dart';
+import '../widgets/tv_full_premium_ui.dart';
 import '../widgets/tv_live_theater.dart';
 
 const String _media3DefaultUserAgent =
@@ -21,11 +21,17 @@ const String _media3DefaultUserAgent =
 class AndroidMedia3TexturePlayerScreen extends StatefulWidget {
   final List<Channel> playlist;
   final int initialIndex;
+  final VoidCallback? onChangeList;
+  final VoidCallback? onRefreshLists;
+  final VoidCallback? onParentalControl;
 
   const AndroidMedia3TexturePlayerScreen({
     super.key,
     required this.playlist,
     required this.initialIndex,
+    this.onChangeList,
+    this.onRefreshLists,
+    this.onParentalControl,
   });
 
   @override
@@ -214,13 +220,7 @@ class _AndroidMedia3TexturePlayerScreenState
         setState(() => _buffering = true);
         break;
       case 'prepared':
-        break;
       case 'bufferingEnd':
-        setState(() {
-          _buffering = false;
-          _friendlyError = null;
-        });
-        break;
       case 'playing':
         _autoRetryCount = 0;
         _recordHealthySignal();
@@ -298,8 +298,7 @@ class _AndroidMedia3TexturePlayerScreenState
         combined.contains('404') ||
         combined.contains('410');
     final transient = !permanentHttp &&
-        (combined.contains('tvfull_fast_io') ||
-            combined.contains('network') ||
+        (combined.contains('network') ||
             combined.contains('timeout') ||
             combined.contains('connection') ||
             combined.contains('io_bad_http_status') ||
@@ -326,10 +325,14 @@ class _AndroidMedia3TexturePlayerScreenState
       return;
     }
 
-    // Sólo respuestas HTTP permanentes entran al cooldown largo. Una
-    // demora, un timeout, un 5xx o TVFULL_FAST_IO deben poder reintentarse sin
-    // hacer que el zapping saltee el canal durante diez minutos.
-    final shouldCooldown = permanentHttp;
+    final shouldCooldown = permanentHttp ||
+        combined.contains('tvfull_no_progress') ||
+        combined.contains('tvfull_fast_io') ||
+        combined.contains('io_bad_http_status') ||
+        combined.contains('response_code_5') ||
+        combined.contains('network') ||
+        combined.contains('timeout') ||
+        combined.contains('connection');
     if (shouldCooldown) {
       _health.markDead(_channel, reason: code);
     }
@@ -345,8 +348,7 @@ class _AndroidMedia3TexturePlayerScreenState
     if (value.contains('decoder') || value.contains('codec')) {
       return 'Formato de video no compatible';
     }
-    if (value.contains('tvfull_fast_io') ||
-        value.contains('timeout') ||
+    if (value.contains('timeout') ||
         value.contains('network') ||
         value.contains('connection')) {
       return 'Problema de conexión';
@@ -514,6 +516,10 @@ class _AndroidMedia3TexturePlayerScreenState
 
   void _selectChannel(int index) {
     if (index < 0 || index >= widget.playlist.length) return;
+    if (_theaterMode && index == _index) {
+      _setTheaterMode(false);
+      return;
+    }
     setState(() {
       _index = index;
       _channelListVisible = !_theaterMode;
@@ -703,13 +709,18 @@ class _AndroidMedia3TexturePlayerScreenState
                   video: video,
                   channels: _channelDrawer(docked: true),
                   channelName: _channel.name,
+                  channelGroup: _channel.group,
                   onFullscreen: () => _setTheaterMode(false),
                   onCategories: () => Navigator.of(context).pop(),
-                  onHome: () =>
-                      Navigator.of(context).popUntil((route) => route.isFirst),
+                  onHome: () => Navigator.of(context).pop(),
                   onAudio: _hasMultipleAudioTracks
                       ? () => unawaited(_showAudioPicker())
                       : null,
+                  onChangeList: widget.onChangeList,
+                  onRefreshLists: widget.onRefreshLists,
+                  onParentalControl: widget.onParentalControl,
+                  onSectionRequested: (section) =>
+                      Navigator.of(context).pop(section),
                 )
               : video,
         ),
@@ -763,10 +774,10 @@ class _AndroidMedia3TexturePlayerScreenState
                     color: Colors.black.withValues(alpha: .24),
                     borderRadius: BorderRadius.circular(14),
                     border:
-                        Border.all(color: tvCleanCyan.withValues(alpha: .40)),
+                        Border.all(color: tvFullCyan.withValues(alpha: .40)),
                     boxShadow: [
                       BoxShadow(
-                        color: tvCleanCyan.withValues(alpha: .10),
+                        color: tvFullCyan.withValues(alpha: .10),
                         blurRadius: 12,
                       ),
                     ],
@@ -811,7 +822,7 @@ class _AndroidMedia3TexturePlayerScreenState
                               ),
                             ),
                             const SizedBox(width: 10),
-                            const TvCleanLiveBadge(),
+                            const TvFullLiveBadge(),
                           ],
                         ),
                         const SizedBox(height: 5),
@@ -868,7 +879,7 @@ class _AndroidMedia3TexturePlayerScreenState
   Widget _channelDrawer({bool docked = false}) => Align(
         alignment: Alignment.centerRight,
         child: Material(
-          color: const Color(0xF20A1119),
+          color: docked ? Colors.transparent : const Color(0xE80D1828),
           elevation: docked ? 0 : 16,
           child: SafeArea(
             child: SizedBox(
@@ -876,27 +887,27 @@ class _AndroidMedia3TexturePlayerScreenState
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Padding(
-                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-                    child: Row(
-                      children: [
-                        const Expanded(
-                          child: Text(
-                            'Canales',
-                            style: TextStyle(
-                              fontSize: 20,
-                              fontWeight: FontWeight.w900,
+                  if (!docked)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+                      child: Row(
+                        children: [
+                          const Expanded(
+                            child: Text(
+                              'Canales',
+                              style: TextStyle(
+                                fontSize: 20,
+                                fontWeight: FontWeight.w900,
+                              ),
                             ),
                           ),
-                        ),
-                        if (!docked)
                           IconButton(
                             onPressed: _closeChannelList,
                             icon: const Icon(Icons.close_rounded),
                           ),
-                      ],
+                        ],
+                      ),
                     ),
-                  ),
                   Expanded(
                     child: ListView.builder(
                       controller: _channelScrollController,
@@ -1054,7 +1065,7 @@ class _LiveHudAction extends StatelessWidget {
         visualDensity: VisualDensity.compact,
       ),
       onPressed: onTap,
-      icon: Icon(icon, size: 17, color: tvCleanCyan),
+      icon: Icon(icon, size: 17, color: tvFullCyan),
       label: Text(
         label,
         style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w800),
