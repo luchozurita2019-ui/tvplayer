@@ -30,6 +30,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/playlists/
+    - android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png
 
 # TV FULL PRO 1.2.7+19 live-error-navigation and updater reliability marker.
 
@@ -64,3 +65,5 @@ flutter:
 
 # TV FULL PRO 1.4.4+36 Android TV BACK is route-owned so one press closes only the player grid.
 # Validation trigger v36: verify Android TV integration after removing duplicate Back ownership.
+
+# TV FULL PRO 1.4.5+37 cinematic Android TV interface; playback engine remains inherited from +36.
