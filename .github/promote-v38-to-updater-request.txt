@@ -1,0 +1,6 @@
+TV FULL PRO 1.4.6+38 promotion requested.
+verified_build_run=34160135784
+source_branch=ui/full-pro-redesign-v38
+target_branch=android-tv-full-pro-clean-source
+publish_when=verified build completes successfully
+requested_at=2026-09-07T17:42:00-03:00
