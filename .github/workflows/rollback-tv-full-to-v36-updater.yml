@@ -1,0 +1,115 @@
+name: Rollback TV FULL PRO Updater to V36
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/rollback-to-v36-request.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout updater branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+          fetch-depth: 0
+
+      - name: Download exact verified V36 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/v36
+          mkdir -p /tmp/v36
+          gh run download 33778349291 --repo "$GITHUB_REPOSITORY" --name TV-FULL-PRO-SPLIT --dir /tmp/v36
+          test -f /tmp/v36/TV-FULL-PRO-ARM32.apk
+          test -f /tmp/v36/TV-FULL-PRO-ARM64.apk
+          test -f /tmp/v36/TV-FULL-PRO-ARM32.apk.signature.txt
+          test -f /tmp/v36/TV-FULL-PRO-ARM64.apk.signature.txt
+
+      - name: Verify exact V36 APK identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARM32=/tmp/v36/TV-FULL-PRO-ARM32.apk
+          ARM64=/tmp/v36/TV-FULL-PRO-ARM64.apk
+          test "$(sha256sum "$ARM32" | awk '{print $1}')" = '4a23cf873b6072ac8264659e4de386fbcccadc5e48b8ff4993e7fe60a2f16667'
+          test "$(sha256sum "$ARM64" | awk '{print $1}')" = '3efe507a71e952f5703180f111446fb375da7f52dbcdd4ca6d4a4baf33b1d192'
+          test "$(stat -c '%s' "$ARM32")" = '34925837'
+          test "$(stat -c '%s' "$ARM64")" = '38649143'
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' /tmp/v36/TV-FULL-PRO-ARM32.apk.signature.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' /tmp/v36/TV-FULL-PRO-ARM64.apk.signature.txt
+
+      - name: Restore V36 stable APK files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload tv-full-pro-latest \
+            /tmp/v36/TV-FULL-PRO-ARM32.apk \
+            /tmp/v36/TV-FULL-PRO-ARM64.apk \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Restore V36 installer manifest only
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin android-tv-full-pro-clean-source
+          git checkout android-tv-full-pro-clean-source
+          git reset --hard origin/android-tv-full-pro-clean-source
+          cat > tv_full_installer/latest.json <<'EOF'
+          {
+            "versionName": "1.4.4",
+            "versionCode": 36,
+            "packageName": "com.tvfull.pro.tv.v10safe",
+            "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
+            "arm32": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk",
+              "sha256": "4a23cf873b6072ac8264659e4de386fbcccadc5e48b8ff4993e7fe60a2f16667",
+              "size": 34925837
+            },
+            "arm64": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk",
+              "sha256": "3efe507a71e952f5703180f111446fb375da7f52dbcdd4ca6d4a4baf33b1d192",
+              "size": 38649143
+            }
+          }
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tv_full_installer/latest.json
+          git commit -m 'Restore TV FULL PRO 1.4.4+36 in stable installer' || true
+          git push origin HEAD:android-tv-full-pro-clean-source
+
+      - name: Verify public rollback
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST='https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/android-tv-full-pro-clean-source/tv_full_installer/latest.json'
+          ARM32='https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk'
+          ARM64='https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk'
+          for attempt in $(seq 1 20); do
+            BODY="$(curl -L --fail --silent --show-error "$MANIFEST" || true)"
+            if printf '%s' "$BODY" | grep -q '"versionCode": 36'; then
+              break
+            fi
+            sleep 3
+          done
+          printf '%s' "$BODY" | grep -q '"versionName": "1.4.4"'
+          printf '%s' "$BODY" | grep -q '4a23cf873b6072ac8264659e4de386fbcccadc5e48b8ff4993e7fe60a2f16667'
+          printf '%s' "$BODY" | grep -q '3efe507a71e952f5703180f111446fb375da7f52dbcdd4ca6d4a4baf33b1d192'
+          curl -L --fail --silent --show-error "$ARM32" -o /tmp/public-arm32.apk
+          curl -L --fail --silent --show-error "$ARM64" -o /tmp/public-arm64.apk
+          test "$(sha256sum /tmp/public-arm32.apk | awk '{print $1}')" = '4a23cf873b6072ac8264659e4de386fbcccadc5e48b8ff4993e7fe60a2f16667'
+          test "$(sha256sum /tmp/public-arm64.apk | awk '{print $1}')" = '3efe507a71e952f5703180f111446fb375da7f52dbcdd4ca6d4a4baf33b1d192'
