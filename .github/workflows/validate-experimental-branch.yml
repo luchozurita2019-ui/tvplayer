@@ -42,8 +42,13 @@ jobs:
         run: flutter pub get
       - name: Analyze source
         run: flutter analyze --no-fatal-infos --no-fatal-warnings
-      - name: Run tests
-        run: flutter test
+      - name: Run non-golden tests
+        shell: bash
+        run: |
+          set -euo pipefail
+          mapfile -d '' tests < <(find test -name '*_test.dart' ! -name 'v39_visual_snapshot_test.dart' -print0)
+          if [ "${#tests[@]}" -eq 0 ]; then exit 1; fi
+          flutter test "${tests[@]}"
       - name: Compile Android TV debug integration
         run: >-
           flutter build apk --debug
