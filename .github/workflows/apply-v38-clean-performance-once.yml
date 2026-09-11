@@ -47,7 +47,11 @@ jobs:
           PY
 
       - name: Apply deterministic V38 patch
-        run: python3 .github/scripts/apply_v38_clean_performance.py
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/apply_v38_clean_performance.py
+          git restore --source="$GITHUB_SHA" -- .github/scripts/apply_v38_clean_performance.py
 
       - name: Enforce performance-only scope
         shell: bash
