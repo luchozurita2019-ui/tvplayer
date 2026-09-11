@@ -1,2 +1,0 @@
-logo_test_run=34632048330
-source_commit=977e88dafa6920c2315a350dd8d478fa17b6924e
