@@ -1,3 +1,0 @@
-Restore the stable installer to the exact verified TV FULL PRO 1.4.4+36 APKs from successful workflow run 33778349291.
-Do not change application source code.
-Rollback requested again on 2026-09-11 after installer V40 was published by mistake.

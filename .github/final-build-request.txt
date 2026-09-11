@@ -1,7 +1,0 @@
-TV FULL PRO final release build requested for premium lightweight LIVE UI.
-validated_code_commit=8d6e0ea0f04e23b4ed53ec93b66d34a8331b52b9
-version=1.3.5+27
-release_target=universal ARM Android TV APK
-signing=persistent TV FULL PRO release keystore; must match historical certificate SHA-256 40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a
-notes=premium lightweight LIVE catalog for M3U/Xtream; intelligent sports highlights from favorites and real usage; transparent player HUD; larger sharp channel logo; red neon EN VIVO badge; preserve v26 logo performance, classic list, channel-health behavior and all LIVE playback timings.
-requested_at=2026-09-02T09:21:00-03:00

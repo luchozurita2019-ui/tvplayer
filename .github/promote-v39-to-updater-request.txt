@@ -1,6 +1,0 @@
-TV FULL PRO 1.4.7+39 promotion requested.
-verified_build_run=34163392000
-source_branch=ui/full-pro-photo-match-v39
-target_branch=android-tv-full-pro-clean-source
-artifact=TV-FULL-PRO-V39-PHOTO-MATCH
-requested_at=2026-09-07T20:32:00-03:00

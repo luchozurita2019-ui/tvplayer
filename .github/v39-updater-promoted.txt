@@ -1,4 +1,0 @@
-TV FULL PRO 1.4.7+39 promoted to stable updater.
-verified_build_run=34163392000
-arm32_sha256=8d561270ac7358dc937c3fdf2b84a50f1e431a0ef486d8005fe5af02d9db80c6
-arm64_sha256=3a7fe002b6d9ececcc62f1bc627d68dd55b3cc228bb74d68f8b45823d09eaac7
