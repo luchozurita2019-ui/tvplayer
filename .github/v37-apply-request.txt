@@ -2,4 +2,5 @@ Apply the complete TV FULL PRO V37 candidate improvement patch to the exact V36 
 base=9766496746e877421fb1dd0a11130d867fd035ab
 candidate_version=1.4.5+37
 stable_installer=do_not_touch
+attempt=2
 requested_at=2026-09-11
