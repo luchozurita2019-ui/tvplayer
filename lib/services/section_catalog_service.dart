@@ -45,13 +45,16 @@ class SectionCatalogService {
   final Map<String, int> _memoryWeights = <String, int>{};
   int _memoryBytes = 0;
 
+  String _memoryKey(Playlist playlist, String kind) =>
+      '${playlist.id}|${playlist.source}|$kind';
+
   Future<SectionCatalogSnapshot?> loadCached(
     Playlist playlist,
     TvSectionKind kind,
   ) async {
     _lastRequestedKind[playlist.id] = kind;
     final key = 'm3u_${kind.name}';
-    final memoryKey = '${playlist.id}|$key';
+    final memoryKey = _memoryKey(playlist, key);
     final memory = _memory.remove(memoryKey);
     if (memory != null) {
       _memory[memoryKey] = memory;
@@ -192,7 +195,7 @@ class SectionCatalogService {
   /// en generaciones temporales independientes. No se crean tres listas de
   /// Channel en RAM: sólo viven el parser incremental y las categorías únicas.
   Future<void> _downloadAndPartitionToDisk(Playlist playlist) async {
-    final parser = M3uLineParser();
+    final parser = M3uLineParser(baseUri: Uri.tryParse(playlist.source));
     final writers = <TvSectionKind, CatalogFileWriter>{};
     final categorySets = <TvSectionKind, Set<String>>{
       for (final kind in TvSectionKind.values) kind: <String>{},
@@ -231,19 +234,14 @@ class SectionCatalogService {
         );
       }
 
+      // Si la descarga global fue válida, una sección con cero elementos es un
+      // resultado válido y debe reemplazar la generación anterior. De esta forma
+      // "vacío" no se confunde con "respuesta inválida".
       for (final kind in TvSectionKind.values) {
         final writer = writers[kind]!;
-        if (writer.count == 0) {
-          // Conservamos la última generación funcional de una sección si una
-          // actualización válida no trae entradas para ella.
-          await writer.abort();
-          continue;
-        }
         final committed = await writer.commit(categories: categories[kind]!);
         if (committed) {
-          // La próxima lectura debe materializar la generación nueva, no una
-          // instantánea RAM anterior que todavía estaba visible en pantalla.
-          _forget('${playlist.id}|m3u_${kind.name}');
+          _forget(_memoryKey(playlist, 'm3u_${kind.name}'));
         }
       }
 
@@ -267,7 +265,8 @@ class SectionCatalogService {
     final maxSections = profile.lowRam ? 1 : 3;
     final budget = _memoryBudgetBytes(profile);
 
-    while (_memory.length > 1 &&
+    // Un único catálogo enorme tampoco puede quedar exento del presupuesto.
+    while (_memory.isNotEmpty &&
         (_memory.length > maxSections || _memoryBytes > budget)) {
       _forget(_memory.keys.first);
     }
@@ -338,7 +337,8 @@ class SectionCatalogService {
     } catch (_) {
       return null;
     }
-    if (channels.isEmpty) return null;
+    // La existencia de una generación publicada valida también una sección
+    // vacía; no la confundimos con ausencia/corrupción del snapshot.
     return SectionCatalogSnapshot(
       channels: List<Channel>.unmodifiable(channels),
       categories: List<String>.unmodifiable(
@@ -361,7 +361,6 @@ class SectionCatalogService {
         channels.add(Channel.fromJson(Map<String, dynamic>.from(item)));
       } catch (_) {}
     }
-    if (channels.isEmpty) return null;
 
     final categories = rawCategories is List
         ? rawCategories.map((e) => e.toString()).toList(growable: false)
