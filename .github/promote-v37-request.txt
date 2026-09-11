@@ -1,6 +1,0 @@
-Promote the already validated and historically signed TV FULL PRO V37 candidate artifact to the stable updater release.
-source_run=34614074334
-version=1.4.5+37
-arm32_sha256=ef9e53a588309277fa9628a2967bdf9b0eadf848ab2417476a6e81169ca5d774
-arm64_sha256=a1facc945822801381172fe67b61dc98d154b83d10b67d365dc79e7c3fa1d307
-certificate_sha256=40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a
