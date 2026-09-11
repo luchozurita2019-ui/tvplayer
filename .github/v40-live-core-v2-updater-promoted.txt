@@ -1,0 +1,5 @@
+TV FULL PRO 1.4.8+40 LIVE Core V2 promoted to installer.
+source_branch=experiment/live-core-v2-integrated
+source_commit=04a222cba34d133f091e2d77c69454e374e1620a
+verified_build_run=34571060622
+apk_sha256=b71bf081288da4ad0e8667e3e0cf6545e43ced74a8dd657ac58336625d191b09
