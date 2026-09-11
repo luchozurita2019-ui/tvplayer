@@ -49,6 +49,7 @@ class XtreamLiveFastService {
       <String, XtreamLiveCatalogSnapshot>{};
   final Map<String, Future<XtreamLiveCatalogSnapshot?>> _pendingCacheReads =
       <String, Future<XtreamLiveCatalogSnapshot?>>{};
+  int _refreshGeneration = 0;
 
   String? get lastDiagnostics => _lastDiagnostics;
 
@@ -116,32 +117,52 @@ class XtreamLiveFastService {
     XtreamCatalogProgressCallback? onProgress,
     bool forceSessionRefresh = false,
   }) async {
+    final operationGeneration = ++_refreshGeneration;
+    final browsingGeneration = XtreamHttpClient.beginBrowsingOperation();
+    void checkpoint() {
+      if (operationGeneration != _refreshGeneration) {
+        throw const XtreamRequestCancelled();
+      }
+      XtreamHttpClient.ensureGeneration(browsingGeneration);
+    }
+
+    void progress(XtreamCatalogProgress value) {
+      checkpoint();
+      onProgress?.call(value);
+    }
+
     final totalWatch = Stopwatch()..start();
     try {
       // Siempre resolvemos la sesión real al refrescar LIVE. Esto evita depender
       // de una conexión provisional y respeta host/protocolo/puerto server_info.
       var connection = await XtreamFastCatalogService.instance
           .connectionForPlaylist(playlistUrl, forceRefresh: true);
+      checkpoint();
 
       try {
         return await _fetch(
           connection,
           playlistUrl,
-          onProgress,
+          progress,
           totalWatch: totalWatch,
+          checkpoint: checkpoint,
         );
       } on _XtreamLiveHttpException catch (error) {
         if (error.statusCode != 401 && error.statusCode != 403) rethrow;
         XtreamFastCatalogService.instance.invalidateSession(playlistUrl);
         connection = await XtreamFastCatalogService.instance
             .connectionForPlaylist(playlistUrl, forceRefresh: true);
+        checkpoint();
         return await _fetch(
           connection,
           playlistUrl,
-          onProgress,
+          progress,
           totalWatch: totalWatch,
+          checkpoint: checkpoint,
         );
       }
+    } on XtreamRequestCancelled {
+      rethrow;
     } catch (error) {
       if (totalWatch.isRunning) totalWatch.stop();
       final diagnostic = <String>[
@@ -164,7 +185,9 @@ class XtreamLiveFastService {
     String playlistUrl,
     XtreamCatalogProgressCallback? onProgress, {
     required Stopwatch totalWatch,
+    required void Function() checkpoint,
   }) async {
+    checkpoint();
     onProgress?.call(
       const XtreamCatalogProgress(
         section: 'LIVE',
@@ -197,6 +220,9 @@ class XtreamLiveFastService {
         },
       );
       categoriesBody = categoryResult.body;
+      checkpoint();
+    } on XtreamRequestCancelled {
+      rethrow;
     } catch (_) {
       categoriesBody = '[]';
       categorySuccess = false;
@@ -226,6 +252,7 @@ class XtreamLiveFastService {
         ),
       ),
     );
+    checkpoint();
 
     onProgress?.call(
       const XtreamCatalogProgress(
@@ -255,6 +282,7 @@ class XtreamLiveFastService {
     } finally {
       unawaited(_deleteFileQuietly(transfer.file));
     }
+    checkpoint();
     prepareWatch.stop();
 
     final count = (prepared['count'] as num?)?.toInt() ?? 0;
@@ -276,14 +304,18 @@ class XtreamLiveFastService {
       }),
       flush: true,
     );
+    checkpoint();
 
     await _replaceFile(itemsTemp, files.items);
+    checkpoint();
     await _replaceFile(metaTemp, files.meta);
+    checkpoint();
 
     // La actualización recién confirmada debe reconstruirse desde la nueva
     // generación de disco, no desde una instantánea RAM anterior.
     _memory.remove(playlistUrl.trim());
     final cached = await _loadCachedFromDisk(playlistUrl);
+    checkpoint();
     if (cached == null || cached.channels.isEmpty) {
       throw const FormatException('No se pudo reconstruir el catálogo LIVE.');
     }
@@ -448,7 +480,7 @@ class XtreamLiveFastService {
             !_retryableConnectionError(error)) {
           rethrow;
         }
-        XtreamHttpClient.cancelBrowsingRequests();
+        XtreamHttpClient.restartTransport();
         await Future<void>.delayed(const Duration(milliseconds: 650));
       }
     }
@@ -463,7 +495,7 @@ class XtreamLiveFastService {
       } catch (error) {
         lastError = error;
         if (attempt == 1 || !_retryableConnectionError(error)) rethrow;
-        XtreamHttpClient.cancelBrowsingRequests();
+        XtreamHttpClient.restartTransport();
         await Future<void>.delayed(const Duration(milliseconds: 650));
       }
     }

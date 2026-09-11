@@ -14,6 +14,7 @@ import android.view.WindowManager
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
+import androidx.media3.common.MimeTypes
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
 import androidx.media3.common.TrackSelectionOverride
@@ -36,6 +37,7 @@ import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
 import java.net.InetAddress
+import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Locale
 import java.util.concurrent.ConcurrentHashMap
@@ -89,6 +91,9 @@ class MainActivity : FlutterActivity() {
     private var liveBufferHealthCheck: Runnable? = null
     private var liveStabilityReset: Runnable? = null
     private var liveEverReady = false
+    private var liveFirstFrameGeneration = -1L
+    private var currentSourceForcedHls = false
+    private var opaqueHlsRecoveryAttempted = false
     private var liveBufferLastProgressAtMs = 0L
     private var liveBufferLastPositionMs = 0L
     private var startupStartedAtMs = 0L
@@ -536,6 +541,9 @@ class MainActivity : FlutterActivity() {
         liveReadySinceMs = 0L
         lastBandwidthEstimate = 0L
         liveEverReady = false
+        liveFirstFrameGeneration = -1L
+        currentSourceForcedHls = false
+        opaqueHlsRecoveryAttempted = false
         liveBufferLastProgressAtMs = 0L
         liveBufferLastPositionMs = 0L
         resetStartupProgress()
@@ -551,14 +559,18 @@ class MainActivity : FlutterActivity() {
         userAgent: String,
         positionMs: Long,
         useFallbackDns: Boolean,
+        forceHls: Boolean = false,
     ) {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
         applyPlaybackGuards()
 
         val factory = mediaSourceFactory(headers, userAgent, useFallbackDns)
+        val useHlsMime = isLive && (currentSourceForcedHls || forceHls || looksLikeHls(url))
+        currentSourceForcedHls = useHlsMime
         val itemBuilder = MediaItem.Builder()
             .setUri(Uri.parse(url))
             .setMediaId(clientGeneration.toString())
+        if (useHlsMime) itemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
         if (isLive) {
             val targetOffset = adaptiveTargetOffsetMs(currentAdaptiveLevel)
             itemBuilder.setLiveConfiguration(
@@ -578,6 +590,18 @@ class MainActivity : FlutterActivity() {
         if (positionMs > 0L) exo.seekTo(positionMs)
         exo.prepare()
         exo.playWhenReady = true
+    }
+
+    private fun looksLikeHls(url: String): Boolean {
+        val lower = url.lowercase(Locale.US)
+        if (lower.contains(".m3u8")) return true
+        val parsed = try { Uri.parse(url) } catch (_: Throwable) { return false }
+        val path = (parsed.path ?: "").lowercase(Locale.US)
+        val query = (parsed.query ?: "").lowercase(Locale.US)
+        return path.contains("/hls/") ||
+            query.contains("m3u8") ||
+            query.contains("format=hls") ||
+            query.contains("type=hls")
     }
 
     private fun mediaSourceFactory(
@@ -664,7 +688,7 @@ class MainActivity : FlutterActivity() {
         val task = Runnable {
             if (!isLive || generation != playbackGeneration) return@Runnable
             val exo = player ?: return@Runnable
-            if (exo.playbackState == Player.STATE_READY) return@Runnable
+            if (liveFirstFrameGeneration == clientGeneration) return@Runnable
 
             val now = System.currentTimeMillis()
             val buffered = exo.bufferedPosition.coerceAtLeast(0L)
@@ -707,6 +731,8 @@ class MainActivity : FlutterActivity() {
                     "generation" to clientGeneration,
                     "errorCode" to "TVFULL_NO_PROGRESS",
                     "errorCodeName" to "TVFULL_NO_PROGRESS",
+                    "errorCategory" to "no_progress",
+                    "retryable" to false,
                     "error" to "La señal no envió datos",
                 )
             )
@@ -1006,11 +1032,23 @@ class MainActivity : FlutterActivity() {
 
     private fun handleRenderedFirstFrame(generation: Long) {
         if (!isActiveClientGeneration(generation)) return
-        liveNetworkProgressAtMs = System.currentTimeMillis()
+        val firstFrameForGeneration = liveFirstFrameGeneration != generation
+        val now = System.currentTimeMillis()
+        liveFirstFrameGeneration = generation
+        liveNetworkProgressAtMs = now
+        if (isLive && firstFrameForGeneration) {
+            cancelStartupDeadline()
+            liveEverReady = true
+            liveReadySinceMs = now
+            liveBufferLastProgressAtMs = 0L
+            liveBufferLastPositionMs = 0L
+            scheduleLiveStabilityReset(playbackGeneration)
+        }
         eventSink?.success(
             mapOf(
                 "eventType" to "playing",
                 "generation" to generation,
+                "firstFrame" to true,
                 "bufferedPosition" to (player?.bufferedPosition ?: 0L).coerceAtLeast(0L),
             )
         )
@@ -1042,15 +1080,12 @@ class MainActivity : FlutterActivity() {
             }
 
             Player.STATE_READY -> {
-                cancelStartupDeadline()
+                if (!isLive) cancelStartupDeadline()
                 cancelLiveBufferHealthCheck()
-                liveEverReady = liveEverReady || isLive
-                if (isLive && liveReadySinceMs == 0L) {
-                    liveReadySinceMs = System.currentTimeMillis()
-                }
+                // READY confirma preparación, no imagen. En LIVE el guardián
+                // sigue activo hasta onRenderedFirstFrame de esta generación.
                 liveBufferLastProgressAtMs = 0L
                 liveBufferLastPositionMs = 0L
-                if (isLive) scheduleLiveStabilityReset(playbackGeneration)
                 if (player?.playWhenReady == true) {
                     applyPlaybackGuards()
                 } else {
@@ -1153,6 +1188,40 @@ class MainActivity : FlutterActivity() {
             }
         }
 
+        if (isLive &&
+            !currentSourceForcedHls &&
+            !opaqueHlsRecoveryAttempted &&
+            isLikelyOpaqueHlsParserError(error)
+        ) {
+            val url = currentUrl
+            if (url != null) {
+                try {
+                    opaqueHlsRecoveryAttempted = true
+                    prepareSource(
+                        url,
+                        currentHeaders,
+                        currentUserAgent,
+                        0L,
+                        useFallbackDns = dnsFallbackActive,
+                        forceHls = true,
+                    )
+                    resetStartupProgress()
+                    scheduleStartupDeadline(playbackGeneration, LIVE_RECOVERY_MAX_WAIT_MS)
+                    eventSink?.success(
+                        mapOf(
+                            "eventType" to "liveRecovery",
+                            "generation" to generation,
+                            "reason" to "opaque_hls_mime",
+                            "attempt" to 1,
+                        )
+                    )
+                    return
+                } catch (_: Throwable) {
+                    // Si no era HLS, continuamos con la clasificación original.
+                }
+            }
+        }
+
         if (!dnsFallbackActive && hasUnknownHost(error)) {
             val url = currentUrl
             if (url != null) {
@@ -1223,22 +1292,36 @@ class MainActivity : FlutterActivity() {
         return null
     }
 
-    private fun playbackErrorCategory(error: PlaybackException, httpStatus: Int?): String = when {
-        httpStatus != null -> "http"
-        hasUnknownHost(error) -> "dns"
-        error.errorCodeName.contains("TIMEOUT", ignoreCase = true) -> "timeout"
-        isFastIoError(error) -> "network"
-        error.errorCodeName.contains("DECOD", ignoreCase = true) -> "decoder"
-        error.errorCodeName.contains("PARS", ignoreCase = true) -> "parser"
-        else -> "playback"
+    private fun playbackErrorCategory(error: PlaybackException, httpStatus: Int?): String {
+        val name = error.errorCodeName.uppercase(Locale.US)
+        return when {
+            httpStatus != null && httpStatus in setOf(401, 403, 404, 410) -> "http_terminal"
+            httpStatus != null && (httpStatus == 408 || httpStatus == 429 || httpStatus in 500..599) -> "http_transient"
+            httpStatus != null -> "http"
+            hasUnknownHost(error) -> "dns"
+            hasSocketTimeout(error) || name.contains("TIMEOUT") -> "timeout"
+            name.contains("DECOD") -> "decoder"
+            name.contains("PARSING_MANIFEST") -> "manifest"
+            name.contains("PARSING_CONTAINER") -> "segment"
+            name.contains("BEHIND_LIVE_WINDOW") -> "microcut"
+            isFastIoError(error) -> "network"
+            name.contains("PARS") -> "parser"
+            else -> "playback"
+        }
     }
 
     private fun isRetryablePlaybackError(error: PlaybackException, httpStatus: Int?): Boolean {
         if (httpStatus != null) {
-            return httpStatus == 404 || httpStatus == 408 || httpStatus == 429 ||
-                httpStatus in 500..599
+            if (httpStatus in setOf(401, 403, 404, 410)) return false
+            return httpStatus == 408 || httpStatus == 429 || httpStatus in 500..599
         }
-        return hasUnknownHost(error) || isFastIoError(error)
+        val category = playbackErrorCategory(error, null)
+        if (category == "decoder" || category == "parser" || category == "manifest") return false
+        return category == "dns" ||
+            category == "timeout" ||
+            category == "network" ||
+            category == "segment" ||
+            category == "microcut"
     }
 
     private fun hasUnknownHost(error: Throwable): Boolean {
@@ -1249,6 +1332,24 @@ class MainActivity : FlutterActivity() {
             cause = cause?.cause
         }
         return false
+    }
+
+    private fun hasSocketTimeout(error: Throwable): Boolean {
+        var cause: Throwable? = error
+        repeat(12) {
+            if (cause == null) return false
+            if (cause is SocketTimeoutException) return true
+            cause = cause?.cause
+        }
+        return false
+    }
+
+    private fun isLikelyOpaqueHlsParserError(error: PlaybackException): Boolean {
+        val url = currentUrl ?: return false
+        if (looksLikeHls(url)) return false
+        val name = error.errorCodeName.uppercase(Locale.US)
+        return name.contains("PARSING_MANIFEST") ||
+            name.contains("PARSING_CONTAINER_UNSUPPORTED")
     }
 
 
@@ -1305,6 +1406,9 @@ class MainActivity : FlutterActivity() {
         liveReadySinceMs = 0L
         lastBandwidthEstimate = 0L
         liveEverReady = false
+        liveFirstFrameGeneration = -1L
+        currentSourceForcedHls = false
+        opaqueHlsRecoveryAttempted = false
         liveBufferLastProgressAtMs = 0L
         liveBufferLastPositionMs = 0L
         startupStartedAtMs = 0L

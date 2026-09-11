@@ -3,18 +3,32 @@ import 'dart:io';
 import 'package:http/http.dart' as http;
 import 'package:http/io_client.dart';
 
-/// Cliente HTTP compartido para Xtream.
-///
-/// La v40 usa explícitamente dart:io/IOClient para tener un pool nativo
-/// predecible: keep-alive, gzip automático, conexiones limitadas por host y
-/// timeouts de conexión/idle. [instance] es estable aunque el pool interno se
-/// reinicie al priorizar reproducción sobre navegación.
+class XtreamRequestCancelled implements Exception {
+  const XtreamRequestCancelled();
+
+  @override
+  String toString() => 'La operación Xtream fue reemplazada por una más nueva.';
+}
+
+/// Cliente HTTP compartido para Xtream con pool nativo y cancelación por generación.
 class XtreamHttpClient {
   XtreamHttpClient._();
 
   static final _RestartableXtreamClient instance = _RestartableXtreamClient();
 
-  static void cancelBrowsingRequests() => instance.restart();
+  static int get generation => instance.generation;
+
+  /// Comienza una navegación nueva y corta transferencias de navegación viejas.
+  static int beginBrowsingOperation() => instance.cancelBrowsing();
+
+  static void ensureGeneration(int expected) =>
+      instance.ensureGeneration(expected);
+
+  /// Se conserva para los sitios que priorizan reproducción sobre navegación.
+  static void cancelBrowsingRequests() => instance.cancelBrowsing();
+
+  /// Reinicia solamente sockets/pool para un retry interno de la misma operación.
+  static void restartTransport() => instance.restartTransport();
 
   static const String browserUserAgent =
       'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
@@ -40,6 +54,9 @@ http.Client _newNativeClient() {
 class _RestartableXtreamClient extends http.BaseClient {
   http.Client _inner = _newNativeClient();
   bool _closed = false;
+  int _generation = 0;
+
+  int get generation => _generation;
 
   @override
   Future<http.StreamedResponse> send(http.BaseRequest request) {
@@ -52,7 +69,20 @@ class _RestartableXtreamClient extends http.BaseClient {
     return client.send(request);
   }
 
-  void restart() {
+  int cancelBrowsing() {
+    if (_closed) throw StateError('El cliente Xtream ya fue cerrado.');
+    _generation++;
+    restartTransport();
+    return _generation;
+  }
+
+  void ensureGeneration(int expected) {
+    if (_closed || expected != _generation) {
+      throw const XtreamRequestCancelled();
+    }
+  }
+
+  void restartTransport() {
     if (_closed) return;
     final previous = _inner;
     _inner = _newNativeClient();
@@ -63,6 +93,7 @@ class _RestartableXtreamClient extends http.BaseClient {
   void close() {
     if (_closed) return;
     _closed = true;
+    _generation++;
     _inner.close();
   }
 }

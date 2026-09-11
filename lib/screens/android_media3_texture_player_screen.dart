@@ -9,6 +9,7 @@ import '../services/channel_health_service.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/live_channel_usage_service.dart';
+import '../services/live_playback_error_policy.dart';
 import '../widgets/channel_logo_image.dart';
 import '../widgets/tv_full_premium_ui.dart';
 
@@ -206,12 +207,10 @@ class _AndroidMedia3TexturePlayerScreenState
         setState(() => _buffering = true);
         break;
       case 'prepared':
-        _autoRetryCount = 0;
         // READY significa que Media3 preparó la fuente, no que el usuario ya
         // tenga imagen. Conservamos el loader hasta el primer frame real.
         break;
       case 'bufferingEnd':
-        _autoRetryCount = 0;
         if (_firstFrameGeneration == _openGeneration) {
           setState(() {
             _buffering = false;
@@ -305,28 +304,16 @@ class _AndroidMedia3TexturePlayerScreenState
       'TV FULL PRO LIVE [$code] $detail '
       'http=$httpStatus retryable=$retryable category=$category',
     );
-    final combined = '$code $detail ${category ?? ''}'.toLowerCase();
-    final status = httpStatus;
-    final permanentHttp = status == 401 ||
-        status == 403 ||
-        status == 410 ||
-        (status == null &&
-            (combined.contains('401') ||
-                combined.contains('403') ||
-                combined.contains('410')));
-    final transient = !permanentHttp &&
-        (retryable == true ||
-            status == 404 ||
-            status == 408 ||
-            status == 429 ||
-            (status != null && status >= 500 && status <= 599) ||
-            combined.contains('network') ||
-            combined.contains('timeout') ||
-            combined.contains('connection') ||
-            combined.contains('io_bad_http_status') ||
-            combined.contains('response_code_5'));
+    final decision = LivePlaybackErrorPolicy.decide(
+      code: code,
+      detail: detail,
+      retryCount: _autoRetryCount,
+      httpStatus: httpStatus,
+      nativeRetryable: retryable,
+      category: category,
+    );
 
-    if (transient && _autoRetryCount < 1) {
+    if (decision.shouldRetry) {
       _autoRetryCount++;
       if (mounted) {
         setState(() {
@@ -334,7 +321,7 @@ class _AndroidMedia3TexturePlayerScreenState
           _friendlyError = null;
         });
       }
-      _retryTimer = Timer(const Duration(milliseconds: 650), () {
+      _retryTimer = Timer(decision.retryDelay, () {
         if (mounted) {
           unawaited(
             _prepareCurrent(
@@ -347,42 +334,10 @@ class _AndroidMedia3TexturePlayerScreenState
       return;
     }
 
-    final shouldCooldown = permanentHttp ||
-        combined.contains('tvfull_no_progress') ||
-        combined.contains('tvfull_stall_exhausted') ||
-        combined.contains('io_bad_http_status') ||
-        combined.contains('response_code_5') ||
-        combined.contains('network') ||
-        combined.contains('timeout') ||
-        combined.contains('connection') ||
-        status == 404 ||
-        status == 408 ||
-        status == 429 ||
-        (status != null && status >= 500 && status <= 599);
-    if (shouldCooldown) {
+    if (decision.markDead) {
       _health.markDead(_channel, reason: code);
     }
-    _finishWithError(_friendlyMessage(combined), '$code · $detail');
-  }
-
-  String _friendlyMessage(String value) {
-    if (value.contains('parsing_container') ||
-        value.contains('parser') ||
-        value.contains('malformed')) {
-      return 'Formato de señal no compatible';
-    }
-    if (value.contains('decoder') || value.contains('codec')) {
-      return 'Formato de video no compatible';
-    }
-    if (value.contains('timeout') ||
-        value.contains('network') ||
-        value.contains('connection')) {
-      return 'Problema de conexión';
-    }
-    if (value.contains('http') || value.contains('response_code')) {
-      return 'Canal no disponible';
-    }
-    return 'Canal temporalmente no disponible';
+    _finishWithError(decision.friendlyMessage, '$code · $detail');
   }
 
   void _finishWithError(String friendly, String technical) {

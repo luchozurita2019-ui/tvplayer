@@ -117,6 +117,9 @@ class XtreamFastCatalogService {
 
   Directory? _cacheDirectory;
   Directory? _transferDirectory;
+  int _movieRefreshGeneration = 0;
+  int _seriesRefreshGeneration = 0;
+  final Map<String, int> _sessionGenerations = <String, int>{};
 
   Future<XtreamConnectionResult> connectionForPlaylist(
     String playlistUrl, {
@@ -130,10 +133,17 @@ class XtreamFastCatalogService {
       if (pending != null) return pending;
     }
 
+    final transportGeneration = XtreamHttpClient.generation;
+    final sessionGeneration = (_sessionGenerations[key] ?? 0) + 1;
+    _sessionGenerations[key] = sessionGeneration;
     final future = XtreamService.reconnectFromPlaylistUrl(key);
     _pendingSessions[key] = future;
     try {
       final connection = await future;
+      XtreamHttpClient.ensureGeneration(transportGeneration);
+      if (_sessionGenerations[key] != sessionGeneration) {
+        throw const XtreamRequestCancelled();
+      }
       _sessions[key] = connection;
       _sessions[connection.playlistUrl] = connection;
       return connection;
@@ -167,7 +177,9 @@ class XtreamFastCatalogService {
   }
 
   void invalidateSession(String playlistUrl) {
-    _sessions.remove(playlistUrl.trim());
+    final key = playlistUrl.trim();
+    _sessions.remove(key);
+    _sessionGenerations[key] = (_sessionGenerations[key] ?? 0) + 1;
   }
 
   Future<XtreamMovieCatalogSnapshot?> loadCachedMovies(
@@ -347,22 +359,52 @@ class XtreamFastCatalogService {
     bool forceSessionRefresh = false,
   }) async {
     final key = playlistUrl.trim();
+    final operationGeneration = ++_movieRefreshGeneration;
+    final browsingGeneration = XtreamHttpClient.beginBrowsingOperation();
+    void checkpoint() {
+      if (operationGeneration != _movieRefreshGeneration) {
+        throw const XtreamRequestCancelled();
+      }
+      XtreamHttpClient.ensureGeneration(browsingGeneration);
+    }
+
+    void progress(XtreamCatalogProgress value) {
+      checkpoint();
+      onProgress?.call(value);
+    }
+
     var connection = await _connectionForCatalog(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
+    checkpoint();
 
     try {
-      final snapshot = await _fetchMovies(connection, playlistUrl, onProgress);
+      final snapshot = await _fetchMovies(
+        connection,
+        playlistUrl,
+        progress,
+        checkpoint: checkpoint,
+      );
+      checkpoint();
       _rememberMovieSnapshot(key, snapshot);
       return snapshot;
     } on _XtreamHttpException catch (error) {
       if (error.statusCode != 401 && error.statusCode != 403) rethrow;
       invalidateSession(playlistUrl);
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
-      final snapshot = await _fetchMovies(connection, playlistUrl, onProgress);
+      checkpoint();
+      final snapshot = await _fetchMovies(
+        connection,
+        playlistUrl,
+        progress,
+        checkpoint: checkpoint,
+      );
+      checkpoint();
       _rememberMovieSnapshot(key, snapshot);
       return snapshot;
+    } on XtreamRequestCancelled {
+      rethrow;
     } on TimeoutException {
       rethrow;
     } on SocketException {
@@ -370,6 +412,7 @@ class XtreamFastCatalogService {
     } catch (error) {
       try {
         final movies = await XtreamVodService.fetchCatalog(connection);
+        checkpoint();
         final categories = _categoriesFromMovies(movies);
         final snapshot = XtreamMovieCatalogSnapshot(
           connection: connection,
@@ -378,9 +421,12 @@ class XtreamFastCatalogService {
           savedAt: DateTime.now(),
           fromCache: false,
         );
-        await _writeMovieCache(playlistUrl, snapshot);
+        await _writeMovieCache(playlistUrl, snapshot, checkpoint: checkpoint);
+        checkpoint();
         _rememberMovieSnapshot(key, snapshot);
         return snapshot;
+      } on XtreamRequestCancelled {
+        rethrow;
       } catch (_) {
         throw error;
       }
@@ -393,12 +439,27 @@ class XtreamFastCatalogService {
     bool forceSessionRefresh = false,
   }) async {
     final key = playlistUrl.trim();
+    final operationGeneration = ++_seriesRefreshGeneration;
+    final browsingGeneration = XtreamHttpClient.beginBrowsingOperation();
+    void checkpoint() {
+      if (operationGeneration != _seriesRefreshGeneration) {
+        throw const XtreamRequestCancelled();
+      }
+      XtreamHttpClient.ensureGeneration(browsingGeneration);
+    }
+
+    void progress(XtreamCatalogProgress value) {
+      checkpoint();
+      onProgress?.call(value);
+    }
+
     final totalWatch = Stopwatch()..start();
     final connectionWatch = Stopwatch()..start();
     var connection = await _connectionForCatalog(
       playlistUrl,
       forceRefresh: forceSessionRefresh,
     );
+    checkpoint();
     connectionWatch.stop();
     var connectionElapsed = connectionWatch.elapsed;
 
@@ -406,10 +467,12 @@ class XtreamFastCatalogService {
       final snapshot = await _fetchSeries(
         connection,
         playlistUrl,
-        onProgress,
+        progress,
         totalWatch: totalWatch,
         connectionElapsed: connectionElapsed,
+        checkpoint: checkpoint,
       );
+      checkpoint();
       _rememberSeriesSnapshot(key, snapshot);
       return snapshot;
     } on _XtreamHttpException catch (error) {
@@ -417,17 +480,22 @@ class XtreamFastCatalogService {
       invalidateSession(playlistUrl);
       final authWatch = Stopwatch()..start();
       connection = await connectionForPlaylist(playlistUrl, forceRefresh: true);
+      checkpoint();
       authWatch.stop();
       connectionElapsed += authWatch.elapsed;
       final snapshot = await _fetchSeries(
         connection,
         playlistUrl,
-        onProgress,
+        progress,
         totalWatch: totalWatch,
         connectionElapsed: connectionElapsed,
+        checkpoint: checkpoint,
       );
+      checkpoint();
       _rememberSeriesSnapshot(key, snapshot);
       return snapshot;
+    } on XtreamRequestCancelled {
+      rethrow;
     } on TimeoutException {
       rethrow;
     } on SocketException {
@@ -436,6 +504,7 @@ class XtreamFastCatalogService {
       try {
         final fallbackWatch = Stopwatch()..start();
         final series = await XtreamSeriesService.fetchCatalog(connection);
+        checkpoint();
         fallbackWatch.stop();
         final categories = _categoriesFromSeries(series);
         if (totalWatch.isRunning) totalWatch.stop();
@@ -458,9 +527,12 @@ class XtreamFastCatalogService {
           savedAt: DateTime.now(),
           fromCache: false,
         );
-        await _writeSeriesCache(playlistUrl, snapshot);
+        await _writeSeriesCache(playlistUrl, snapshot, checkpoint: checkpoint);
+        checkpoint();
         _rememberSeriesSnapshot(key, snapshot);
         return snapshot;
+      } on XtreamRequestCancelled {
+        rethrow;
       } catch (_) {
         throw error;
       }
@@ -470,8 +542,10 @@ class XtreamFastCatalogService {
   Future<XtreamMovieCatalogSnapshot> _fetchMovies(
     XtreamConnectionResult connection,
     String playlistUrl,
-    XtreamCatalogProgressCallback? onProgress,
-  ) async {
+    XtreamCatalogProgressCallback? onProgress, {
+    required void Function() checkpoint,
+  }) async {
+    checkpoint();
     onProgress?.call(
       const XtreamCatalogProgress(
         section: 'MOVIE',
@@ -488,6 +562,9 @@ class XtreamFastCatalogService {
         'get_vod_categories',
         _categoryTimeout,
       );
+      checkpoint();
+    } on XtreamRequestCancelled {
+      rethrow;
     } catch (_) {
       categoriesBody = '[]';
     }
@@ -514,6 +591,7 @@ class XtreamFastCatalogService {
         ),
       ),
     );
+    checkpoint();
 
     onProgress?.call(
       const XtreamCatalogProgress(
@@ -532,6 +610,7 @@ class XtreamFastCatalogService {
     } finally {
       unawaited(_deleteFileQuietly(transfer.file));
     }
+    checkpoint();
 
     final movies = _movieListFromPrepared(prepared['items']);
     if (movies.isEmpty) {
@@ -545,6 +624,7 @@ class XtreamFastCatalogService {
       savedAt: DateTime.now(),
       fromCache: false,
     );
+    checkpoint();
     if (connection.serverName != null ||
         connection.status != null ||
         connection.expiration != null) {
@@ -555,7 +635,9 @@ class XtreamFastCatalogService {
       'movies',
       prepared,
       snapshot.savedAt,
+      checkpoint: checkpoint,
     );
+    checkpoint();
     return snapshot;
   }
 
@@ -565,7 +647,9 @@ class XtreamFastCatalogService {
     XtreamCatalogProgressCallback? onProgress, {
     required Stopwatch totalWatch,
     required Duration connectionElapsed,
+    required void Function() checkpoint,
   }) async {
+    checkpoint();
     onProgress?.call(
       const XtreamCatalogProgress(
         section: 'SERIES',
@@ -586,6 +670,9 @@ class XtreamFastCatalogService {
         _categoryTimeout,
         onBytes: (value) => categoryBytes = value,
       );
+      checkpoint();
+    } on XtreamRequestCancelled {
+      rethrow;
     } catch (_) {
       categoriesBody = '[]';
       categorySuccess = false;
@@ -617,6 +704,7 @@ class XtreamFastCatalogService {
         ),
       ),
     );
+    checkpoint();
 
     onProgress?.call(
       const XtreamCatalogProgress(
@@ -636,6 +724,7 @@ class XtreamFastCatalogService {
     } finally {
       unawaited(_deleteFileQuietly(transfer.file));
     }
+    checkpoint();
     prepareWatch.stop();
 
     final materializeWatch = Stopwatch()..start();
@@ -683,7 +772,9 @@ class XtreamFastCatalogService {
       'series',
       prepared,
       snapshot.savedAt,
+      checkpoint: checkpoint,
     );
+    checkpoint();
     return snapshot;
   }
 
@@ -789,8 +880,9 @@ class XtreamFastCatalogService {
     String playlistUrl,
     String kind,
     Map<String, dynamic> prepared,
-    DateTime savedAt,
-  ) async {
+    DateTime savedAt, {
+    void Function()? checkpoint,
+  }) async {
     await Future<void>.delayed(Duration.zero);
     final payload = <String, dynamic>{
       'version': _cacheVersion,
@@ -799,13 +891,14 @@ class XtreamFastCatalogService {
       'categories': prepared['categories'] ?? const <String>[],
       'items': prepared['items'] ?? const <dynamic>[],
     };
-    await _writeCache(playlistUrl, kind, payload);
+    await _writeCache(playlistUrl, kind, payload, checkpoint: checkpoint);
   }
 
   Future<void> _writeMovieCache(
     String playlistUrl,
-    XtreamMovieCatalogSnapshot snapshot,
-  ) async {
+    XtreamMovieCatalogSnapshot snapshot, {
+    void Function()? checkpoint,
+  }) async {
     final payload = <String, dynamic>{
       'version': _cacheVersion,
       'kind': 'movies',
@@ -813,13 +906,19 @@ class XtreamFastCatalogService {
       'categories': snapshot.categories,
       'items': snapshot.movies.map(_movieToMap).toList(growable: false),
     };
-    await _writeCache(playlistUrl, 'movies', payload);
+    await _writeCache(
+      playlistUrl,
+      'movies',
+      payload,
+      checkpoint: checkpoint,
+    );
   }
 
   Future<void> _writeSeriesCache(
     String playlistUrl,
-    XtreamSeriesCatalogSnapshot snapshot,
-  ) async {
+    XtreamSeriesCatalogSnapshot snapshot, {
+    void Function()? checkpoint,
+  }) async {
     final payload = <String, dynamic>{
       'version': _cacheVersion,
       'kind': 'series',
@@ -827,19 +926,33 @@ class XtreamFastCatalogService {
       'categories': snapshot.categories,
       'items': snapshot.series.map(_seriesToMap).toList(growable: false),
     };
-    await _writeCache(playlistUrl, 'series', payload);
+    await _writeCache(
+      playlistUrl,
+      'series',
+      payload,
+      checkpoint: checkpoint,
+    );
   }
 
   Future<void> _writeCache(
     String playlistUrl,
     String kind,
-    Map<String, dynamic> payload,
-  ) async {
+    Map<String, dynamic> payload, {
+    void Function()? checkpoint,
+  }) async {
     final encoded = await compute(_encodeCachePayload, payload);
+    checkpoint?.call();
     final file = await _cacheFile(playlistUrl, kind);
-    final temp = File('${file.path}.tmp');
+    final temp = File(
+      '${file.path}.tmp_${DateTime.now().microsecondsSinceEpoch}',
+    );
     await temp.writeAsString(encoded, flush: true);
-    if (await file.exists()) await file.delete();
+    checkpoint?.call();
+    if (await file.exists()) {
+      checkpoint?.call();
+      await file.delete();
+    }
+    checkpoint?.call();
     await temp.rename(file.path);
   }
 

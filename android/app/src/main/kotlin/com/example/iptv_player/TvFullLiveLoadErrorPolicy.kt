@@ -6,7 +6,7 @@ import androidx.media3.datasource.HttpDataSource
 import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.exoplayer.upstream.LoadErrorHandlingPolicy
 
-/** Segment/request recovery whose retry budget follows the learned channel profile. */
+/** LIVE request recovery with a small bounded budget and explicit terminal HTTPs. */
 @UnstableApi
 class TvFullLiveLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     @Volatile
@@ -15,8 +15,8 @@ class TvFullLiveLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
     override fun getMinimumLoadableRetryCount(dataType: Int): Int {
         val level = protectionLevel.coerceIn(0, 3)
         return when (dataType) {
-            C.DATA_TYPE_MEDIA_PROGRESSIVE_LIVE -> 6 + level
-            C.DATA_TYPE_MEDIA, C.DATA_TYPE_MANIFEST -> 4 + level
+            C.DATA_TYPE_MEDIA_PROGRESSIVE_LIVE -> 5 + level
+            C.DATA_TYPE_MEDIA, C.DATA_TYPE_MANIFEST -> 3 + level
             else -> super.getMinimumLoadableRetryCount(dataType)
         }
     }
@@ -27,37 +27,27 @@ class TvFullLiveLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
         val exception = loadErrorInfo.exception
         if (exception is HttpDataSource.InvalidResponseCodeException) {
             when (exception.responseCode) {
-                401, 403, 410 -> return C.TIME_UNSET
-                404 -> {
-                    // Un manifiesto inexistente es terminal, pero un segmento HLS
-                    // puede dar 404 brevemente mientras avanza la ventana LIVE.
-                    val dataType = loadErrorInfo.mediaLoadData.dataType
-                    val isMediaSegment = dataType == C.DATA_TYPE_MEDIA ||
-                        dataType == C.DATA_TYPE_MEDIA_PROGRESSIVE_LIVE
-                    if (!isMediaSegment) return C.TIME_UNSET
-                    return when (loadErrorInfo.errorCount) {
-                        1 -> 350L
-                        2 -> 900L
-                        else -> C.TIME_UNSET
-                    }
-                }
-                429 -> return (1500L * loadErrorInfo.errorCount).coerceAtMost(6000L)
-                in 500..599 -> return when (loadErrorInfo.errorCount) {
-                    1 -> 250L
-                    2 -> 600L
-                    3 -> 1200L
-                    else -> (1500L + protectionLevel * 250L).coerceAtMost(2500L)
-                }
+                401, 403, 404, 410 -> return C.TIME_UNSET
+                408 -> return boundedBackoff(loadErrorInfo.errorCount)
+                429 -> return (1200L * loadErrorInfo.errorCount).coerceAtMost(5000L)
+                in 500..599 -> return boundedBackoff(loadErrorInfo.errorCount)
             }
         }
 
         val defaultDelay = super.getRetryDelayMsFor(loadErrorInfo)
         if (defaultDelay == C.TIME_UNSET) return C.TIME_UNSET
         return when (loadErrorInfo.errorCount) {
-            1 -> 250L
+            1 -> 240L
             2 -> 600L
             3 -> 1200L
-            else -> defaultDelay.coerceAtMost(2500L)
+            else -> defaultDelay.coerceAtMost(2200L)
         }
+    }
+
+    private fun boundedBackoff(errorCount: Int): Long = when (errorCount) {
+        1 -> 240L
+        2 -> 600L
+        3 -> 1200L
+        else -> (1500L + protectionLevel * 200L).coerceAtMost(2200L)
     }
 }
