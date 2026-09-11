@@ -61,6 +61,7 @@ class _AndroidMedia3TexturePlayerScreenState
   int _openGeneration = 0;
   int _autoRetryCount = 0;
   int _healthRecordedGeneration = -1;
+  int _firstFrameGeneration = -1;
   DateTime? _prepareStartedAt;
   List<_LiveAudioTrack> _audioTracks = const <_LiveAudioTrack>[];
 
@@ -151,6 +152,7 @@ class _AndroidMedia3TexturePlayerScreenState
       _prepareStartedAt ??= DateTime.now();
     }
     _healthRecordedGeneration = -1;
+    _firstFrameGeneration = -1;
     if (mounted) {
       setState(() {
         _buffering = true;
@@ -204,9 +206,22 @@ class _AndroidMedia3TexturePlayerScreenState
         setState(() => _buffering = true);
         break;
       case 'prepared':
+        _autoRetryCount = 0;
+        // READY significa que Media3 preparó la fuente, no que el usuario ya
+        // tenga imagen. Conservamos el loader hasta el primer frame real.
+        break;
       case 'bufferingEnd':
+        _autoRetryCount = 0;
+        if (_firstFrameGeneration == _openGeneration) {
+          setState(() {
+            _buffering = false;
+            _friendlyError = null;
+          });
+        }
+        break;
       case 'playing':
         _autoRetryCount = 0;
+        _firstFrameGeneration = _openGeneration;
         _recordHealthySignal();
         setState(() {
           _buffering = false;
@@ -225,7 +240,6 @@ class _AndroidMedia3TexturePlayerScreenState
             }
           }
         }
-        _recordHealthySignal();
         setState(() => _audioTracks = tracks);
         break;
       case 'videoSize':
@@ -244,7 +258,13 @@ class _AndroidMedia3TexturePlayerScreenState
             event['errorCode']?.toString() ??
             '';
         final detail = event['error']?.toString() ?? codeName;
-        _handleTechnicalError(codeName, detail);
+        _handleTechnicalError(
+          codeName,
+          detail,
+          httpStatus: (event['httpStatus'] as num?)?.toInt(),
+          retryable: event['retryable'] as bool?,
+          category: event['errorCategory']?.toString(),
+        );
         break;
       case 'completed':
         // Media3 nativo ya hizo sus recuperaciones LIVE estilo Hot Player.
@@ -274,15 +294,33 @@ class _AndroidMedia3TexturePlayerScreenState
     }
   }
 
-  void _handleTechnicalError(String code, String detail) {
-    debugPrint('TV FULL PRO LIVE [$code] $detail');
-    final combined = '$code $detail'.toLowerCase();
-    final permanentHttp = combined.contains('401') ||
-        combined.contains('403') ||
-        combined.contains('404') ||
-        combined.contains('410');
+  void _handleTechnicalError(
+    String code,
+    String detail, {
+    int? httpStatus,
+    bool? retryable,
+    String? category,
+  }) {
+    debugPrint(
+      'TV FULL PRO LIVE [$code] $detail '
+      'http=$httpStatus retryable=$retryable category=$category',
+    );
+    final combined = '$code $detail ${category ?? ''}'.toLowerCase();
+    final status = httpStatus;
+    final permanentHttp = status == 401 ||
+        status == 403 ||
+        status == 410 ||
+        (status == null &&
+            (combined.contains('401') ||
+                combined.contains('403') ||
+                combined.contains('410')));
     final transient = !permanentHttp &&
-        (combined.contains('network') ||
+        (retryable == true ||
+            status == 404 ||
+            status == 408 ||
+            status == 429 ||
+            (status != null && status >= 500 && status <= 599) ||
+            combined.contains('network') ||
             combined.contains('timeout') ||
             combined.contains('connection') ||
             combined.contains('io_bad_http_status') ||
@@ -311,12 +349,16 @@ class _AndroidMedia3TexturePlayerScreenState
 
     final shouldCooldown = permanentHttp ||
         combined.contains('tvfull_no_progress') ||
-        combined.contains('tvfull_fast_io') ||
+        combined.contains('tvfull_stall_exhausted') ||
         combined.contains('io_bad_http_status') ||
         combined.contains('response_code_5') ||
         combined.contains('network') ||
         combined.contains('timeout') ||
-        combined.contains('connection');
+        combined.contains('connection') ||
+        status == 404 ||
+        status == 408 ||
+        status == 429 ||
+        (status != null && status >= 500 && status <= 599);
     if (shouldCooldown) {
       _health.markDead(_channel, reason: code);
     }

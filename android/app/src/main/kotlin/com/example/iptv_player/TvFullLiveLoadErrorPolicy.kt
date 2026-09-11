@@ -27,7 +27,20 @@ class TvFullLiveLoadErrorPolicy : DefaultLoadErrorHandlingPolicy() {
         val exception = loadErrorInfo.exception
         if (exception is HttpDataSource.InvalidResponseCodeException) {
             when (exception.responseCode) {
-                401, 403, 404, 410 -> return C.TIME_UNSET
+                401, 403, 410 -> return C.TIME_UNSET
+                404 -> {
+                    // Un manifiesto inexistente es terminal, pero un segmento HLS
+                    // puede dar 404 brevemente mientras avanza la ventana LIVE.
+                    val dataType = loadErrorInfo.mediaLoadData.dataType
+                    val isMediaSegment = dataType == C.DATA_TYPE_MEDIA ||
+                        dataType == C.DATA_TYPE_MEDIA_PROGRESSIVE_LIVE
+                    if (!isMediaSegment) return C.TIME_UNSET
+                    return when (loadErrorInfo.errorCount) {
+                        1 -> 350L
+                        2 -> 900L
+                        else -> C.TIME_UNSET
+                    }
+                }
                 429 -> return (1500L * loadErrorInfo.errorCount).coerceAtMost(6000L)
                 in 500..599 -> return when (loadErrorInfo.errorCount) {
                     1 -> 250L

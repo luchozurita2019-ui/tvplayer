@@ -47,6 +47,8 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
   Timer? _guideDebounce;
   int _guideGeneration = 0;
   bool _guideLoading = false;
+  final ValueNotifier<_LiveHeroViewState> _heroState =
+      ValueNotifier<_LiveHeroViewState>(const _LiveHeroViewState());
 
   @override
   void initState() {
@@ -70,6 +72,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
         _focusedChannel = null;
         _guide = null;
         _guideLoading = false;
+        _heroState.value = const _LiveHeroViewState();
       } else {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) _focusChannel(widget.channels.first);
@@ -88,6 +91,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
   void dispose() {
     _guideDebounce?.cancel();
     _guideGeneration++;
+    _heroState.dispose();
     super.dispose();
   }
 
@@ -97,18 +101,22 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
 
     _guideDebounce?.cancel();
     final generation = ++_guideGeneration;
-    setState(() {
-      _focusedChannel = channel;
-      _guide = null;
-      _guideLoading = false;
-    });
+    _focusedChannel = channel;
+    _guide = null;
+    _guideLoading = false;
+    _heroState.value = _LiveHeroViewState(channel: channel);
 
     final loader = widget.programGuideLoader;
     if (loader == null) return;
 
     _guideDebounce = Timer(const Duration(milliseconds: 520), () async {
       if (!mounted || generation != _guideGeneration) return;
-      setState(() => _guideLoading = true);
+      _guideLoading = true;
+      _heroState.value = _LiveHeroViewState(
+        channel: channel,
+        guide: _guide,
+        loading: true,
+      );
       LiveProgramGuide? result;
       try {
         result = await loader(channel);
@@ -116,17 +124,19 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
         result = null;
       }
       if (!mounted || generation != _guideGeneration) return;
-      setState(() {
-        _guide = result;
-        _guideLoading = false;
-      });
+      _guide = result;
+      _guideLoading = false;
+      _heroState.value = _LiveHeroViewState(
+        channel: channel,
+        guide: result,
+      );
     });
   }
 
   @override
   Widget build(BuildContext context) {
-    final hero = _focusedChannel ??
-        (widget.channels.isNotEmpty ? widget.channels.first : null);
+    final fallbackHero =
+        widget.channels.isNotEmpty ? widget.channels.first : null;
 
     return Row(
       children: [
@@ -167,10 +177,21 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _toolbar(),
-                if (hero != null) ...[
-                  const SizedBox(height: 8),
-                  _hero(hero),
-                ],
+                ValueListenableBuilder<_LiveHeroViewState>(
+                  valueListenable: _heroState,
+                  builder: (context, state, child) {
+                    final hero = state.channel ?? fallbackHero;
+                    if (hero == null) return const SizedBox.shrink();
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 8),
+                      child: _hero(
+                        hero,
+                        guide: state.guide,
+                        guideLoading: state.loading,
+                      ),
+                    );
+                  },
+                ),
                 const SizedBox(height: 10),
                 _SectionTitle(
                   title: widget.selectedCategory ?? 'Todos los canales',
@@ -269,7 +290,11 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
     );
   }
 
-  Widget _hero(Channel channel) {
+  Widget _hero(
+    Channel channel, {
+    required LiveProgramGuide? guide,
+    required bool guideLoading,
+  }) {
     final group = channel.group?.trim();
     return Container(
       height: 150,
@@ -373,8 +398,8 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
           Expanded(
             flex: 9,
             child: _ProgramGuidePanel(
-              guide: _guide,
-              loading: _guideLoading,
+              guide: guide,
+              loading: guideLoading,
               enabled: widget.programGuideLoader != null,
             ),
           ),
@@ -382,6 +407,18 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
       ),
     );
   }
+}
+
+class _LiveHeroViewState {
+  final Channel? channel;
+  final LiveProgramGuide? guide;
+  final bool loading;
+
+  const _LiveHeroViewState({
+    this.channel,
+    this.guide,
+    this.loading = false,
+  });
 }
 
 class _ProgramGuidePanel extends StatelessWidget {

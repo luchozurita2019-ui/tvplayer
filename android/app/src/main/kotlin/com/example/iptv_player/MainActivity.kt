@@ -21,6 +21,7 @@ import androidx.media3.common.Tracks
 import androidx.media3.common.VideoSize
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.datasource.HttpDataSource
 import androidx.media3.datasource.okhttp.OkHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.DefaultRenderersFactory
@@ -46,7 +47,7 @@ import okhttp3.OkHttpClient
 import okhttp3.dnsoverhttps.DnsOverHttps
 
 @UnstableApi
-class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
+class MainActivity : FlutterActivity() {
     companion object {
         private const val METHOD_CHANNEL = "tvfull/media3_texture"
         private const val EVENT_CHANNEL = "tvfull/media3_texture_events"
@@ -64,6 +65,8 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         private const val LIVE_STABLE_RESET_MS = 30000L
         private const val MAX_LIVE_ENDED_RECOVERIES = 5
         private const val MAX_LIVE_STALL_RECOVERIES = 2
+        private const val MAX_BEHIND_LIVE_WINDOW_RECOVERIES = 1
+        private const val LIVE_DNS_FALLBACK_MAX_WAIT_MS = 18000L
     }
 
     private var player: ExoPlayer? = null
@@ -79,6 +82,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var wifiLock: WifiManager.WifiLock? = null
     private var playbackGeneration = 0L
     private var clientGeneration = 0L
+    private var sessionPlayerListener: Player.Listener? = null
+    private var sessionAnalyticsListener: AnalyticsListener? = null
+    private var resumeAfterLifecycleStop = false
     private var startupDeadline: Runnable? = null
     private var liveBufferHealthCheck: Runnable? = null
     private var liveStabilityReset: Runnable? = null
@@ -90,6 +96,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     private var startupLastBufferedPositionMs = 0L
     private var liveNetworkProgressAtMs = 0L
     private var liveStallRecoveries = 0
+    private var behindLiveWindowRecoveries = 0
     private var currentAdaptiveLevel = 0
     private var liveSessionRebuffers = 0
     private var liveStableWindows = 0
@@ -376,6 +383,14 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         clearKeepScreenOn()
     }
 
+    override fun onStart() {
+        super.onStart()
+        if (resumeAfterLifecycleStop) {
+            resumeAfterLifecycleStop = false
+            player?.play()
+        }
+    }
+
     override fun onResume() {
         super.onResume()
         val exo = player
@@ -389,6 +404,14 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     override fun onPause() {
         releasePlaybackGuards()
         super.onPause()
+    }
+
+    override fun onStop() {
+        val exo = player
+        resumeAfterLifecycleStop = exo?.playWhenReady == true
+        if (resumeAfterLifecycleStop) exo?.pause()
+        releasePlaybackGuards()
+        super.onStop()
     }
 
     private fun initializePlayer(
@@ -420,14 +443,68 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                         .build(),
                     true,
                 )
-                exo.addListener(this)
-                exo.addAnalyticsListener(this)
             }
         textureEntry = flutterEngine.renderer.createSurfaceTexture()
         surface = Surface(textureEntry!!.surfaceTexture())
         player!!.setVideoSurface(surface)
         return textureEntry!!.id()
     }
+
+    private fun bindSessionListeners(requestGeneration: Long) {
+        val exo = player ?: return
+        sessionPlayerListener?.let(exo::removeListener)
+        sessionAnalyticsListener?.let(exo::removeAnalyticsListener)
+
+        val playerListener = object : Player.Listener {
+            override fun onTracksChanged(tracks: Tracks) =
+                handleTracksChanged(requestGeneration, tracks)
+
+            override fun onRenderedFirstFrame() =
+                handleRenderedFirstFrame(requestGeneration)
+
+            override fun onPlaybackStateChanged(playbackState: Int) =
+                handlePlaybackStateChanged(requestGeneration, playbackState)
+
+            override fun onVideoSizeChanged(videoSize: VideoSize) =
+                handleVideoSizeChanged(requestGeneration, videoSize)
+
+            override fun onPlayerError(error: PlaybackException) =
+                handlePlayerError(requestGeneration, error)
+        }
+
+        val analyticsListener = object : AnalyticsListener {
+            override fun onBandwidthEstimate(
+                eventTime: AnalyticsListener.EventTime,
+                totalLoadTimeMs: Int,
+                totalBytesLoaded: Long,
+                bitrateEstimate: Long,
+            ) {
+                handleBandwidthEstimate(requestGeneration, totalBytesLoaded, bitrateEstimate)
+            }
+
+            override fun onVideoCodecError(
+                eventTime: AnalyticsListener.EventTime,
+                videoCodecError: Exception,
+            ) {
+                handleCodecError(requestGeneration, "video", videoCodecError)
+            }
+
+            override fun onAudioCodecError(
+                eventTime: AnalyticsListener.EventTime,
+                audioCodecError: Exception,
+            ) {
+                handleCodecError(requestGeneration, "audio", audioCodecError)
+            }
+        }
+
+        sessionPlayerListener = playerListener
+        sessionAnalyticsListener = analyticsListener
+        exo.addListener(playerListener)
+        exo.addAnalyticsListener(analyticsListener)
+    }
+
+    private fun isActiveClientGeneration(generation: Long): Boolean =
+        generation == clientGeneration
 
     private fun prepare(
         url: String,
@@ -436,12 +513,11 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         positionMs: Long,
         requestGeneration: Long,
     ) {
-        // Detenemos únicamente la fuente anterior; ExoPlayer, decodificadores,
-        // textura y Surface siguen vivos. La fuente vieja se cancela antes de
-        // publicar la nueva generación para no mezclar su cola de eventos.
-        player?.stop()
-        player?.clearMediaItems()
+        // Cada fuente recibe listeners que capturan su propia generación. Si
+        // queda un callback antiguo en cola, conserva la generación vieja y
+        // Flutter lo descarta. ExoPlayer, decodificadores y Surface se reutilizan.
         clientGeneration = requestGeneration
+        bindSessionListeners(requestGeneration)
         playbackGeneration++
         val generation = playbackGeneration
         cancelStartupDeadline()
@@ -454,6 +530,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         liveLoadErrorPolicy.protectionLevel = currentAdaptiveLevel
         endedRecoveries = 0
         liveStallRecoveries = 0
+        behindLiveWindowRecoveries = 0
         liveSessionRebuffers = 0
         liveStableWindows = 0
         liveReadySinceMs = 0L
@@ -479,7 +556,9 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         applyPlaybackGuards()
 
         val factory = mediaSourceFactory(headers, userAgent, useFallbackDns)
-        val itemBuilder = MediaItem.Builder().setUri(Uri.parse(url))
+        val itemBuilder = MediaItem.Builder()
+            .setUri(Uri.parse(url))
+            .setMediaId(clientGeneration.toString())
         if (isLive) {
             val targetOffset = adaptiveTargetOffsetMs(currentAdaptiveLevel)
             itemBuilder.setLiveConfiguration(
@@ -698,11 +777,13 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
 
             val checkNow = System.currentTimeMillis()
             val currentBuffered = current.bufferedPosition.coerceAtLeast(0L)
-            if (currentBuffered > liveBufferLastPositionMs + 250L) {
-                // Siguen llegando datos: dejamos que Media3 reconstruya reserva
-                // sin interrumpir un servidor lento que todavía está vivo.
-                liveBufferLastPositionMs = currentBuffered
-                liveBufferLastProgressAtMs = checkNow
+            if (currentBuffered > liveBufferLastPositionMs + 250L ||
+                liveNetworkProgressAtMs > liveBufferLastProgressAtMs
+            ) {
+                // Buffer o bytes reales de red demuestran que el servidor sigue
+                // vivo. No interrumpimos un stream lento mientras haya progreso.
+                liveBufferLastPositionMs = maxOf(liveBufferLastPositionMs, currentBuffered)
+                liveBufferLastProgressAtMs = maxOf(checkNow, liveNetworkProgressAtMs)
                 scheduleLiveBufferHealthCheck(generation)
                 return@Runnable
             }
@@ -746,6 +827,25 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                         )
                     )
                 }
+                return@Runnable
+            }
+
+            if (silentFor >= LIVE_BUFFER_STALL_MS &&
+                liveStallRecoveries >= MAX_LIVE_STALL_RECOVERIES
+            ) {
+                current.stop()
+                releasePlaybackGuards()
+                eventSink?.success(
+                    mapOf(
+                        "eventType" to "videoError",
+                        "generation" to clientGeneration,
+                        "errorCode" to "TVFULL_STALL_EXHAUSTED",
+                        "errorCodeName" to "TVFULL_STALL_EXHAUSTED",
+                        "errorCategory" to "buffering",
+                        "retryable" to false,
+                        "error" to "La señal dejó de avanzar después de las recuperaciones",
+                    )
+                )
                 return@Runnable
             }
 
@@ -881,41 +981,43 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         return output
     }
 
-    private fun sendTracks() {
+    private fun sendTracks(generation: Long = clientGeneration) {
         eventSink?.success(
             mapOf(
                 "eventType" to "tracksChanged",
-                "generation" to clientGeneration,
+                "generation" to generation,
                 "audioTracks" to serializeTracks(C.TRACK_TYPE_AUDIO),
                 "textTracks" to serializeTracks(C.TRACK_TYPE_TEXT),
             )
         )
     }
 
-    override fun onTracksChanged(tracks: Tracks) {
+    private fun handleTracksChanged(generation: Long, tracks: Tracks) {
+        if (!isActiveClientGeneration(generation)) return
         if (isLive && tracks.groups.isNotEmpty()) {
-            // Descubrir tracks demuestra que la señal está viva aunque todavía
-            // no haya primer frame. Evitamos matar canales lentos justo antes
-            // de que Media3 termine de preparar audio/video.
+            // Tracks prueban actividad, pero el éxito visual se confirma sólo
+            // cuando llega onRenderedFirstFrame para esta misma generación.
             val now = System.currentTimeMillis()
             liveNetworkProgressAtMs = now
             startupLastProgressAtMs = maxOf(startupLastProgressAtMs, now)
         }
-        sendTracks()
+        sendTracks(generation)
     }
 
-    override fun onRenderedFirstFrame() {
+    private fun handleRenderedFirstFrame(generation: Long) {
+        if (!isActiveClientGeneration(generation)) return
         liveNetworkProgressAtMs = System.currentTimeMillis()
         eventSink?.success(
             mapOf(
                 "eventType" to "playing",
-                "generation" to clientGeneration,
+                "generation" to generation,
                 "bufferedPosition" to (player?.bufferedPosition ?: 0L).coerceAtLeast(0L),
             )
         )
     }
 
-    override fun onPlaybackStateChanged(playbackState: Int) {
+    private fun handlePlaybackStateChanged(generation: Long, playbackState: Int) {
+        if (!isActiveClientGeneration(generation)) return
         when (playbackState) {
             Player.STATE_BUFFERING -> {
                 if (player?.playWhenReady == true) applyPlaybackGuards()
@@ -934,7 +1036,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 eventSink?.success(
                     mapOf(
                         "eventType" to "bufferingStart",
-                        "generation" to clientGeneration,
+                        "generation" to generation,
                     )
                 )
             }
@@ -957,16 +1059,16 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                 eventSink?.success(
                     mapOf(
                         "eventType" to "prepared",
-                        "generation" to clientGeneration,
+                        "generation" to generation,
                     )
                 )
                 eventSink?.success(
                     mapOf(
                         "eventType" to "bufferingEnd",
-                        "generation" to clientGeneration,
+                        "generation" to generation,
                     )
                 )
-                sendTracks()
+                sendTracks(generation)
             }
 
             Player.STATE_ENDED -> {
@@ -987,7 +1089,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                     eventSink?.success(
                         mapOf(
                             "eventType" to "liveRecovery",
-                            "generation" to clientGeneration,
+                            "generation" to generation,
                             "reason" to "unexpected_end",
                             "attempt" to endedRecoveries,
                         )
@@ -997,7 +1099,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                     eventSink?.success(
                         mapOf(
                             "eventType" to "completed",
-                            "generation" to clientGeneration,
+                            "generation" to generation,
                         )
                     )
                 }
@@ -1005,7 +1107,8 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         }
     }
 
-    override fun onVideoSizeChanged(videoSize: VideoSize) {
+    private fun handleVideoSizeChanged(generation: Long, videoSize: VideoSize) {
+        if (!isActiveClientGeneration(generation)) return
         if (videoSize.width <= 0 || videoSize.height <= 0) return
         if (isLive) {
             textureEntry?.surfaceTexture()?.setDefaultBufferSize(videoSize.width, videoSize.height)
@@ -1013,7 +1116,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         eventSink?.success(
             mapOf(
                 "eventType" to "videoSize",
-                "generation" to clientGeneration,
+                "generation" to generation,
                 "width" to videoSize.width,
                 "height" to videoSize.height,
                 "pixelWidthHeightRatio" to videoSize.pixelWidthHeightRatio,
@@ -1021,9 +1124,35 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         )
     }
 
-    override fun onPlayerError(error: PlaybackException) {
+    private fun handlePlayerError(generation: Long, error: PlaybackException) {
+        if (!isActiveClientGeneration(generation)) return
         cancelLiveBufferHealthCheck()
         cancelLiveStabilityReset()
+
+        if (isLive &&
+            error.errorCodeName.contains("BEHIND_LIVE_WINDOW", ignoreCase = true) &&
+            behindLiveWindowRecoveries < MAX_BEHIND_LIVE_WINDOW_RECOVERIES
+        ) {
+            val exo = player
+            if (exo != null) {
+                behindLiveWindowRecoveries++
+                exo.seekToDefaultPosition()
+                exo.prepare()
+                exo.play()
+                resetStartupProgress()
+                scheduleStartupDeadline(playbackGeneration, LIVE_RECOVERY_MAX_WAIT_MS)
+                eventSink?.success(
+                    mapOf(
+                        "eventType" to "liveRecovery",
+                        "generation" to generation,
+                        "reason" to "behind_live_window",
+                        "attempt" to behindLiveWindowRecoveries,
+                    )
+                )
+                return
+            }
+        }
+
         if (!dnsFallbackActive && hasUnknownHost(error)) {
             val url = currentUrl
             if (url != null) {
@@ -1037,17 +1166,18 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
                         resumePosition,
                         useFallbackDns = true,
                     )
+                    resetStartupProgress()
+                    scheduleStartupDeadline(playbackGeneration, LIVE_DNS_FALLBACK_MAX_WAIT_MS)
                     eventSink?.success(
                         mapOf(
                             "eventType" to "dnsFallback",
-                            "generation" to clientGeneration,
-                            "host" to (Uri.parse(url).host ?: ""),
+                            "generation" to generation,
+                            "host" to Uri.parse(url).host,
                         )
                     )
                     return
                 } catch (_: Throwable) {
-                    // El deadline total de LIVE sigue vigente; no encadenamos
-                    // resoluciones/reintentos adicionales.
+                    // Si el fallback no puede iniciarse, informamos el error original.
                 }
             }
         }
@@ -1055,14 +1185,20 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         cancelStartupDeadline()
         releasePlaybackGuards()
         val fastIo = isFastIoError(error)
+        val httpStatus = findHttpStatus(error)
         eventSink?.success(
             mapOf(
                 "eventType" to "videoError",
-                "generation" to clientGeneration,
+                "generation" to generation,
                 "errorCode" to error.errorCode,
-                "errorCodeName" to if (fastIo) "TVFULL_FAST_IO" else error.errorCodeName,
-                "error" to if (fastIo) "La señal no respondió" else
-                    (error.message ?: "error de reproducción"),
+                "errorCodeName" to error.errorCodeName,
+                "errorCategory" to playbackErrorCategory(error, httpStatus),
+                "retryable" to isRetryablePlaybackError(error, httpStatus),
+                "fastIo" to fastIo,
+                "httpStatus" to httpStatus,
+                "causeType" to (error.cause?.javaClass?.simpleName ?: ""),
+                "causeMessage" to (error.cause?.message ?: ""),
+                "error" to (error.message ?: "error de reproducción"),
             )
         )
     }
@@ -1073,6 +1209,36 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
             name.contains("network") ||
             name.contains("timeout") ||
             name.contains("bad_http_status")
+    }
+
+    private fun findHttpStatus(error: Throwable): Int? {
+        var cause: Throwable? = error
+        repeat(12) {
+            val current = cause ?: return null
+            if (current is HttpDataSource.InvalidResponseCodeException) {
+                return current.responseCode
+            }
+            cause = current.cause
+        }
+        return null
+    }
+
+    private fun playbackErrorCategory(error: PlaybackException, httpStatus: Int?): String = when {
+        httpStatus != null -> "http"
+        hasUnknownHost(error) -> "dns"
+        error.errorCodeName.contains("TIMEOUT", ignoreCase = true) -> "timeout"
+        isFastIoError(error) -> "network"
+        error.errorCodeName.contains("DECOD", ignoreCase = true) -> "decoder"
+        error.errorCodeName.contains("PARS", ignoreCase = true) -> "parser"
+        else -> "playback"
+    }
+
+    private fun isRetryablePlaybackError(error: PlaybackException, httpStatus: Int?): Boolean {
+        if (httpStatus != null) {
+            return httpStatus == 404 || httpStatus == 408 || httpStatus == 429 ||
+                httpStatus in 500..599
+        }
+        return hasUnknownHost(error) || isFastIoError(error)
     }
 
     private fun hasUnknownHost(error: Throwable): Boolean {
@@ -1086,42 +1252,25 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
     }
 
 
-    override fun onBandwidthEstimate(
-        eventTime: AnalyticsListener.EventTime,
-        totalLoadTimeMs: Int,
+    private fun handleBandwidthEstimate(
+        generation: Long,
         totalBytesLoaded: Long,
         bitrateEstimate: Long,
     ) {
-        if (!isLive || bitrateEstimate <= 0L) return
+        if (!isActiveClientGeneration(generation) || !isLive || bitrateEstimate <= 0L) return
         if (totalBytesLoaded > 0L) liveNetworkProgressAtMs = System.currentTimeMillis()
         lastBandwidthEstimate = bitrateEstimate
         evaluateAdaptiveProfile("bandwidth")
     }
 
-    override fun onVideoCodecError(
-        eventTime: AnalyticsListener.EventTime,
-        videoCodecError: Exception,
-    ) {
+    private fun handleCodecError(generation: Long, kind: String, error: Exception) {
+        if (!isActiveClientGeneration(generation)) return
         eventSink?.success(
             mapOf(
                 "eventType" to "codecError",
-                "generation" to clientGeneration,
-                "kind" to "video",
-                "error" to (videoCodecError.message ?: videoCodecError.javaClass.simpleName),
-            )
-        )
-    }
-
-    override fun onAudioCodecError(
-        eventTime: AnalyticsListener.EventTime,
-        audioCodecError: Exception,
-    ) {
-        eventSink?.success(
-            mapOf(
-                "eventType" to "codecError",
-                "generation" to clientGeneration,
-                "kind" to "audio",
-                "error" to (audioCodecError.message ?: audioCodecError.javaClass.simpleName),
+                "generation" to generation,
+                "kind" to kind,
+                "error" to (error.message ?: error.javaClass.simpleName),
             )
         )
     }
@@ -1132,8 +1281,10 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         cancelLiveBufferHealthCheck()
         cancelLiveStabilityReset()
         releasePlaybackGuards()
-        player?.removeListener(this)
-        player?.removeAnalyticsListener(this)
+        sessionPlayerListener?.let { player?.removeListener(it) }
+        sessionAnalyticsListener?.let { player?.removeAnalyticsListener(it) }
+        sessionPlayerListener = null
+        sessionAnalyticsListener = null
         player?.stop()
         player?.clearMediaItems()
         player?.release()
@@ -1147,6 +1298,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         currentUserAgent = DEFAULT_UA
         endedRecoveries = 0
         liveStallRecoveries = 0
+        behindLiveWindowRecoveries = 0
         currentAdaptiveLevel = 0
         liveSessionRebuffers = 0
         liveStableWindows = 0
@@ -1160,6 +1312,7 @@ class MainActivity : FlutterActivity(), Player.Listener, AnalyticsListener {
         startupLastBufferedPositionMs = 0L
         liveNetworkProgressAtMs = 0L
         dnsFallbackActive = false
+        resumeAfterLifecycleStop = false
         normalMediaSourceFactory = null
         normalMediaSourceKey = null
         fallbackMediaSourceFactory = null

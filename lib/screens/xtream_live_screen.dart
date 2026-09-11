@@ -51,6 +51,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   CatalogIndex<Channel>? _catalogIndex;
   _LiveData? _indexedData;
   _LiveData? _visibleData;
+  late final LiveProgramGuideLoader _programGuideLoader;
 
   @override
   void initState() {
@@ -58,6 +59,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
     _parental.addListener(_onParentalChanged);
     unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
+    _programGuideLoader = (channel) => LiveEpgService.instance
+        .loadXtreamNowNext(widget.playlist.source, channel);
     _future = _loadInitial();
   }
 
@@ -392,8 +395,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         },
         isFavorite: provider.isFavorite,
         onFavoriteToggle: provider.toggleFavorite,
-        programGuideLoader: (channel) => LiveEpgService.instance
-            .loadXtreamNowNext(widget.playlist.source, channel),
+        programGuideLoader: _programGuideLoader,
       );
     }
 
