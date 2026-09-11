@@ -2,4 +2,4 @@ TV FULL PRO V37 candidate build requested.
 base=9766496746e877421fb1dd0a11130d867fd035ab
 version=1.4.5+37
 stable_installer=untouched
-trigger=manual-after-patch-apply
+trigger=after-unused-epg-cleanup
