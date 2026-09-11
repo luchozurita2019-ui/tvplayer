@@ -42,11 +42,13 @@ class LiveEpgService {
 
   static const Duration _timeout = Duration(seconds: 5);
   static const Duration _cacheFreshFor = Duration(minutes: 3);
+  static const Duration _negativeFreshFor = Duration(seconds: 20);
   static const int _maxCacheEntries = 24;
 
   final Map<String, _LiveEpgCacheEntry> _cache = <String, _LiveEpgCacheEntry>{};
   final Map<String, Future<LiveProgramGuide?>> _pending =
       <String, Future<LiveProgramGuide?>>{};
+  final Map<String, DateTime> _negativeCache = <String, DateTime>{};
 
   Future<LiveProgramGuide?> loadXtreamNowNext(
     String playlistUrl,
@@ -64,6 +66,16 @@ class LiveEpgService {
       return cached.guide;
     }
 
+    final negativeAt = _negativeCache[key];
+    if (negativeAt != null) {
+      if (DateTime.now().difference(negativeAt) < _negativeFreshFor) return null;
+      _negativeCache.remove(key);
+    }
+
+    // Durante apertura, zapping o recuperación LIVE, la reproducción tiene
+    // prioridad absoluta. La caché positiva anterior sigue disponible sin red.
+    if (XtreamHttpClient.browsingSuspended) return null;
+
     final existing = _pending[key];
     if (existing != null) return existing;
 
@@ -72,7 +84,10 @@ class LiveEpgService {
     try {
       final guide = await future;
       if (guide != null && guide.hasPrograms) {
+        _negativeCache.remove(key);
         _remember(key, guide);
+      } else {
+        _negativeCache[key] = DateTime.now();
       }
       return guide;
     } finally {
@@ -85,6 +100,7 @@ class LiveEpgService {
     if (source.isEmpty) return;
     final prefix = '$source|';
     _cache.removeWhere((key, value) => key.startsWith(prefix));
+    _negativeCache.removeWhere((key, value) => key.startsWith(prefix));
     _pending.removeWhere((key, value) => key.startsWith(prefix));
   }
 
@@ -93,9 +109,11 @@ class LiveEpgService {
     String streamId,
   ) async {
     try {
+      if (XtreamHttpClient.browsingSuspended) return null;
       var connection = await XtreamFastCatalogService.instance
           .connectionForPlaylist(playlistUrl);
       for (var attempt = 0; attempt < 2; attempt++) {
+        if (XtreamHttpClient.browsingSuspended) return null;
         try {
           return await _fetchWithConnection(connection, streamId);
         } on _XtreamEpgHttpException catch (error) {
@@ -122,6 +140,7 @@ class LiveEpgService {
     final http.Client client = XtreamHttpClient.instance;
 
     for (final action in actions) {
+      if (XtreamHttpClient.browsingSuspended) return null;
       try {
         final uri = _endpoint(
           connection.apiServer,
