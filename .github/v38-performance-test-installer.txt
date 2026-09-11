@@ -1,0 +1,6 @@
+TV FULL PRO 1.4.6+38 performance-only test active.
+source_commit=21ff7417d11acfaf27c1a30b0df2b83db05fe49e
+compiled_run=34639628136
+promotion_run=34640551951
+arm32_sha256=15a25777c49ed4d7fe1817906c8514dfa2f62fa57731562bdc788b69d462fc05
+arm64_sha256=f5e1cf2bf170cd8c4da7eabe5962644a78fe20e33504bad28cd769e721de211a
