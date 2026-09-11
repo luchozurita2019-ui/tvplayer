@@ -118,12 +118,22 @@ jobs:
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
           test -x "$AAPT"
+
           for apk in artifact/TV-FULL-PRO-V38-ARM32.apk artifact/TV-FULL-PRO-V38-ARM64.apk; do
-            "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.txt"
-            grep -qi "$CERT_SHA256" "$apk.signature.txt"
+            echo "Verifying $apk"
+            "$APKSIGNER" verify --verbose --print-certs "$apk" | tee "$apk.signature.txt"
+            CERT_ACTUAL="$(sed -n 's/^Signer #1 certificate SHA-256 digest: //p' "$apk.signature.txt" | head -n 1 | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+            echo "certificate_sha256=$CERT_ACTUAL"
+            test "$CERT_ACTUAL" = "$CERT_SHA256"
+
             "$AAPT" dump badging "$apk" > "$apk.badging.txt"
-            grep -q "package: name='com.tvfull.pro.tv.v10safe' versionCode='38' versionName='1.4.6'" "$apk.badging.txt"
+            PACKAGE_LINE="$(head -n 1 "$apk.badging.txt")"
+            echo "$PACKAGE_LINE"
+            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "name='com.tvfull.pro.tv.v10safe'"
+            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "versionCode='38'"
+            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "versionName='1.4.6'"
           done
+
           ARM32_SHA="$(sha256sum artifact/TV-FULL-PRO-V38-ARM32.apk | awk '{print $1}')"
           ARM64_SHA="$(sha256sum artifact/TV-FULL-PRO-V38-ARM64.apk | awk '{print $1}')"
           ARM32_SIZE="$(stat -c '%s' artifact/TV-FULL-PRO-V38-ARM32.apk)"
@@ -223,9 +233,10 @@ jobs:
         run: rm -f android/key.properties android/tvfull-release.jks
 
       - name: Upload V38 verification artifacts
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V38-PERFORMANCE-INSTALLER
+          name: TV-FULL-PRO-V38-PERFORMANCE-INSTALLER-${{ github.run_id }}
           path: artifact/
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 30
