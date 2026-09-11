@@ -1,0 +1,173 @@
+name: Promote Built V38 Performance Artifact to Installer
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/v38-artifact-promotion-request.txt'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  verify-and-promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      SOURCE_RUN_ID: 34639628136
+      SOURCE_ARTIFACT: TV-FULL-PRO-V38-PERFORMANCE-INSTALLER-34639628136
+      VALIDATED_V38_SHA: 21ff7417d11acfaf27c1a30b0df2b83db05fe49e
+      CERT_SHA256: 40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a
+
+    steps:
+      - name: Checkout stable manifest branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+          fetch-depth: 0
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Download already built V38 APKs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/v38
+          gh run download "$SOURCE_RUN_ID" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$SOURCE_ARTIFACT" \
+            --dir /tmp/v38
+          test -f /tmp/v38/TV-FULL-PRO-V38-ARM32.apk
+          test -f /tmp/v38/TV-FULL-PRO-V38-ARM64.apk
+
+      - name: Verify both APKs exactly
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+
+          for apk in /tmp/v38/TV-FULL-PRO-V38-ARM32.apk /tmp/v38/TV-FULL-PRO-V38-ARM64.apk; do
+            echo "=== VERIFY $apk ==="
+            SIG="$($APKSIGNER verify --verbose --print-certs "$apk")"
+            printf '%s\n' "$SIG"
+            printf '%s\n' "$SIG" | grep -Fiq "certificate SHA-256 digest: $CERT_SHA256"
+
+            PACKAGE_LINE="$($AAPT dump badging "$apk" | head -n 1)"
+            echo "$PACKAGE_LINE"
+            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "name='com.tvfull.pro.tv.v10safe'"
+            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "versionCode='38'"
+            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "versionName='1.4.6'"
+          done
+
+          ARM32_SHA="$(sha256sum /tmp/v38/TV-FULL-PRO-V38-ARM32.apk | awk '{print $1}')"
+          ARM64_SHA="$(sha256sum /tmp/v38/TV-FULL-PRO-V38-ARM64.apk | awk '{print $1}')"
+          ARM32_SIZE="$(stat -c '%s' /tmp/v38/TV-FULL-PRO-V38-ARM32.apk)"
+          ARM64_SIZE="$(stat -c '%s' /tmp/v38/TV-FULL-PRO-V38-ARM64.apk)"
+          echo "arm32_sha=$ARM32_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm64_sha=$ARM64_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm32_size=$ARM32_SIZE" >> "$GITHUB_OUTPUT"
+          echo "arm64_size=$ARM64_SIZE" >> "$GITHUB_OUTPUT"
+          echo "ARM32=$ARM32_SHA ($ARM32_SIZE bytes)"
+          echo "ARM64=$ARM64_SHA ($ARM64_SIZE bytes)"
+
+      - name: Publish isolated V38 test release
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="tv-full-pro-v38-performance-test-${GITHUB_RUN_ID}"
+          cp /tmp/v38/TV-FULL-PRO-V38-ARM32.apk /tmp/v38/TV-FULL-PRO-ARM32.apk
+          cp /tmp/v38/TV-FULL-PRO-V38-ARM64.apk /tmp/v38/TV-FULL-PRO-ARM64.apk
+          gh release create "$TAG" \
+            /tmp/v38/TV-FULL-PRO-ARM32.apk \
+            /tmp/v38/TV-FULL-PRO-ARM64.apk \
+            --prerelease \
+            --target "$VALIDATED_V38_SHA" \
+            --title 'TV FULL PRO 1.4.6+38 - prueba de rendimiento' \
+            --notes "V38 performance-only; sin cambios de interfaz. Source: $VALIDATED_V38_SHA. APKs recompiladas, tests pasados y firma histórica verificada."
+          echo "base=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Point installer manifest to V38 test
+        env:
+          PUBLIC_BASE: ${{ steps.publish.outputs.base }}
+          ARM32_SHA: ${{ steps.meta.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.meta.outputs.arm64_sha }}
+          ARM32_SIZE: ${{ steps.meta.outputs.arm32_size }}
+          ARM64_SIZE: ${{ steps.meta.outputs.arm64_size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin android-tv-full-pro-clean-source
+          git reset --hard origin/android-tv-full-pro-clean-source
+
+          cat > tv_full_installer/latest.json <<EOF
+          {
+            "versionName": "1.4.6",
+            "versionCode": 38,
+            "packageName": "com.tvfull.pro.tv.v10safe",
+            "certificateSha256": "$CERT_SHA256",
+            "arm32": {
+              "url": "$PUBLIC_BASE/TV-FULL-PRO-ARM32.apk",
+              "sha256": "$ARM32_SHA",
+              "size": $ARM32_SIZE
+            },
+            "arm64": {
+              "url": "$PUBLIC_BASE/TV-FULL-PRO-ARM64.apk",
+              "sha256": "$ARM64_SHA",
+              "size": $ARM64_SIZE
+            }
+          }
+          EOF
+
+          printf '%s\n' \
+            'TV FULL PRO 1.4.6+38 performance-only test active.' \
+            "source_commit=$VALIDATED_V38_SHA" \
+            "compiled_run=$SOURCE_RUN_ID" \
+            "promotion_run=$GITHUB_RUN_ID" \
+            "arm32_sha256=$ARM32_SHA" \
+            "arm64_sha256=$ARM64_SHA" \
+            > .github/v38-performance-test-installer.txt
+
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tv_full_installer/latest.json .github/v38-performance-test-installer.txt
+          git commit -m 'Point installer to verified V38 performance test'
+          git push origin HEAD:android-tv-full-pro-clean-source
+
+      - name: Verify public installer is V38
+        env:
+          ARM32_SHA: ${{ steps.meta.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.meta.outputs.arm64_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/android-tv-full-pro-clean-source/tv_full_installer/latest.json'
+          for attempt in $(seq 1 20); do
+            BODY="$(curl -L --fail --silent --show-error "$URL" || true)"
+            if printf '%s' "$BODY" | grep -q '"versionCode": 38' && \
+               printf '%s' "$BODY" | grep -q '"versionName": "1.4.6"' && \
+               printf '%s' "$BODY" | grep -q "$ARM32_SHA" && \
+               printf '%s' "$BODY" | grep -q "$ARM64_SHA"; then
+              echo 'VERIFIED: official installer is serving V38 performance-only test.'
+              exit 0
+            fi
+            sleep 3
+          done
+          echo 'Public installer manifest did not verify as V38.'
+          exit 1
