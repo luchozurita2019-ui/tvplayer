@@ -59,7 +59,9 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
 
-          for apk in /tmp/v38/TV-FULL-PRO-V38-ARM32.apk /tmp/v38/TV-FULL-PRO-V38-ARM64.apk; do
+          verify_apk() {
+            local apk="$1"
+            local expected_code="$2"
             echo "=== VERIFY $apk ==="
             SIG="$($APKSIGNER verify --verbose --print-certs "$apk")"
             printf '%s\n' "$SIG"
@@ -68,9 +70,14 @@ jobs:
             PACKAGE_LINE="$($AAPT dump badging "$apk" | head -n 1)"
             echo "$PACKAGE_LINE"
             printf '%s\n' "$PACKAGE_LINE" | grep -Fq "name='com.tvfull.pro.tv.v10safe'"
-            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "versionCode='38'"
+            printf '%s\n' "$PACKAGE_LINE" | grep -Fq "versionCode='$expected_code'"
             printf '%s\n' "$PACKAGE_LINE" | grep -Fq "versionName='1.4.6'"
-          done
+          }
+
+          # Flutter --split-per-abi offsets the base build number by ABI:
+          # armeabi-v7a => 1000 + 38, arm64-v8a => 2000 + 38.
+          verify_apk /tmp/v38/TV-FULL-PRO-V38-ARM32.apk 1038
+          verify_apk /tmp/v38/TV-FULL-PRO-V38-ARM64.apk 2038
 
           ARM32_SHA="$(sha256sum /tmp/v38/TV-FULL-PRO-V38-ARM32.apk | awk '{print $1}')"
           ARM64_SHA="$(sha256sum /tmp/v38/TV-FULL-PRO-V38-ARM64.apk | awk '{print $1}')"
