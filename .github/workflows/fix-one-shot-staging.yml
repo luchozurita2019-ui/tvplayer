@@ -1,0 +1,41 @@
+name: Fix one-shot staging
+
+on:
+  push:
+    branches:
+      - fix/playback-priority-cancellation
+    paths:
+      - '.github/workflows/fix-one-shot-staging.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/playback-priority-cancellation
+      - name: Fix staging in target workflow
+        shell: python
+        run: |
+          from pathlib import Path
+          p = Path('.github/workflows/apply-epg-priority-fix.yml')
+          lines = p.read_text().splitlines()
+          changed = False
+          for i, line in enumerate(lines):
+              stripped = line.lstrip()
+              if not changed and stripped.startswith('git add '):
+                  lines[i] = line[:len(line)-len(stripped)] + 'git add -A'
+                  changed = True
+          assert changed
+          p.write_text('\n'.join(lines) + '\n')
+      - name: Commit fixer
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git rm .github/workflows/fix-one-shot-staging.yml
+          git add -A
+          git commit -m "fix ci: stage deleted EPG one-shot correctly"
+          git push origin HEAD:fix/playback-priority-cancellation
