@@ -1,16 +1,16 @@
 {
-  "versionName": "1.4.5",
-  "versionCode": 37,
+  "versionName": "1.4.6",
+  "versionCode": 38,
   "packageName": "com.tvfull.pro.tv.v10safe",
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
     "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk",
-    "sha256": "ef9e53a588309277fa9628a2967bdf9b0eadf848ab2417476a6e81169ca5d774",
-    "size": 34925837
+    "sha256": "f35f777f69970c05908816bd81d2029358351fd5835c9aa75cc9a898874e525c",
+    "size": 34942221
   },
   "arm64": {
     "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk",
-    "sha256": "a1facc945822801381172fe67b61dc98d154b83d10b67d365dc79e7c3fa1d307",
+    "sha256": "4250e80c009943b0cb9e1211a7735474ea506edfd639546cf1839b202cbaf24c",
     "size": 38649143
   }
 }
