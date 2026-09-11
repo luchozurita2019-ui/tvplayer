@@ -19,25 +19,58 @@ List<Channel> parseM3uInBackground(String content) {
 /// - #KODIPROP:inputstream.adaptive.stream_headers / manifest_headers
 /// - URL|User-Agent=...&Referer=...&Origin=...
 class M3uParser {
-  static List<Channel> parse(String content) {
+  static List<Channel> parse(String content, {Uri? baseUri}) {
     final channels = <Channel>[];
-    final parser = M3uLineParser();
-    for (final line in const LineSplitter().convert(content)) {
+    final parser = M3uLineParser(baseUri: baseUri);
+    var first = true;
+    for (var line in const LineSplitter().convert(content)) {
+      if (first) {
+        line = _stripBom(line);
+        first = false;
+      }
       final channel = parser.addLine(line);
       if (channel != null) channels.add(channel);
     }
     return channels;
   }
 
+  static String _stripBom(String value) =>
+      value.startsWith('\uFEFF') ? value.substring(1) : value;
+
   static String? _extractAttr(String line, String attr) {
-    final pattern = '$attr="';
-    final start = line.indexOf(pattern);
-    if (start == -1) return null;
-    final valueStart = start + pattern.length;
-    final end = line.indexOf('"', valueStart);
-    if (end == -1) return null;
-    final value = line.substring(valueStart, end).trim();
-    return value.isEmpty ? null : value;
+    final escaped = RegExp.escape(attr);
+    final doubleQuoted = RegExp(
+      '(?:^|\\s)$escaped\\s*=\\s*"([^"]*)"',
+      caseSensitive: false,
+    ).firstMatch(line);
+    final singleQuoted = doubleQuoted == null
+        ? RegExp(
+            "(?:^|\\s)$escaped\\s*=\\s*'([^']*)'",
+            caseSensitive: false,
+          ).firstMatch(line)
+        : null;
+    final value = (doubleQuoted?.group(1) ?? singleQuoted?.group(1))?.trim();
+    return value == null || value.isEmpty ? null : value;
+  }
+
+  /// Devuelve la primera coma que no esté dentro de comillas. EXTINF permite
+  /// comas en atributos/títulos y cortar en la primera coma literal corrompe
+  /// metadatos perfectamente válidos.
+  static int _metadataComma(String line) {
+    var quote = 0;
+    for (var i = 0; i < line.length; i++) {
+      final unit = line.codeUnitAt(i);
+      if (unit == 0x22 || unit == 0x27) {
+        if (quote == 0) {
+          quote = unit;
+        } else if (quote == unit) {
+          quote = 0;
+        }
+      } else if (unit == 0x2C && quote == 0) {
+        return i;
+      }
+    }
+    return -1;
   }
 
   static void _parseExtHttp(String raw, Map<String, String> target) {
@@ -110,6 +143,9 @@ class M3uParser {
 /// produce un canal en cuanto aparece su URL. Permite consumir listas grandes
 /// directamente desde la respuesta HTTP sin `join()` ni `split()` globales.
 class M3uLineParser {
+  final Uri? baseUri;
+  bool _firstLine = true;
+
   String? pendingName;
   String? pendingLogo;
   String? pendingGroup;
@@ -118,12 +154,21 @@ class M3uLineParser {
   String? pendingReferrer;
   final Map<String, String> pendingHeaders = <String, String>{};
 
+  M3uLineParser({this.baseUri});
+
   Channel? addLine(String rawLine) {
-    final line = rawLine.trim();
+    var line = rawLine.trim();
+    if (_firstLine) {
+      line = M3uParser._stripBom(line);
+      _firstLine = false;
+    }
     if (line.isEmpty) return null;
 
-    if (line.startsWith('#EXTINF')) {
-      final commaIndex = line.indexOf(',');
+    if (line.toUpperCase().startsWith('#EXTINF')) {
+      // Un EXTINF nuevo invalida cualquier entrada anterior incompleta. Evita
+      // que headers/metadatos huérfanos contaminen el siguiente canal.
+      _resetPending();
+      final commaIndex = M3uParser._metadataComma(line);
       pendingName = commaIndex != -1
           ? line.substring(commaIndex + 1).trim()
           : 'Canal sin nombre';
@@ -131,7 +176,7 @@ class M3uLineParser {
       pendingLogo = M3uParser._extractAttr(line, 'tvg-logo');
       pendingGroup = M3uParser._extractAttr(line, 'group-title');
       pendingTvgId = M3uParser._extractAttr(line, 'tvg-id');
-    } else if (line.startsWith('#EXTVLCOPT:')) {
+    } else if (line.toUpperCase().startsWith('#EXTVLCOPT:')) {
       final rawOption = line.substring('#EXTVLCOPT:'.length).trim();
       final equals = rawOption.indexOf('=');
       if (equals > 0) {
@@ -163,19 +208,29 @@ class M3uLineParser {
           }
         }
       }
-    } else if (line.startsWith('#EXTHTTP:')) {
+    } else if (line.toUpperCase().startsWith('#EXTHTTP:')) {
       M3uParser._parseExtHttp(
-          line.substring('#EXTHTTP:'.length), pendingHeaders);
-    } else if (line.startsWith(
-          '#KODIPROP:inputstream.adaptive.stream_headers=',
+        line.substring('#EXTHTTP:'.length),
+        pendingHeaders,
+      );
+    } else if (line.toLowerCase().startsWith(
+          '#kodiprop:inputstream.adaptive.stream_headers=',
         ) ||
-        line.startsWith('#KODIPROP:inputstream.adaptive.manifest_headers=')) {
+        line.toLowerCase().startsWith(
+          '#kodiprop:inputstream.adaptive.manifest_headers=',
+        )) {
       final equals = line.indexOf('=');
       if (equals != -1) {
         M3uParser._parseHeaderQuery(line.substring(equals + 1), pendingHeaders);
       }
     } else if (!line.startsWith('#')) {
       final parsed = M3uParser._splitUrlAndInlineHeaders(line);
+      final normalizedUrl = _normalizeStreamUrl(parsed.url);
+      if (normalizedUrl == null) {
+        // HTML/texto de error con HTTP 200 no debe transformarse en canales.
+        // Conservamos metadatos pendientes por si la siguiente línea sí es URL.
+        return null;
+      }
       pendingHeaders.addAll(parsed.headers);
 
       // Sincronizamos los campos históricos para listas guardadas y código
@@ -186,7 +241,7 @@ class M3uLineParser {
       final channel = pendingName != null
           ? Channel(
               name: pendingName!,
-              url: parsed.url,
+              url: normalizedUrl,
               logoUrl: pendingLogo,
               group: pendingGroup,
               tvgId: pendingTvgId,
@@ -197,8 +252,8 @@ class M3uLineParser {
                   : Map<String, String>.from(pendingHeaders),
             )
           : Channel(
-              name: parsed.url,
-              url: parsed.url,
+              name: normalizedUrl,
+              url: normalizedUrl,
               httpUserAgent: pendingUserAgent,
               httpReferrer: pendingReferrer,
               httpHeaders: pendingHeaders.isEmpty
@@ -206,16 +261,59 @@ class M3uLineParser {
                   : Map<String, String>.from(pendingHeaders),
             );
 
-      pendingName = null;
-      pendingLogo = null;
-      pendingGroup = null;
-      pendingTvgId = null;
-      pendingUserAgent = null;
-      pendingReferrer = null;
-      pendingHeaders.clear();
+      _resetPending();
       return channel;
     }
     return null;
+  }
+
+  String? _normalizeStreamUrl(String raw) {
+    final value = raw.trim();
+    if (value.isEmpty || value.startsWith('<')) return null;
+    final lowered = value.toLowerCase();
+    if (lowered.startsWith('<!doctype') ||
+        lowered.startsWith('<html') ||
+        lowered.startsWith('{"error"') ||
+        lowered.startsWith('{"message"')) {
+      return null;
+    }
+
+    final parsed = Uri.tryParse(value);
+    if (parsed == null) return null;
+    if (parsed.hasScheme) {
+      const supported = <String>{
+        'http',
+        'https',
+        'rtsp',
+        'rtmp',
+        'rtp',
+        'udp',
+      };
+      if (!supported.contains(parsed.scheme.toLowerCase())) return null;
+      if ((parsed.scheme == 'http' || parsed.scheme == 'https') &&
+          parsed.host.isEmpty) {
+        return null;
+      }
+      return parsed.toString();
+    }
+
+    final base = baseUri;
+    if (base == null || !base.hasScheme) return null;
+    try {
+      return base.resolveUri(parsed).toString();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _resetPending() {
+    pendingName = null;
+    pendingLogo = null;
+    pendingGroup = null;
+    pendingTvgId = null;
+    pendingUserAgent = null;
+    pendingReferrer = null;
+    pendingHeaders.clear();
   }
 }
 
