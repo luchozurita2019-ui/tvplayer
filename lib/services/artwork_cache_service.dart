@@ -43,15 +43,15 @@ class ArtworkCacheService {
   int _generation = 0;
   int _active = 0;
   int _downloads = 0;
-  bool _pausedForPlayback = false;
+  int _playbackPauseDepth = 0;
   bool _pruning = false;
 
-  bool get pausedForPlayback => _pausedForPlayback;
+  bool get pausedForPlayback => _playbackPauseDepth > 0;
 
   Future<void> switchProvider(String providerId) async {
     await DevicePerformanceService.instance.init();
-    _pausedForPlayback = false;
-    _client ??= http.Client();
+    // Cambiar proveedor no puede levantar una pausa impuesta por reproducción.
+    if (!pausedForPlayback) _client ??= http.Client();
     await _ensureDirectory();
   }
 
@@ -69,8 +69,8 @@ class ArtworkCacheService {
   Future<void> clearBrowsingSession() async {
     _cancelPendingNetwork();
     _interest.clear();
-    _pausedForPlayback = false;
-    _client ??= http.Client();
+    // No reanudar descargas si existe una ruta de playback activa.
+    if (!pausedForPlayback) _client ??= http.Client();
   }
 
   void retain(String? rawUrl) {
@@ -91,15 +91,18 @@ class ArtworkCacheService {
     }
   }
 
+  /// Ref-counted para que una pantalla secundaria no pueda reactivar la red
+  /// mientras otra sesión de reproducción sigue viva.
   void pauseForPlayback() {
-    if (_pausedForPlayback) return;
-    _pausedForPlayback = true;
+    _playbackPauseDepth++;
+    if (_playbackPauseDepth > 1) return;
     _cancelPendingNetwork();
   }
 
   void resumeBrowsing() {
-    if (!_pausedForPlayback) return;
-    _pausedForPlayback = false;
+    if (_playbackPauseDepth == 0) return;
+    _playbackPauseDepth--;
+    if (_playbackPauseDepth > 0) return;
     _client ??= http.Client();
     _drain();
   }
@@ -123,7 +126,7 @@ class ArtworkCacheService {
       _known[url] = file;
       return file;
     }
-    if (!allowNetwork || _pausedForPlayback) return null;
+    if (!allowNetwork || pausedForPlayback) return null;
     if (demandDriven && (_interest[url] ?? 0) <= 0) return null;
 
     final existing = _inFlight[url];
@@ -161,9 +164,10 @@ class ArtworkCacheService {
   }
 
   bool _wanted(_ArtworkRequest request) {
-    if (request.generation != _generation || _pausedForPlayback) return false;
-    if (request.demandDriven && (_interest[request.url] ?? 0) <= 0)
+    if (request.generation != _generation || pausedForPlayback) return false;
+    if (request.demandDriven && (_interest[request.url] ?? 0) <= 0) {
       return false;
+    }
     return true;
   }
 
@@ -198,7 +202,7 @@ class ArtworkCacheService {
   }
 
   void _drain() {
-    if (_pausedForPlayback) return;
+    if (pausedForPlayback) return;
     while (_active < _maxConcurrent && _queue.isNotEmpty) {
       final request = _queue.removeFirst();
       if (!_wanted(request)) {
@@ -312,7 +316,9 @@ class ArtworkCacheService {
     final uri = Uri.tryParse(value);
     if (uri == null ||
         !(uri.scheme == 'http' || uri.scheme == 'https') ||
-        uri.host.isEmpty) return null;
+        uri.host.isEmpty) {
+      return null;
+    }
     return uri.toString();
   }
 
