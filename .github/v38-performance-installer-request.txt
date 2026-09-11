@@ -1,5 +1,0 @@
-TV FULL PRO V38 performance-only installer test
-validated_source=21ff7417d11acfaf27c1a30b0df2b83db05fe49e
-version=1.4.6+38
-installer_promotion=manifest-only
-verification=explicit-v2
