@@ -47,7 +47,11 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void initState() {
     super.initState();
-    XtreamHttpClient.cancelBrowsingRequests();
+    // Prioridad real de playback: Xtream permanece suspendido durante toda la
+    // vida de esta ruta. Una tarea antigua puede capturar el cierre del socket,
+    // pero cualquier reintento nuevo será rechazado mientras el player siga
+    // activo. M3U y artwork conservan sus cancelaciones propias.
+    XtreamHttpClient.pauseBrowsingForPlayback();
     M3uFetcher.cancelBrowsingRequests();
     ArtworkCacheService.instance.pauseForPlayback();
   }
@@ -55,6 +59,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
   @override
   void dispose() {
     ArtworkCacheService.instance.resumeBrowsing();
+    XtreamHttpClient.resumeBrowsingAfterPlayback();
     super.dispose();
   }
 
