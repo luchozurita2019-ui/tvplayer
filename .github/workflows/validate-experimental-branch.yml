@@ -10,6 +10,7 @@ on:
     paths:
       - 'lib/**'
       - 'android/**'
+      - 'test/**'
       - 'pubspec.yaml'
       - '.github/workflows/validate-experimental-branch.yml'
   workflow_dispatch:
