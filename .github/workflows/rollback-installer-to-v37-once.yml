@@ -1,0 +1,119 @@
+name: Rollback Installer to Verified V37 Once
+
+on:
+  push:
+    branches:
+      - android-tv-full-pro-clean-source
+    paths:
+      - '.github/workflows/rollback-installer-to-v37-once.yml'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout updater branch
+        uses: actions/checkout@v4
+        with:
+          ref: android-tv-full-pro-clean-source
+          fetch-depth: 0
+
+      - name: Download exact verified V37 artifact
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm -rf /tmp/v37
+          mkdir -p /tmp/v37
+          gh run download 34614074334 --repo "$GITHUB_REPOSITORY" --name TV-FULL-PRO-V37-CANDIDATE --dir /tmp/v37
+          test -f /tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM32.apk
+          test -f /tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM64.apk
+          test -f /tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM32.apk.signature.txt
+          test -f /tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM64.apk.signature.txt
+          test -f /tmp/v37/CANDIDATE-IDENTITY.txt
+
+      - name: Verify exact V37 hashes identity and historical certificate
+        shell: bash
+        run: |
+          set -euo pipefail
+          ARM32=/tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM32.apk
+          ARM64=/tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM64.apk
+          test "$(sha256sum "$ARM32" | awk '{print $1}')" = 'ef9e53a588309277fa9628a2967bdf9b0eadf848ab2417476a6e81169ca5d774'
+          test "$(sha256sum "$ARM64" | awk '{print $1}')" = 'a1facc945822801381172fe67b61dc98d154b83d10b67d365dc79e7c3fa1d307'
+          test "$(stat -c '%s' "$ARM32")" = '34925837'
+          test "$(stat -c '%s' "$ARM64")" = '38649143'
+          grep -Fq 'Candidate: 1.4.5+37' /tmp/v37/CANDIDATE-IDENTITY.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' /tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM32.apk.signature.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' /tmp/v37/TV-FULL-PRO-V37-CANDIDATE-ARM64.apk.signature.txt
+          cp "$ARM32" /tmp/v37/TV-FULL-PRO-ARM32.apk
+          cp "$ARM64" /tmp/v37/TV-FULL-PRO-ARM64.apk
+
+      - name: Restore V37 APK files in updater release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release upload tv-full-pro-latest \
+            /tmp/v37/TV-FULL-PRO-ARM32.apk \
+            /tmp/v37/TV-FULL-PRO-ARM64.apk \
+            --clobber --repo "$GITHUB_REPOSITORY"
+
+      - name: Restore V37 installer manifest
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin android-tv-full-pro-clean-source
+          git checkout android-tv-full-pro-clean-source
+          git reset --hard origin/android-tv-full-pro-clean-source
+          cat > tv_full_installer/latest.json <<'EOF'
+          {
+            "versionName": "1.4.5",
+            "versionCode": 37,
+            "packageName": "com.tvfull.pro.tv.v10safe",
+            "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
+            "arm32": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk",
+              "sha256": "ef9e53a588309277fa9628a2967bdf9b0eadf848ab2417476a6e81169ca5d774",
+              "size": 34925837
+            },
+            "arm64": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk",
+              "sha256": "a1facc945822801381172fe67b61dc98d154b83d10b67d365dc79e7c3fa1d307",
+              "size": 38649143
+            }
+          }
+          EOF
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tv_full_installer/latest.json
+          git commit -m 'Restore verified TV FULL PRO 1.4.5+37 in installer'
+          git push origin HEAD:android-tv-full-pro-clean-source
+
+      - name: Verify public V37 installer
+        shell: bash
+        run: |
+          set -euo pipefail
+          MANIFEST='https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/android-tv-full-pro-clean-source/tv_full_installer/latest.json'
+          ARM32='https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk'
+          ARM64='https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk'
+          BODY=''
+          for attempt in $(seq 1 20); do
+            BODY="$(curl -L --fail --silent --show-error "$MANIFEST" || true)"
+            if printf '%s' "$BODY" | grep -q '"versionCode": 37'; then
+              break
+            fi
+            sleep 3
+          done
+          printf '%s' "$BODY" | grep -q '"versionName": "1.4.5"'
+          printf '%s' "$BODY" | grep -q 'ef9e53a588309277fa9628a2967bdf9b0eadf848ab2417476a6e81169ca5d774'
+          printf '%s' "$BODY" | grep -q 'a1facc945822801381172fe67b61dc98d154b83d10b67d365dc79e7c3fa1d307'
+          curl -L --fail --silent --show-error "$ARM32" -o /tmp/public-v37-arm32.apk
+          curl -L --fail --silent --show-error "$ARM64" -o /tmp/public-v37-arm64.apk
+          test "$(sha256sum /tmp/public-v37-arm32.apk | awk '{print $1}')" = 'ef9e53a588309277fa9628a2967bdf9b0eadf848ab2417476a6e81169ca5d774'
+          test "$(sha256sum /tmp/public-v37-arm64.apk | awk '{print $1}')" = 'a1facc945822801381172fe67b61dc98d154b83d10b67d365dc79e7c3fa1d307'
