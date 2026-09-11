@@ -46,7 +46,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
   LiveProgramGuide? _guide;
   Timer? _guideDebounce;
   int _guideGeneration = 0;
-  bool _guideLoading = false;
   final ValueNotifier<_LiveHeroViewState> _heroState =
       ValueNotifier<_LiveHeroViewState>(const _LiveHeroViewState());
 
@@ -71,7 +70,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
         _guideGeneration++;
         _focusedChannel = null;
         _guide = null;
-        _guideLoading = false;
         _heroState.value = const _LiveHeroViewState();
       } else {
         WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -103,7 +101,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
     final generation = ++_guideGeneration;
     _focusedChannel = channel;
     _guide = null;
-    _guideLoading = false;
     _heroState.value = _LiveHeroViewState(channel: channel);
 
     final loader = widget.programGuideLoader;
@@ -111,7 +108,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
 
     _guideDebounce = Timer(const Duration(milliseconds: 520), () async {
       if (!mounted || generation != _guideGeneration) return;
-      _guideLoading = true;
       _heroState.value = _LiveHeroViewState(
         channel: channel,
         guide: _guide,
@@ -125,7 +121,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
       }
       if (!mounted || generation != _guideGeneration) return;
       _guide = result;
-      _guideLoading = false;
       _heroState.value = _LiveHeroViewState(
         channel: channel,
         guide: result,
