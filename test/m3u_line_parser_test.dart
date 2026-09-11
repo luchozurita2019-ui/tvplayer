@@ -27,4 +27,50 @@ void main() {
     expect(channels.last.name, 'Película Dos');
     expect(channels.last.httpHeaders, isNull);
   });
+
+  test('EXTINF acepta comas dentro de atributos entre comillas', () {
+    final channels = M3uParser.parse('''
+#EXTM3U
+#EXTINF:-1 tvg-name="Noticias, Tucumán" group-title="News, Local",Canal 24
+https://stream.test/live/24.m3u8
+''');
+
+    expect(channels, hasLength(1));
+    expect(channels.single.name, 'Canal 24');
+    expect(channels.single.group, 'News, Local');
+  });
+
+  test('BOM inicial no impide reconocer la cabecera ni el canal', () {
+    final channels = M3uParser.parse(
+      '\uFEFF#EXTM3U\n#EXTINF:-1 group-title="TV",Canal BOM\nhttps://stream.test/bom.ts',
+    );
+
+    expect(channels, hasLength(1));
+    expect(channels.single.name, 'Canal BOM');
+    expect(channels.single.group, 'TV');
+  });
+
+  test('HTML o JSON de error con HTTP 200 no se convierten en canal', () {
+    final parser = M3uLineParser();
+    expect(parser.addLine('#EXTINF:-1 group-title="TV",Canal Real'), isNull);
+    expect(parser.addLine('<html><body>Access denied</body></html>'), isNull);
+    final channel = parser.addLine('https://stream.test/real.ts');
+
+    expect(channel, isNotNull);
+    expect(channel!.name, 'Canal Real');
+    expect(channel.url, 'https://stream.test/real.ts');
+  });
+
+  test('un EXTINF nuevo limpia headers huérfanos de la entrada anterior', () {
+    final parser = M3uLineParser();
+    parser.addLine('#EXTINF:-1,Entrada incompleta');
+    parser.addLine('#EXTVLCOPT:http-user-agent=NO-DEBE-FILTRARSE');
+    parser.addLine('#EXTINF:-1,Entrada válida');
+    final channel = parser.addLine('https://stream.test/valid.ts');
+
+    expect(channel, isNotNull);
+    expect(channel!.name, 'Entrada válida');
+    expect(channel.httpUserAgent, isNull);
+    expect(channel.httpHeaders, isNull);
+  });
 }
