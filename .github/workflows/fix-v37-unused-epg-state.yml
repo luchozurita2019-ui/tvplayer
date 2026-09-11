@@ -1,0 +1,33 @@
+name: Fix V37 unused EPG state
+
+on:
+  push:
+    branches:
+      - candidate/v37-complete-improvements
+    paths:
+      - '.github/workflows/fix-v37-unused-epg-state.yml'
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: candidate/v37-complete-improvements
+          fetch-depth: 0
+      - name: Remove obsolete EPG loading field
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed -i '/^[[:space:]]*bool _guideLoading = false;[[:space:]]*$/d' lib/widgets/tv_live_premium_catalog.dart
+          sed -i '/^[[:space:]]*_guideLoading = false;[[:space:]]*$/d' lib/widgets/tv_live_premium_catalog.dart
+          sed -i '/^[[:space:]]*_guideLoading = true;[[:space:]]*$/d' lib/widgets/tv_live_premium_catalog.dart
+          ! grep -q '_guideLoading' lib/widgets/tv_live_premium_catalog.dart
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/widgets/tv_live_premium_catalog.dart
+          git commit -m 'Remove obsolete V37 EPG loading state'
+          git push origin HEAD:candidate/v37-complete-improvements
