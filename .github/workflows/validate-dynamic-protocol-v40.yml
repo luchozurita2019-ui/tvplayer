@@ -1,0 +1,48 @@
+name: Validate Dynamic Protocol V40
+
+on:
+  push:
+    branches:
+      - feature/dynamic-stream-resolver-v40-protocol-final
+    paths:
+      - lib/services/dynamic_stream_service.dart
+      - test/dynamic_stream_service_test.dart
+      - docs/dynamic_stream_source.md
+      - .github/workflows/validate-dynamic-protocol-v40.yml
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: feature/dynamic-stream-resolver-v40-protocol-final
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze integration
+        run: >-
+          flutter analyze --no-fatal-warnings --no-fatal-infos
+          lib/services/dynamic_stream_service.dart
+          lib/models/channel.dart
+          lib/providers/iptv_provider.dart
+          lib/services/section_catalog_service.dart
+          lib/screens/android_media3_texture_player_screen.dart
+          test/dynamic_stream_service_test.dart
+
+      - name: Run dynamic protocol tests
+        run: flutter test test/dynamic_stream_service_test.dart
+
+      - name: Build Android debug APK
+        run: flutter build apk --debug
