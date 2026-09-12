@@ -1,59 +1,122 @@
-# Fuente dinámica de TV FULL PRO
+# Fuente dinámica LIVE de TV FULL PRO
 
-Esta integración mantiene intactas las listas M3U/Xtream existentes y sólo se
-activa cuando el build recibe `TV_FULL_DYNAMIC_SOURCE_JSON`.
+Esta integración mantiene intactas las listas M3U/Xtream existentes y añade
+una lista independiente, por defecto `TV clásica 2`, para servidores que usan:
 
-No se deben guardar credenciales de terceros ni secretos obtenidos de otra
-aplicación en el repositorio. La configuración debe corresponder a un servicio
-propio o autorizado.
+1. catálogo Xtream (`player_api.php`), y
+2. generación de URL de reproducción justo antes de abrir un canal.
 
-## Flujo
+La configuración se entrega al compilar mediante
+`TV_FULL_DYNAMIC_SOURCE_JSON`. Las credenciales y valores de sesión no se
+guardan en el repositorio.
 
-1. TV FULL descarga el catálogo configurado.
-2. Guarda nombre, categoría, logo y un `dynamicStreamId` estable.
-3. Al abrir o cambiar de canal, solicita una URL temporal al resolvedor.
-4. Entrega esa URL y los headers de reproducción a Media3.
-5. Un reintento vuelve a resolver el canal, por lo que no reutiliza una URL
-   temporal vencida.
+## Flujo implementado
+
+```text
+player_api.php?action=get_live_categories
+                +
+player_api.php?action=get_live_streams
+                ↓
+        stream_id estable
+                ↓
+       usuario abre canal
+                ↓
+POST /stream/gen/<stream_id>
+                ↓
+    URL HLS temporal en texto
+                ↓
+             Media3
+```
+
+TV FULL guarda el `stream_id`, no la URL temporal. Media3 recibe la URL una vez
+y refresca normalmente el manifiesto HLS. Un cambio de canal o un reintento
+completo vuelve a resolver el `stream_id`.
+
+## ANDROID_ID
+
+El servicio reutiliza el canal nativo que TV FULL ya tenía para leer
+`Settings.Secure.ANDROID_ID`.
+
+El mismo valor puede usarse en:
+
+- `device` del POST al resolvedor, mediante `{androidId}`;
+- `X-Did` de reproducción.
+
+Si `X-Did` no está declarado en `playbackHeaders`, TV FULL lo añade
+automáticamente cuando existe un Android ID válido.
+
+## X-Hash
+
+`X-Hash` es opcional. TV FULL no reproduce ni copia algoritmos nativos de otras
+aplicaciones para generarlo.
+
+Para una prueba A/B puede proporcionarse de dos maneras:
+
+- campo `xHash` dentro de `TV_FULL_DYNAMIC_SOURCE_JSON`; o
+- `--dart-define=TV_FULL_DYNAMIC_X_HASH=<valor>`.
+
+Si no existe un valor, el header `X-Hash` simplemente no se envía.
 
 ## Configuración
 
-Ejemplo de esquema (dominios ficticios):
+Ejemplo con un servidor de laboratorio:
 
 ```json
 {
   "name": "TV clásica 2",
-  "catalog": {
-    "url": "https://authorized.example/catalog",
-    "method": "GET",
-    "headers": {},
-    "form": {},
-    "itemsPath": "channels",
-    "fields": {
-      "id": ["id", "stream_id"],
-      "name": ["name", "title"],
-      "group": ["category"],
-      "logo": ["logo"],
-      "tvgId": ["tvg_id"]
-    }
+  "server": "https://resolver.example",
+  "username": "demo-user",
+  "password": "demo-pass",
+  "catalogHeaders": {
+    "User-Agent": "TV FULL PRO/40"
   },
   "resolver": {
-    "url": "https://authorized.example/resolve/{id}",
+    "path": "/stream/gen/{id}",
     "method": "POST",
-    "headers": {},
     "form": {
-      "stream_id": "{id}",
-      "device_id": "{androidId}"
-    },
-    "urlPath": "url"
+      "id": "{id}",
+      "cast": "false",
+      "device": "{androidId}",
+      "code": ""
+    }
   },
   "playbackHeaders": {
-    "X-Device": "{androidId}"
-  }
+    "X-App": "tvfull",
+    "X-Version": "40",
+    "X-Did": "{androidId}",
+    "User-Agent": "TV FULL PRO/40"
+  },
+  "xHash": ""
 }
 ```
 
-Placeholders admitidos: `{id}`, `{androidId}`, `{name}` y `{group}`.
+`resolver.form` es opcional. Si se omite, TV FULL usa automáticamente:
 
-Para producción conviene entregar esta configuración desde el backend/panel de
-TV FULL en vez de compilar secretos dentro del APK.
+```text
+id={id}
+cast=false
+device={androidId}
+code=
+```
+
+`resolver.path` también es opcional y por defecto es `/stream/gen/{id}`.
+
+Los placeholders admitidos en formulario y headers son:
+
+- `{id}`
+- `{androidId}`
+- `{name}`
+- `{group}`
+
+## Compatibilidad
+
+El catálogo conserva:
+
+- `stream_id`
+- nombre
+- categoría
+- logo
+- `epg_channel_id`
+
+La URL final no se persiste. Esto evita reutilizar una ruta HLS temporal cuando
+el servidor espera una resolución nueva para una apertura posterior.
