@@ -1,0 +1,1 @@
+Build the isolated V40 dynamic protocol test from this branch, sign with the historical TV FULL certificate, publish ARM32/ARM64 assets, and point the installer test manifest to the resulting release. X-Hash intentionally omitted for the first A/B compatibility test.
