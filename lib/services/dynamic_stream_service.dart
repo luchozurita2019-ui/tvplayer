@@ -25,33 +25,52 @@ class ResolvedDynamicStream {
   const ResolvedDynamicStream({required this.url, required this.headers});
 }
 
-/// Catálogo dinámico y resolución on-demand para fuentes autorizadas.
+/// Fuente LIVE compatible con servidores que exponen catálogo Xtream y
+/// requieren resolver el stream_id justo antes de iniciar la reproducción.
 ///
-/// La configuración NO se guarda en el repositorio. Se inyecta al compilar con
-/// `--dart-define=TV_FULL_DYNAMIC_SOURCE_JSON=...` o desde un constructor de
-/// pruebas. Los canales normales M3U/Xtream nunca pasan por este servicio.
+/// Flujo:
+/// 1. player_api.php?action=get_live_categories
+/// 2. player_api.php?action=get_live_streams
+/// 3. el usuario abre un canal (stream_id estable)
+/// 4. POST al endpoint de resolución (por defecto /stream/gen/{id})
+/// 5. el cuerpo de la respuesta contiene la URL HLS temporal
+/// 6. Media3 recibe esa URL y los headers de reproducción configurados.
+///
+/// La configuración se inyecta con TV_FULL_DYNAMIC_SOURCE_JSON. X-Hash es
+/// opcional y nunca se genera copiando lógica de otra aplicación: puede
+/// proporcionarse en la configuración o con TV_FULL_DYNAMIC_X_HASH.
 class DynamicStreamService {
   DynamicStreamService._({
     String? rawConfig,
     http.Client? client,
     Future<String?> Function()? androidIdProvider,
+    String? xHashOverride,
   })  : _rawConfigOverride = rawConfig,
         _client = client ?? http.Client(),
-        _androidIdProvider = androidIdProvider ?? _platformAndroidId;
+        _androidIdProvider = androidIdProvider ?? _platformAndroidId,
+        _xHashOverride = xHashOverride;
 
   static final DynamicStreamService instance = DynamicStreamService._();
+
   static const String sourcePrefix = 'tvfull-dynamic://catalog/';
   static const String streamPrefix = 'tvfull-dynamic://stream/';
   static const MethodChannel _deviceChannel =
       MethodChannel('tvfull/device_identity');
+
   static const String _compiledConfig = String.fromEnvironment(
     'TV_FULL_DYNAMIC_SOURCE_JSON',
+    defaultValue: '',
+  );
+  static const String _compiledXHash = String.fromEnvironment(
+    'TV_FULL_DYNAMIC_X_HASH',
     defaultValue: '',
   );
 
   final String? _rawConfigOverride;
   final http.Client _client;
   final Future<String?> Function() _androidIdProvider;
+  final String? _xHashOverride;
+
   _DynamicSourceConfig? _config;
   bool _configLoaded = false;
   String? _configurationError;
@@ -61,11 +80,13 @@ class DynamicStreamService {
     required String configJson,
     required http.Client client,
     Future<String?> Function()? androidIdProvider,
+    String? xHashOverride,
   }) {
     return DynamicStreamService._(
       rawConfig: configJson,
       client: client,
       androidIdProvider: androidIdProvider,
+      xHashOverride: xHashOverride,
     );
   }
 
@@ -78,7 +99,8 @@ class DynamicStreamService {
   String get playlistSource {
     final raw = _rawConfig.trim();
     if (raw.isEmpty) return '${sourcePrefix}disabled';
-    final fingerprint = sha256.convert(utf8.encode(raw)).toString().substring(0, 12);
+    final fingerprint =
+        sha256.convert(utf8.encode(raw)).toString().substring(0, 12);
     return '$sourcePrefix$fingerprint';
   }
 
@@ -87,45 +109,48 @@ class DynamicStreamService {
 
   Future<List<Channel>> fetchCatalog() async {
     final config = _requireConfig();
-    final androidId = await _safeAndroidId();
-    final vars = <String, String>{'androidId': androidId ?? ''};
-    final response = await _send(config.catalog, vars);
-    final body = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
-    if (body.isEmpty) {
-      throw const DynamicStreamException(
-        'El catálogo dinámico respondió vacío.',
-        retryable: true,
-      );
-    }
 
-    dynamic decoded;
-    try {
-      decoded = jsonDecode(body);
-    } on FormatException {
-      throw const DynamicStreamException(
-        'El catálogo dinámico no devolvió JSON válido.',
-      );
-    }
+    final results = await Future.wait<List<dynamic>>([
+      _xtreamList(config, 'get_live_categories'),
+      _xtreamList(config, 'get_live_streams'),
+    ]);
 
-    final items = _catalogItems(decoded, config.itemsPath);
-    final channels = <Channel>[];
-    final seen = <String>{};
-    for (final raw in items) {
+    final categories = <String, String>{};
+    for (final raw in results[0]) {
       if (raw is! Map) continue;
       final item = Map<String, dynamic>.from(raw);
-      final id = _pick(item, config.idKeys);
-      if (id == null || id.isEmpty || !seen.add(id)) continue;
-      final name = _pick(item, config.nameKeys) ?? 'Canal $id';
-      final group = _pick(item, config.groupKeys);
-      final logo = _pick(item, config.logoKeys);
-      final tvgId = _pick(item, config.tvgIdKeys);
+      final id = _clean(item['category_id']);
+      final name = _clean(item['category_name']);
+      if (id != null && name != null) categories[id] = name;
+    }
+
+    final channels = <Channel>[];
+    final seen = <String>{};
+    for (final raw in results[1]) {
+      if (raw is! Map) continue;
+      final item = Map<String, dynamic>.from(raw);
+      final id = _clean(item['stream_id']);
+      final name = _clean(item['name']);
+      if (id == null || name == null || !seen.add(id)) continue;
+
+      final categoryId = _clean(item['category_id']);
+      final fallbackCategory =
+          _clean(item['category_name']) ?? _clean(item['category']);
+      final group = categoryId == null
+          ? fallbackCategory
+          : categories[categoryId] ?? fallbackCategory;
+
       channels.add(
         Channel(
           name: name,
+          // La URL final NO se persiste. El stream_id es la identidad estable.
           url: '$streamPrefix${Uri.encodeComponent(id)}',
-          logoUrl: logo,
+          logoUrl: _clean(item['stream_icon']) ??
+              _clean(item['logo']) ??
+              _clean(item['icon']),
           group: group,
-          tvgId: tvgId,
+          tvgId: _clean(item['epg_channel_id']) ?? _clean(item['tvg_id']),
+          xtreamStreamId: id,
           dynamicStreamId: id,
         ),
       );
@@ -133,15 +158,16 @@ class DynamicStreamService {
 
     if (channels.isEmpty) {
       throw const DynamicStreamException(
-        'El catálogo dinámico no contiene canales válidos.',
+        'get_live_streams no devolvió canales válidos.',
       );
     }
+
     return List<Channel>.unmodifiable(channels);
   }
 
   Future<ResolvedDynamicStream> resolve(Channel channel) async {
     final config = _requireConfig();
-    final id = channel.dynamicStreamId?.trim() ?? '';
+    final id = (channel.dynamicStreamId ?? channel.xtreamStreamId)?.trim() ?? '';
     if (id.isEmpty) {
       return ResolvedDynamicStream(
         url: channel.url,
@@ -156,9 +182,65 @@ class DynamicStreamService {
       'name': channel.name,
       'group': channel.group ?? '',
     };
-    final response = await _send(config.resolver, vars);
-    final body = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
-    final url = _resolvedUrl(body, config.resolverUrlPath);
+
+    final resolverUri = _resolverUri(config, id);
+    final resolverHeaders = _expandMap(
+      config.resolverHeaders,
+      vars,
+      keepEmpty: false,
+    );
+    final form = _expandMap(
+      config.resolverForm,
+      vars,
+      keepEmpty: true,
+    );
+
+    http.Response response;
+    try {
+      if (config.resolverMethod == 'GET') {
+        final uri = resolverUri.replace(
+          queryParameters: <String, String>{
+            ...resolverUri.queryParameters,
+            ...form,
+          },
+        );
+        response = await _client
+            .get(uri, headers: resolverHeaders)
+            .timeout(config.resolverTimeout);
+      } else {
+        response = await _client
+            .post(
+              resolverUri,
+              headers: resolverHeaders,
+              body: form,
+              encoding: utf8,
+            )
+            .timeout(config.resolverTimeout);
+      }
+    } on TimeoutException {
+      throw const DynamicStreamException(
+        'Tiempo de espera agotado al generar la URL del canal.',
+        retryable: true,
+      );
+    } catch (_) {
+      throw const DynamicStreamException(
+        'No se pudo generar la URL del canal.',
+        retryable: true,
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw DynamicStreamException(
+        'El resolvedor respondió HTTP ${response.statusCode}.',
+        retryable: response.statusCode == 408 ||
+            response.statusCode == 429 ||
+            response.statusCode >= 500,
+      );
+    }
+
+    final url = _resolvedUrl(
+      utf8.decode(response.bodyBytes, allowMalformed: true).trim(),
+    );
     final parsed = Uri.tryParse(url);
     if (parsed == null ||
         !(parsed.scheme == 'http' || parsed.scheme == 'https') ||
@@ -168,21 +250,107 @@ class DynamicStreamService {
       );
     }
 
+    final playbackHeaders = _expandMap(
+      config.playbackHeaders,
+      vars,
+      keepEmpty: false,
+    );
+
+    // En las capturas el mismo ANDROID_ID viaja como device= y X-Did.
+    if (androidId != null && androidId.isNotEmpty) {
+      _putIfMissingCaseInsensitive(playbackHeaders, 'X-Did', androidId);
+    }
+
+    // X-Hash queda deliberadamente opcional. Sirve para una prueba A/B sin
+    // atar TV FULL a un algoritmo nativo de otra aplicación.
+    final xHash = (_xHashOverride ?? '').trim().isNotEmpty
+        ? _xHashOverride!.trim()
+        : _compiledXHash.trim().isNotEmpty
+            ? _compiledXHash.trim()
+            : config.xHash.trim();
+    if (xHash.isNotEmpty) {
+      _putIfMissingCaseInsensitive(playbackHeaders, 'X-Hash', xHash);
+    }
+
     return ResolvedDynamicStream(
       url: parsed.toString(),
-      headers: _expandMap(config.playbackHeaders, vars),
+      headers: playbackHeaders,
     );
+  }
+
+  Future<List<dynamic>> _xtreamList(
+    _DynamicSourceConfig config,
+    String action,
+  ) async {
+    final uri = _endpoint(config.server, 'player_api.php').replace(
+      queryParameters: <String, String>{
+        'username': config.username,
+        'password': config.password,
+        'action': action,
+      },
+    );
+
+    http.Response response;
+    try {
+      response = await _client
+          .get(uri, headers: config.catalogHeaders)
+          .timeout(config.catalogTimeout);
+    } on TimeoutException {
+      throw DynamicStreamException(
+        'Tiempo de espera agotado al consultar $action.',
+        retryable: true,
+      );
+    } catch (_) {
+      throw DynamicStreamException(
+        'No se pudo consultar $action.',
+        retryable: true,
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw DynamicStreamException(
+        'Xtream $action respondió HTTP ${response.statusCode}.',
+        retryable: response.statusCode == 408 ||
+            response.statusCode == 429 ||
+            response.statusCode >= 500,
+      );
+    }
+
+    try {
+      final decoded = jsonDecode(
+        utf8.decode(response.bodyBytes, allowMalformed: true),
+      );
+      if (decoded is List) return decoded;
+    } catch (_) {}
+
+    throw DynamicStreamException(
+      'Xtream $action no devolvió una lista JSON válida.',
+    );
+  }
+
+  Uri _resolverUri(_DynamicSourceConfig config, String id) {
+    final path = config.resolverPath.replaceAll('{id}', Uri.encodeComponent(id));
+    final parsed = Uri.tryParse(path);
+    if (parsed != null &&
+        (parsed.scheme == 'http' || parsed.scheme == 'https') &&
+        parsed.host.isNotEmpty) {
+      return parsed;
+    }
+    return _endpoint(config.server, path);
   }
 
   _DynamicSourceConfig? _loadConfig() {
     if (_configLoaded) return _config;
     _configLoaded = true;
+
     final raw = _rawConfig.trim();
     if (raw.isEmpty) return null;
+
     try {
       final decoded = jsonDecode(raw);
       if (decoded is! Map) {
-        _configurationError = 'La configuración dinámica debe ser un objeto JSON.';
+        _configurationError =
+            'La configuración dinámica debe ser un objeto JSON.';
         return null;
       }
       _config = _DynamicSourceConfig.fromMap(
@@ -203,108 +371,23 @@ class DynamicStreamService {
     );
   }
 
-  Future<http.Response> _send(
-    _DynamicRequest request,
-    Map<String, String> vars,
-  ) async {
-    final method = request.method.toUpperCase();
-    if (method != 'GET' && method != 'POST') {
-      throw DynamicStreamException(
-        'Método dinámico no admitido: $method.',
-      );
-    }
-
-    var uri = Uri.tryParse(_expand(request.url, vars));
-    if (uri == null ||
-        !(uri.scheme == 'http' || uri.scheme == 'https') ||
-        uri.host.isEmpty) {
-      throw const DynamicStreamException('URL dinámica inválida.');
-    }
-    final headers = _expandMap(request.headers, vars);
-    final form = _expandMap(request.form, vars);
-
-    if (method == 'GET' && form.isNotEmpty) {
-      final merged = Map<String, String>.from(uri.queryParameters)..addAll(form);
-      uri = uri.replace(queryParameters: merged);
-    }
-
-    final outgoing = http.Request(method, uri)..headers.addAll(headers);
-    if (method == 'POST' && form.isNotEmpty) {
-      outgoing.headers.putIfAbsent(
-        'Content-Type',
-        () => 'application/x-www-form-urlencoded',
-      );
-      outgoing.body = form.entries
-          .map(
-            (entry) =>
-                '${Uri.encodeQueryComponent(entry.key)}=${Uri.encodeQueryComponent(entry.value)}',
-          )
-          .join('&');
-    }
-
-    http.StreamedResponse streamed;
-    try {
-      streamed = await _client.send(outgoing).timeout(request.timeout);
-    } on TimeoutException {
-      throw DynamicStreamException(
-        'Tiempo de espera agotado al consultar ${_safeTarget(uri)}.',
-        retryable: true,
-      );
-    } catch (error) {
-      throw DynamicStreamException(
-        'No se pudo consultar ${_safeTarget(uri)}.',
-        retryable: true,
-      );
-    }
-
-    final response = await http.Response.fromStream(streamed);
-    if (response.statusCode < 200 || response.statusCode >= 300) {
-      final retryable = response.statusCode == 408 ||
-          response.statusCode == 429 ||
-          response.statusCode >= 500;
-      throw DynamicStreamException(
-        'El servicio dinámico respondió HTTP ${response.statusCode}.',
-        retryable: retryable,
-      );
-    }
-    return response;
-  }
-
-  List<dynamic> _catalogItems(dynamic decoded, String path) {
-    dynamic value = path.trim().isEmpty ? decoded : _valueAtPath(decoded, path);
-    if (value is List) return value;
-    if (value is Map) {
-      for (final key in const ['channels', 'items', 'data', 'results', 'live']) {
-        final candidate = value[key];
-        if (candidate is List) return candidate;
-      }
-      for (final candidate in value.values) {
-        if (candidate is List) return candidate;
-      }
-    }
-    throw const DynamicStreamException(
-      'No se encontró la colección de canales en la respuesta del catálogo.',
-    );
-  }
-
-  String _resolvedUrl(String body, String path) {
+  String _resolvedUrl(String body) {
     if (body.isEmpty) {
       throw const DynamicStreamException(
         'El resolvedor respondió vacío.',
         retryable: true,
       );
     }
-    if (body.startsWith('http://') || body.startsWith('https://')) return body;
 
+    if (body.startsWith('http://') || body.startsWith('https://')) {
+      return body;
+    }
+
+    // Compatibilidad defensiva por si otra implementación devuelve JSON.
     try {
       final decoded = jsonDecode(body);
       if (decoded is String) return decoded.trim();
-      if (path.trim().isNotEmpty) {
-        final value = _valueAtPath(decoded, path);
-        if (value != null) return value.toString().trim();
-      }
       if (decoded is Map) {
-        final map = Map<String, dynamic>.from(decoded);
         for (final key in const [
           'url',
           'stream_url',
@@ -313,24 +396,14 @@ class DynamicStreamService {
           'link',
           'm3u8',
         ]) {
-          final value = map[key];
+          final value = decoded[key];
           if (value != null && value.toString().trim().isNotEmpty) {
             return value.toString().trim();
           }
         }
-        for (final nestedKey in const ['data', 'result']) {
-          final nested = map[nestedKey];
-          if (nested is Map) {
-            for (final key in const ['url', 'stream_url', 'streamUrl', 'link']) {
-              final value = nested[key];
-              if (value != null && value.toString().trim().isNotEmpty) {
-                return value.toString().trim();
-              }
-            }
-          }
-        }
       }
     } catch (_) {}
+
     var cleaned = body.trim();
     if (cleaned.length >= 2 &&
         ((cleaned.startsWith('"') && cleaned.endsWith('"')) ||
@@ -340,34 +413,35 @@ class DynamicStreamService {
     return cleaned;
   }
 
-  dynamic _valueAtPath(dynamic value, String rawPath) {
-    if (rawPath.trim().isEmpty) return value;
-    dynamic current = value;
-    for (final segment in rawPath.split('.')) {
-      if (current is! Map) return null;
-      current = current[segment];
-    }
-    return current;
-  }
-
-  String? _pick(Map<String, dynamic> item, List<String> keys) {
-    for (final key in keys) {
-      final value = _valueAtPath(item, key);
-      if (value == null) continue;
-      final text = value.toString().trim();
-      if (text.isNotEmpty && text.toLowerCase() != 'null') return text;
-    }
-    return null;
+  Uri _endpoint(Uri base, String rawPath) {
+    final cleanPath = rawPath.trim();
+    final pathSegments = <String>[
+      ...base.pathSegments.where((segment) => segment.trim().isNotEmpty),
+      ...cleanPath
+          .split('/')
+          .where((segment) => segment.trim().isNotEmpty),
+    ];
+    return base.replace(
+      pathSegments: pathSegments,
+      query: '',
+      fragment: '',
+    );
   }
 
   Map<String, String> _expandMap(
     Map<String, String> values,
-    Map<String, String> vars,
-  ) {
-    return {
-      for (final entry in values.entries)
-        _expand(entry.key, vars): _expand(entry.value, vars),
-    };
+    Map<String, String> vars, {
+    required bool keepEmpty,
+  }) {
+    final result = <String, String>{};
+    for (final entry in values.entries) {
+      final key = _expand(entry.key, vars).trim();
+      final value = _expand(entry.value, vars);
+      if (key.isEmpty) continue;
+      if (!keepEmpty && value.trim().isEmpty) continue;
+      result[key] = value;
+    }
+    return result;
   }
 
   String _expand(String value, Map<String, String> vars) {
@@ -378,7 +452,17 @@ class DynamicStreamService {
     return result;
   }
 
-  String _safeTarget(Uri uri) => '${uri.scheme}://${uri.host}${uri.path}';
+  void _putIfMissingCaseInsensitive(
+    Map<String, String> headers,
+    String key,
+    String value,
+  ) {
+    final target = key.toLowerCase();
+    for (final current in headers.keys) {
+      if (current.toLowerCase() == target) return;
+    }
+    headers[key] = value;
+  }
 
   Future<String?> _safeAndroidId() async {
     try {
@@ -392,111 +476,111 @@ class DynamicStreamService {
   static Future<String?> _platformAndroidId() async {
     if (kIsWeb || defaultTargetPlatform != TargetPlatform.android) return null;
     try {
-      return await _deviceChannel.invokeMethod<String>('getAndroidId');
+      return (await _deviceChannel.invokeMethod<String>('getAndroidId'))?.trim();
     } on PlatformException {
       return null;
     }
+  }
+
+  String? _clean(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    if (text.isEmpty || text.toLowerCase() == 'null') return null;
+    return text;
   }
 }
 
 class _DynamicSourceConfig {
   final String name;
-  final _DynamicRequest catalog;
-  final _DynamicRequest resolver;
-  final String itemsPath;
-  final String resolverUrlPath;
-  final List<String> idKeys;
-  final List<String> nameKeys;
-  final List<String> groupKeys;
-  final List<String> logoKeys;
-  final List<String> tvgIdKeys;
+  final Uri server;
+  final String username;
+  final String password;
+  final Map<String, String> catalogHeaders;
+  final Duration catalogTimeout;
+  final String resolverPath;
+  final String resolverMethod;
+  final Map<String, String> resolverHeaders;
+  final Map<String, String> resolverForm;
+  final Duration resolverTimeout;
   final Map<String, String> playbackHeaders;
+  final String xHash;
 
   const _DynamicSourceConfig({
     required this.name,
-    required this.catalog,
-    required this.resolver,
-    required this.itemsPath,
-    required this.resolverUrlPath,
-    required this.idKeys,
-    required this.nameKeys,
-    required this.groupKeys,
-    required this.logoKeys,
-    required this.tvgIdKeys,
+    required this.server,
+    required this.username,
+    required this.password,
+    required this.catalogHeaders,
+    required this.catalogTimeout,
+    required this.resolverPath,
+    required this.resolverMethod,
+    required this.resolverHeaders,
+    required this.resolverForm,
+    required this.resolverTimeout,
     required this.playbackHeaders,
+    required this.xHash,
   });
 
   factory _DynamicSourceConfig.fromMap(Map<String, dynamic> map) {
-    final catalogRaw = map['catalog'];
-    final resolverRaw = map['resolver'];
-    if (catalogRaw is! Map || resolverRaw is! Map) {
-      throw const FormatException('Faltan catalog/resolver.');
+    final rawServer = map['server']?.toString().trim() ?? '';
+    final server = Uri.tryParse(rawServer);
+    if (server == null ||
+        !(server.scheme == 'http' || server.scheme == 'https') ||
+        server.host.isEmpty) {
+      throw const FormatException('Servidor Xtream dinámico inválido.');
     }
-    final catalog = Map<String, dynamic>.from(catalogRaw);
-    final resolver = Map<String, dynamic>.from(resolverRaw);
-    final fieldsRaw = catalog['fields'];
-    final fields = fieldsRaw is Map
-        ? Map<String, dynamic>.from(fieldsRaw)
+
+    final username = map['username']?.toString().trim() ?? '';
+    final password = map['password']?.toString().trim() ?? '';
+    if (username.isEmpty || password.isEmpty) {
+      throw const FormatException('Faltan usuario o contraseña Xtream.');
+    }
+
+    final resolverRaw = map['resolver'];
+    final resolver = resolverRaw is Map
+        ? Map<String, dynamic>.from(resolverRaw)
         : const <String, dynamic>{};
+
+    final catalogTimeoutMs =
+        int.tryParse(map['catalogTimeoutMs']?.toString() ?? '') ?? 12000;
+    final resolverTimeoutMs =
+        int.tryParse(resolver['timeoutMs']?.toString() ?? '') ?? 8000;
+
+    final resolverMethod =
+        resolver['method']?.toString().trim().toUpperCase() ?? 'POST';
+    if (resolverMethod != 'GET' && resolverMethod != 'POST') {
+      throw const FormatException('El resolvedor sólo admite GET o POST.');
+    }
+
+    final resolverForm = _stringMap(resolver['form']);
 
     return _DynamicSourceConfig(
       name: map['name']?.toString().trim().isNotEmpty == true
           ? map['name'].toString().trim()
           : 'TV clásica 2',
-      catalog: _DynamicRequest.fromMap(catalog),
-      resolver: _DynamicRequest.fromMap(resolver),
-      itemsPath: catalog['itemsPath']?.toString().trim() ?? '',
-      resolverUrlPath: resolver['urlPath']?.toString().trim() ?? '',
-      idKeys: _keys(fields['id'], const ['id', 'stream_id', 'channel_id']),
-      nameKeys: _keys(fields['name'], const ['name', 'title', 'channel_name']),
-      groupKeys: _keys(
-        fields['group'],
-        const ['group', 'category', 'category_name', 'group_title'],
-      ),
-      logoKeys: _keys(fields['logo'], const ['logo', 'logo_url', 'stream_icon']),
-      tvgIdKeys: _keys(fields['tvgId'], const ['tvg_id', 'epg_id', 'xmltv_id']),
+      server: server.replace(query: '', fragment: ''),
+      username: username,
+      password: password,
+      catalogHeaders: _stringMap(map['catalogHeaders']),
+      catalogTimeout:
+          Duration(milliseconds: catalogTimeoutMs.clamp(1000, 30000)),
+      resolverPath: resolver['path']?.toString().trim().isNotEmpty == true
+          ? resolver['path'].toString().trim()
+          : '/stream/gen/{id}',
+      resolverMethod: resolverMethod,
+      resolverHeaders: _stringMap(resolver['headers']),
+      resolverForm: resolverForm.isEmpty
+          ? const <String, String>{
+              'id': '{id}',
+              'cast': 'false',
+              'device': '{androidId}',
+              'code': '',
+            }
+          : resolverForm,
+      resolverTimeout:
+          Duration(milliseconds: resolverTimeoutMs.clamp(1000, 30000)),
       playbackHeaders: _stringMap(map['playbackHeaders']),
-    );
-  }
-
-  static List<String> _keys(dynamic raw, List<String> fallback) {
-    if (raw is List) {
-      final values = raw
-          .map((value) => value.toString().trim())
-          .where((value) => value.isNotEmpty)
-          .toList(growable: false);
-      if (values.isNotEmpty) return values;
-    }
-    if (raw is String && raw.trim().isNotEmpty) return [raw.trim()];
-    return fallback;
-  }
-}
-
-class _DynamicRequest {
-  final String url;
-  final String method;
-  final Map<String, String> headers;
-  final Map<String, String> form;
-  final Duration timeout;
-
-  const _DynamicRequest({
-    required this.url,
-    required this.method,
-    required this.headers,
-    required this.form,
-    required this.timeout,
-  });
-
-  factory _DynamicRequest.fromMap(Map<String, dynamic> map) {
-    final url = map['url']?.toString().trim() ?? '';
-    if (url.isEmpty) throw const FormatException('Falta URL dinámica.');
-    final timeoutMs = int.tryParse(map['timeoutMs']?.toString() ?? '') ?? 8000;
-    return _DynamicRequest(
-      url: url,
-      method: map['method']?.toString().trim().toUpperCase() ?? 'GET',
-      headers: _stringMap(map['headers']),
-      form: _stringMap(map['form']),
-      timeout: Duration(milliseconds: timeoutMs.clamp(1000, 30000)),
+      xHash: map['xHash']?.toString().trim() ?? '',
     );
   }
 }
