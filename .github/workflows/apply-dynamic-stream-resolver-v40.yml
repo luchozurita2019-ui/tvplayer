@@ -1,0 +1,62 @@
+name: Apply Dynamic Stream Resolver V40
+
+on:
+  push:
+    branches:
+      - feature/dynamic-stream-resolver-v40
+    paths:
+      - .github/scripts/apply_dynamic_stream_resolver_v40.py
+      - .github/workflows/apply-dynamic-stream-resolver-v40.yml
+
+permissions:
+  contents: write
+
+jobs:
+  apply-and-validate:
+    if: ${{ !contains(github.event.head_commit.message, '[skip ci]') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout isolated branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/dynamic-stream-resolver-v40
+          fetch-depth: 0
+
+      - name: Apply guarded patch
+        run: python3 .github/scripts/apply_dynamic_stream_resolver_v40.py
+
+      - name: Check patch whitespace
+        run: git diff --check
+
+      - name: Set up Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Analyze changed integration
+        run: flutter analyze --no-fatal-warnings --no-fatal-infos
+
+      - name: Run dynamic resolver tests
+        run: flutter test test/dynamic_stream_service_test.dart
+
+      - name: Commit validated product changes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add lib/models/channel.dart \
+                  lib/providers/iptv_provider.dart \
+                  lib/services/dynamic_stream_service.dart \
+                  lib/services/section_catalog_service.dart \
+                  lib/screens/android_media3_texture_player_screen.dart \
+                  test/dynamic_stream_service_test.dart \
+                  docs/dynamic_stream_source.md
+          if git diff --cached --quiet; then
+            echo "No product changes to commit."
+          else
+            git commit -m "Add configurable dynamic catalog and on-demand stream resolution [skip ci]"
+            git push origin HEAD:feature/dynamic-stream-resolver-v40
+          fi
