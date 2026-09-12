@@ -6,6 +6,8 @@ on:
       - feature/dynamic-stream-resolver-v40-protocol-final
     paths:
       - '.github/v41-xhash-build-request.txt'
+      - 'v41_xhash.txt'
+      - '.github/workflows/build-v41-xhash-test.yml'
 
 permissions:
   contents: write
