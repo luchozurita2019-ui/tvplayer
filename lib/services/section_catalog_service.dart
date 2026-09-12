@@ -6,6 +6,7 @@ import '../models/playlist.dart';
 import 'catalog_file_store.dart';
 import 'content_classifier.dart';
 import 'device_performance_service.dart';
+import 'dynamic_stream_service.dart';
 import 'm3u_fetcher.dart';
 import 'm3u_parser.dart';
 import 'tv_local_store.dart';
@@ -192,6 +193,11 @@ class SectionCatalogService {
   /// en generaciones temporales independientes. No se crean tres listas de
   /// Channel en RAM: sólo viven el parser incremental y las categorías únicas.
   Future<void> _downloadAndPartitionToDisk(Playlist playlist) async {
+    if (DynamicStreamService.instance.handlesSource(playlist.source)) {
+      await _downloadDynamicAndPartitionToDisk(playlist);
+      return;
+    }
+
     final parser = M3uLineParser();
     final writers = <TvSectionKind, CatalogFileWriter>{};
     final categorySets = <TvSectionKind, Set<String>>{
@@ -256,6 +262,53 @@ class SectionCatalogService {
     }
   }
 
+  Future<void> _downloadDynamicAndPartitionToDisk(Playlist playlist) async {
+    final channels = await DynamicStreamService.instance.fetchCatalog();
+    final writers = <TvSectionKind, CatalogFileWriter>{};
+    final categorySets = <TvSectionKind, Set<String>>{
+      for (final kind in TvSectionKind.values) kind: <String>{},
+    };
+    final categories = <TvSectionKind, List<String>>{
+      for (final kind in TvSectionKind.values) kind: <String>[],
+    };
+
+    for (final kind in TvSectionKind.values) {
+      writers[kind] = await _catalogFiles.beginSnapshot(
+        serviceId: playlist.id,
+        kind: 'm3u_${kind.name}',
+      );
+    }
+
+    try {
+      for (final channel in channels) {
+        final kind = _classify(channel);
+        writers[kind]!.add(channel.toJson());
+        final group = channel.group?.trim();
+        if (group != null &&
+            group.isNotEmpty &&
+            categorySets[kind]!.add(group)) {
+          categories[kind]!.add(group);
+        }
+      }
+
+      for (final kind in TvSectionKind.values) {
+        final writer = writers[kind]!;
+        if (writer.count == 0) {
+          await writer.abort();
+          continue;
+        }
+        final committed = await writer.commit(categories: categories[kind]!);
+        if (committed) _forget('${playlist.id}|m3u_${kind.name}');
+      }
+      _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
+    } catch (_) {
+      for (final writer in writers.values) {
+        await writer.abort();
+      }
+      rethrow;
+    }
+  }
+
   void _remember(String key, SectionCatalogSnapshot snapshot) {
     _forget(key);
     _memory[key] = snapshot;
@@ -302,6 +355,7 @@ class SectionCatalogService {
       bytes += _stringBytes(channel.logoUrl);
       bytes += _stringBytes(channel.group);
       bytes += _stringBytes(channel.tvgId);
+      bytes += _stringBytes(channel.dynamicStreamId);
       bytes += _stringBytes(channel.httpUserAgent);
       bytes += _stringBytes(channel.httpReferrer);
       final headers = channel.httpHeaders;

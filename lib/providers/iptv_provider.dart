@@ -6,6 +6,7 @@ import '../models/channel.dart';
 import '../models/playback_settings.dart';
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
+import '../services/dynamic_stream_service.dart';
 import '../services/m3u_parser.dart';
 import '../services/playback_settings_service.dart';
 import '../services/remote_provisioning_service.dart';
@@ -25,6 +26,7 @@ class IptvProvider extends ChangeNotifier {
   static const _classicPlaylistName = 'Lista clásica';
   static const _classicPlaylistSource =
       'asset://assets/playlists/lista_clasica.m3u';
+  static const _dynamicPlaylistId = 'tvf_builtin_dynamic_classic_2';
 
   List<Playlist> _playlists = const [];
   List<Channel> _favorites = const [];
@@ -93,6 +95,7 @@ class IptvProvider extends ChangeNotifier {
     }
 
     await _ensureClassicPlaylist();
+    await _ensureDynamicPlaylist();
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
@@ -132,6 +135,50 @@ class IptvProvider extends ChangeNotifier {
     next[index] = classic.copyWith(lastUpdated: current.lastUpdated);
     _playlists = next;
     await _localStore.clearServiceCatalogs(_classicPlaylistId);
+    await _localStore.saveServices(_playlists);
+  }
+
+  Future<void> _ensureDynamicPlaylist() async {
+    final service = DynamicStreamService.instance;
+    final index =
+        _playlists.indexWhere((item) => item.id == _dynamicPlaylistId);
+
+    if (!service.isConfigured) {
+      if (index < 0) return;
+      _playlists = _playlists
+          .where((item) => item.id != _dynamicPlaylistId)
+          .toList(growable: false);
+      await _localStore.clearServiceCatalogs(_dynamicPlaylistId);
+      await _localStore.saveServices(_playlists);
+      return;
+    }
+
+    final dynamicPlaylist = Playlist(
+      id: _dynamicPlaylistId,
+      name: service.playlistName,
+      source: service.playlistSource,
+      isRemote: true,
+      channels: const <Channel>[],
+      lastUpdated: DateTime.now(),
+      sourceType: PlaylistSourceType.m3u,
+    );
+
+    if (index < 0) {
+      _playlists = [..._playlists, dynamicPlaylist];
+      await _localStore.saveServices(_playlists);
+      return;
+    }
+
+    final current = _playlists[index];
+    if (current.name == dynamicPlaylist.name &&
+        current.source == dynamicPlaylist.source) {
+      return;
+    }
+
+    final next = List<Playlist>.from(_playlists);
+    next[index] = dynamicPlaylist.copyWith(lastUpdated: current.lastUpdated);
+    _playlists = next;
+    await _localStore.clearServiceCatalogs(_dynamicPlaylistId);
     await _localStore.saveServices(_playlists);
   }
 

@@ -6,6 +6,7 @@ class Channel {
   final String? group; // categoría (ej: "Deportes", "Noticias")
   final String? tvgId; // id XMLTV/EPG del proveedor
   final String? xtreamStreamId; // stream_id real para APIs Xtream (EPG, etc.)
+  final String? dynamicStreamId; // id lógico resuelto al abrir el canal
 
   // Compatibilidad histórica: seguimos exponiendo User-Agent y Referer de
   // forma explícita porque ya existen listas guardadas con estos campos.
@@ -24,6 +25,7 @@ class Channel {
     this.group,
     this.tvgId,
     this.xtreamStreamId,
+    this.dynamicStreamId,
     this.httpUserAgent,
     this.httpReferrer,
     this.httpHeaders,
@@ -93,6 +95,7 @@ class Channel {
         'group': group,
         'tvgId': tvgId,
         'xtreamStreamId': xtreamStreamId,
+        if (dynamicStreamId != null) 'dynamicStreamId': dynamicStreamId,
         'httpUserAgent': httpUserAgent,
         'httpReferrer': httpReferrer,
         if (httpHeaders != null) 'httpHeaders': httpHeaders,
@@ -118,6 +121,7 @@ class Channel {
       group: json['group'] as String?,
       tvgId: json['tvgId'] as String?,
       xtreamStreamId: json['xtreamStreamId'] as String?,
+      dynamicStreamId: json['dynamicStreamId'] as String?,
       httpUserAgent: json['httpUserAgent'] as String?,
       httpReferrer: json['httpReferrer'] as String?,
       httpHeaders: headers,
@@ -125,7 +129,12 @@ class Channel {
   }
 
   /// Clave estable para identificar el canal (usada en favoritos).
-  String get uniqueKey => '$name|$url';
+  String get uniqueKey {
+    final dynamicId = dynamicStreamId?.trim();
+    return dynamicId == null || dynamicId.isEmpty
+        ? '$name|$url'
+        : '$name|dynamic:$dynamicId';
+  }
 
   @override
   bool operator ==(Object other) =>

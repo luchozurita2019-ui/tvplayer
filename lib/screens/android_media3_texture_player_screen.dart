@@ -8,6 +8,7 @@ import '../models/channel.dart';
 import '../services/channel_health_service.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
+import '../services/dynamic_stream_service.dart';
 import '../services/live_channel_usage_service.dart';
 import '../services/live_playback_error_policy.dart';
 import '../widgets/channel_logo_image.dart';
@@ -163,23 +164,40 @@ class _AndroidMedia3TexturePlayerScreenState
       });
     }
 
+    var playbackUrl = _channel.url;
     final headers = Map<String, String>.from(_headers);
-    String? userAgent;
-    for (final key in headers.keys.toList()) {
-      if (key.toLowerCase() == 'user-agent') {
-        userAgent = headers.remove(key);
-        break;
-      }
-    }
 
     try {
+      if ((_channel.dynamicStreamId?.trim().isNotEmpty ?? false)) {
+        final resolved = await DynamicStreamService.instance.resolve(_channel);
+        if (!mounted || generation != _openGeneration) return;
+        playbackUrl = resolved.url;
+        headers.addAll(resolved.headers);
+      }
+
+      String? userAgent;
+      for (final key in headers.keys.toList()) {
+        if (key.toLowerCase() == 'user-agent') {
+          userAgent = headers.remove(key);
+          break;
+        }
+      }
+
       await _player.invokeMethod<void>('prepare', {
-        'url': _channel.url,
+        'url': playbackUrl,
         'requestGeneration': generation,
         'headers': headers,
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
       });
+    } on DynamicStreamException catch (error) {
+      if (!mounted || generation != _openGeneration) return;
+      _handleTechnicalError(
+        'DYNAMIC_RESOLVE',
+        error.message,
+        retryable: error.retryable,
+        category: error.retryable ? 'network' : 'configuration',
+      );
     } on PlatformException catch (error) {
       if (!mounted || generation != _openGeneration) return;
       _handleTechnicalError(error.code, error.message ?? error.code);
