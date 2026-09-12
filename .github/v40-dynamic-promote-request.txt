@@ -1,1 +1,0 @@
-Promote the already-built signed V40 ARM32/ARM64 APK artifact from run 34706860095. Verify historical certificate, package, ABI-adjusted Android version codes 1040/2040 and versionName 1.4.8 before publishing. Point the official installer manifest only after all checks pass.
