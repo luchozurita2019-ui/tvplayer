@@ -1,0 +1,167 @@
+name: Promote V40 Dynamic Artifact to Installer
+
+on:
+  push:
+    branches:
+      - feature/dynamic-stream-resolver-v40-protocol-final
+    paths:
+      - '.github/v40-dynamic-promote-request.txt'
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      SOURCE_RUN_ID: '34706860095'
+      ARTIFACT_NAME: 'TV-FULL-PRO-V40-DYNAMIC-INSTALLER-V2'
+      CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          ref: feature/dynamic-stream-resolver-v40-protocol-final
+          fetch-depth: 0
+
+      - name: Download already-built signed V40 APKs
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: artifact
+          run-id: ${{ env.SOURCE_RUN_ID }}
+          github-token: ${{ github.token }}
+
+      - name: Verify both APKs before publication
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK32='artifact/TV-FULL-PRO-ARM32.apk'
+          APK64='artifact/TV-FULL-PRO-ARM64.apk'
+          test -f "$APK32"
+          test -f "$APK64"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+
+          verify_apk() {
+            local apk="$1"
+            local expected_code="$2"
+            "$APKSIGNER" verify --verbose --print-certs "$apk" > "$apk.signature.verify.txt"
+            local normalized
+            normalized="$(tr -d ':' < "$apk.signature.verify.txt" | tr '[:upper:]' '[:lower:]')"
+            printf '%s' "$normalized" | grep -q "$CERT_SHA256"
+            "$AAPT" dump badging "$apk" > "$apk.badging.verify.txt"
+            local package_line
+            package_line="$(grep '^package:' "$apk.badging.verify.txt" | head -n 1)"
+            echo "$package_line"
+            [[ "$package_line" == *"name='com.tvfull.pro.tv.v10safe'"* ]]
+            [[ "$package_line" == *"versionName='1.4.8'"* ]]
+            [[ "$package_line" == *"versionCode='$expected_code'"* ]]
+          }
+
+          verify_apk "$APK32" '1040'
+          verify_apk "$APK64" '2040'
+
+          ARM32_SHA="$(sha256sum "$APK32" | awk '{print $1}')"
+          ARM64_SHA="$(sha256sum "$APK64" | awk '{print $1}')"
+          ARM32_SIZE="$(stat -c '%s' "$APK32")"
+          ARM64_SIZE="$(stat -c '%s' "$APK64")"
+          echo "arm32_sha=$ARM32_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm64_sha=$ARM64_SHA" >> "$GITHUB_OUTPUT"
+          echo "arm32_size=$ARM32_SIZE" >> "$GITHUB_OUTPUT"
+          echo "arm64_size=$ARM64_SIZE" >> "$GITHUB_OUTPUT"
+
+      - name: Publish V40 dynamic test release
+        id: publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="tv-full-pro-v40-dynamic-test-${GITHUB_RUN_ID}"
+          gh release create "$TAG" \
+            artifact/TV-FULL-PRO-ARM32.apk \
+            artifact/TV-FULL-PRO-ARM64.apk \
+            --prerelease \
+            --target feature/dynamic-stream-resolver-v40-protocol-final \
+            --title 'TV FULL PRO 1.4.8+40 - TV clásica 2' \
+            --notes "V40 dinámica sin X-Hash. APKs construidos y firmados en run $SOURCE_RUN_ID. ARM32 versionCode ABI 1040; ARM64 versionCode ABI 2040; versión lógica del instalador 40."
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "base=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Point official installer to V40 dynamic test
+        env:
+          PUBLIC_BASE: ${{ steps.publish.outputs.base }}
+          RELEASE_TAG: ${{ steps.publish.outputs.tag }}
+          ARM32_SHA: ${{ steps.meta.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.meta.outputs.arm64_sha }}
+          ARM32_SIZE: ${{ steps.meta.outputs.arm32_size }}
+          ARM64_SIZE: ${{ steps.meta.outputs.arm64_size }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin android-tv-full-pro-clean-source
+          git checkout -B installer-v40-dynamic-test origin/android-tv-full-pro-clean-source
+          cat > tv_full_installer/latest.json <<EOF
+          {
+            "versionName": "1.4.8",
+            "versionCode": 40,
+            "packageName": "com.tvfull.pro.tv.v10safe",
+            "certificateSha256": "$CERT_SHA256",
+            "arm32": {
+              "url": "$PUBLIC_BASE/TV-FULL-PRO-ARM32.apk",
+              "sha256": "$ARM32_SHA",
+              "size": $ARM32_SIZE
+            },
+            "arm64": {
+              "url": "$PUBLIC_BASE/TV-FULL-PRO-ARM64.apk",
+              "sha256": "$ARM64_SHA",
+              "size": $ARM64_SIZE
+            }
+          }
+          EOF
+          printf '%s\n' \
+            'TV FULL PRO 1.4.8+40 dynamic protocol test is active in installer.' \
+            "source_build_run=$SOURCE_RUN_ID" \
+            "promotion_run=$GITHUB_RUN_ID" \
+            "release_tag=$RELEASE_TAG" \
+            'x_hash=omitted' \
+            'arm32_android_version_code=1040' \
+            'arm64_android_version_code=2040' \
+            "arm32_sha256=$ARM32_SHA" \
+            "arm64_sha256=$ARM64_SHA" \
+            > .github/v40-dynamic-test-installer.txt
+          git diff --check
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add tv_full_installer/latest.json .github/v40-dynamic-test-installer.txt
+          git commit -m 'Point installer to V40 dynamic protocol test'
+          git push origin HEAD:android-tv-full-pro-clean-source
+
+      - name: Verify public installer manifest
+        env:
+          ARM32_SHA: ${{ steps.meta.outputs.arm32_sha }}
+          ARM64_SHA: ${{ steps.meta.outputs.arm64_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          URL='https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/android-tv-full-pro-clean-source/tv_full_installer/latest.json'
+          for attempt in $(seq 1 20); do
+            BODY="$(curl -L --fail --silent --show-error "$URL" || true)"
+            if printf '%s' "$BODY" | grep -q '"versionCode": 40' && \
+               printf '%s' "$BODY" | grep -q '"versionName": "1.4.8"' && \
+               printf '%s' "$BODY" | grep -q "$ARM32_SHA" && \
+               printf '%s' "$BODY" | grep -q "$ARM64_SHA"; then
+              echo 'V40 dynamic test is live in official installer.'
+              exit 0
+            fi
+            sleep 5
+          done
+          echo 'Installer manifest did not become observable as V40.'
+          exit 1
