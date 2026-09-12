@@ -6,6 +6,7 @@ on:
       - feature/dynamic-stream-resolver-v40
     paths:
       - .github/scripts/apply_dynamic_stream_resolver_v40.py
+      - .github/scripts/run_dynamic_stream_resolver_v40.py
       - .github/workflows/apply-dynamic-stream-resolver-v40.yml
 
 permissions:
@@ -23,7 +24,7 @@ jobs:
           fetch-depth: 0
 
       - name: Apply guarded patch
-        run: python3 .github/scripts/apply_dynamic_stream_resolver_v40.py
+        run: python3 .github/scripts/run_dynamic_stream_resolver_v40.py
 
       - name: Check patch whitespace
         run: git diff --check
