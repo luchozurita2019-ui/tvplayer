@@ -1,1 +1,0 @@
-Retry V40 signed release build with robust certificate/package/version verification. Publish to the official installer only if every identity check passes. X-Hash remains intentionally omitted.
