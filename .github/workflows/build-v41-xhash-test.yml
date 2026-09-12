@@ -1,4 +1,4 @@
-name: Build V41 X-Hash Compatibility Test
+name: Build V42 X-Hash + X-Did Compatibility Test
 
 on:
   push:
@@ -7,16 +7,16 @@ on:
     paths:
       - '.github/v41-xhash-build-request.txt'
       - 'v41_xhash.txt'
+      - 'v42_xdid.txt'
       - '.github/workflows/build-v41-xhash-test.yml'
 
 permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.9'
-  BUILD_NUMBER: '41'
+  BUILD_NAME: '1.4.10'
+  BUILD_NUMBER: '42'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
-  DYNAMIC_CONFIG: '{"name":"TV clásica 2","server":"http://tv.m3uts.xyz","username":"m","password":"m","catalogHeaders":{"User-Agent":"Dalvik/2.1.0"},"resolver":{"path":"/stream/gen/{id}","method":"POST","form":{"id":"{id}","cast":"false","device":"{androidId}","code":""}},"playbackHeaders":{"X-App":"di","X-Version":"10/1.0.9","User-Agent":"Magma Player/10"}}'
 
 jobs:
   build-publish:
@@ -30,21 +30,28 @@ jobs:
           ref: feature/dynamic-stream-resolver-v40-protocol-final
           fetch-depth: 0
 
-      - name: Load X-Hash test value from branch file
+      - name: Load X-Hash and captured X-Did test values
         shell: bash
         run: |
           set -euo pipefail
           test -s v41_xhash.txt
-          normalized="$(tr '\r\n\t' '   ' < v41_xhash.txt | sed -E 's/^[[:space:]]*X-Hash:[[:space:]]*//' | awk '{print $1}')"
-          test -n "$normalized"
-          [[ "$normalized" != 'PEGAR_AQUI_SOLO_EL_X_HASH' ]]
-          if [[ "$normalized" == X-Hash:* || "$normalized" == X-Did:* ]]; then
-            echo 'X-Hash test value format is invalid.' >&2
-            exit 1
-          fi
-          echo "::add-mask::$normalized"
-          echo "TV_FULL_DYNAMIC_X_HASH_SANITIZED=$normalized" >> "$GITHUB_ENV"
-          echo "X-Hash test value accepted (length=${#normalized})"
+          test -s v42_xdid.txt
+          xhash="$(tr '\r\n\t' '   ' < v41_xhash.txt | sed -E 's/^[[:space:]]*X-Hash:[[:space:]]*//' | awk '{print $1}')"
+          xdid="$(tr -d '\r\n\t ' < v42_xdid.txt)"
+          test -n "$xhash"
+          test -n "$xdid"
+          [[ "$xhash" != 'PEGAR_AQUI_SOLO_EL_X_HASH' ]]
+          echo "::add-mask::$xhash"
+          echo "TV_FULL_DYNAMIC_X_HASH_SANITIZED=$xhash" >> "$GITHUB_ENV"
+          echo "TV_FULL_TEST_XDID=$xdid" >> "$GITHUB_ENV"
+          echo 'Compatibility values loaded.'
+
+      - name: Build dynamic config for V42
+        shell: bash
+        run: |
+          set -euo pipefail
+          config="{\"name\":\"TV clásica 2\",\"server\":\"http://tv.m3uts.xyz\",\"username\":\"m\",\"password\":\"m\",\"catalogHeaders\":{\"User-Agent\":\"Dalvik/2.1.0\"},\"resolver\":{\"path\":\"/stream/gen/{id}\",\"method\":\"POST\",\"form\":{\"id\":\"{id}\",\"cast\":\"false\",\"device\":\"$TV_FULL_TEST_XDID\",\"code\":\"\"}},\"playbackHeaders\":{\"X-App\":\"di\",\"X-Version\":\"10/1.0.9\",\"X-Did\":\"$TV_FULL_TEST_XDID\",\"User-Agent\":\"Magma Player/10\"}}"
+          echo "TV_FULL_DYNAMIC_CONFIG=$config" >> "$GITHUB_ENV"
 
       - name: Install Java 17
         uses: actions/setup-java@v5
@@ -89,17 +96,16 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed ARM32 and ARM64 APKs with X-Hash
+      - name: Build signed ARM32 and ARM64 APKs
         shell: bash
         run: |
           set -euo pipefail
-          test -n "$TV_FULL_DYNAMIC_X_HASH_SANITIZED"
           flutter build apk --release --split-per-abi \
             --target-platform android-arm,android-arm64 \
             --build-name="$BUILD_NAME" \
             --build-number="$BUILD_NUMBER" \
             --dart-define=TV_FULL_ANDROID_TV=true \
-            --dart-define="TV_FULL_DYNAMIC_SOURCE_JSON=$DYNAMIC_CONFIG" \
+            --dart-define="TV_FULL_DYNAMIC_SOURCE_JSON=$TV_FULL_DYNAMIC_CONFIG" \
             --dart-define="TV_FULL_DYNAMIC_X_HASH=$TV_FULL_DYNAMIC_X_HASH_SANITIZED"
 
       - name: Verify APK identity
@@ -112,9 +118,6 @@ jobs:
           cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-ARM64.apk
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
-          test -x "$APKSIGNER"
-          test -x "$AAPT"
-
           verify_apk() {
             local apk="$1"
             local expected_code="$2"
@@ -127,37 +130,34 @@ jobs:
             package_line="$(grep '^package:' "$apk.badging.txt" | head -n 1)"
             echo "$package_line"
             [[ "$package_line" == *"name='com.tvfull.pro.tv.v10safe'"* ]]
-            [[ "$package_line" == *"versionName='1.4.9'"* ]]
+            [[ "$package_line" == *"versionName='1.4.10'"* ]]
             [[ "$package_line" == *"versionCode='$expected_code'"* ]]
           }
-
-          verify_apk artifact/TV-FULL-PRO-ARM32.apk '1041'
-          verify_apk artifact/TV-FULL-PRO-ARM64.apk '2041'
-
+          verify_apk artifact/TV-FULL-PRO-ARM32.apk '1042'
+          verify_apk artifact/TV-FULL-PRO-ARM64.apk '2042'
           echo "arm32_sha=$(sha256sum artifact/TV-FULL-PRO-ARM32.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           echo "arm64_sha=$(sha256sum artifact/TV-FULL-PRO-ARM64.apk | awk '{print $1}')" >> "$GITHUB_OUTPUT"
           echo "arm32_size=$(stat -c '%s' artifact/TV-FULL-PRO-ARM32.apk)" >> "$GITHUB_OUTPUT"
           echo "arm64_size=$(stat -c '%s' artifact/TV-FULL-PRO-ARM64.apk)" >> "$GITHUB_OUTPUT"
 
-      - name: Publish isolated V41 X-Hash test release
+      - name: Publish isolated V42 test release
         id: publish
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v41-xhash-test-${GITHUB_RUN_ID}"
+          TAG="tv-full-pro-v42-xdid-test-${GITHUB_RUN_ID}"
           gh release create "$TAG" \
             artifact/TV-FULL-PRO-ARM32.apk \
             artifact/TV-FULL-PRO-ARM64.apk \
             --prerelease \
             --target feature/dynamic-stream-resolver-v40-protocol-final \
-            --title 'TV FULL PRO 1.4.9+41 - X-Hash test' \
-            --notes 'Compatibility test using provider-supplied X-Hash from isolated test branch. Same TV FULL package and historical signing certificate.'
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+            --title 'TV FULL PRO 1.4.10+42 - X-Hash + X-Did test' \
+            --notes 'Compatibility test with provider X-Hash and captured X-Did/device value. Same TV FULL package and historical signing certificate.'
           echo "base=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}" >> "$GITHUB_OUTPUT"
 
-      - name: Point official installer to V41 test
+      - name: Point official installer to V42 test
         env:
           PUBLIC_BASE: ${{ steps.publish.outputs.base }}
           ARM32_SHA: ${{ steps.meta.outputs.arm32_sha }}
@@ -168,11 +168,11 @@ jobs:
         run: |
           set -euo pipefail
           git fetch origin android-tv-full-pro-clean-source
-          git checkout -B installer-v41-xhash-test origin/android-tv-full-pro-clean-source
+          git checkout -B installer-v42-xdid-test origin/android-tv-full-pro-clean-source
           cat > tv_full_installer/latest.json <<EOF
           {
-            "versionName": "1.4.9",
-            "versionCode": 41,
+            "versionName": "1.4.10",
+            "versionCode": 42,
             "packageName": "com.tvfull.pro.tv.v10safe",
             "certificateSha256": "$CERT_SHA256",
             "arm32": {
@@ -191,7 +191,7 @@ jobs:
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add tv_full_installer/latest.json
-          git commit -m 'Point installer to V41 X-Hash compatibility test'
+          git commit -m 'Point installer to V42 X-Did compatibility test'
           git push origin HEAD:android-tv-full-pro-clean-source
 
       - name: Remove signing material
@@ -202,7 +202,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V41-XHASH-TEST
+          name: TV-FULL-PRO-V42-XDID-TEST
           path: artifact/
           if-no-files-found: warn
           retention-days: 30
