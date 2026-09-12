@@ -28,21 +28,21 @@ jobs:
           ref: feature/dynamic-stream-resolver-v40-protocol-final
           fetch-depth: 0
 
-      - name: Validate and normalize required X-Hash secret
+      - name: Load X-Hash test value from branch file
         shell: bash
-        env:
-          TV_FULL_DYNAMIC_X_HASH_RAW: ${{ secrets.TV_FULL_DYNAMIC_X_HASH }}
         run: |
           set -euo pipefail
-          test -n "$TV_FULL_DYNAMIC_X_HASH_RAW"
-          normalized="$(printf '%s' "$TV_FULL_DYNAMIC_X_HASH_RAW" | tr '\r\n\t' '   ' | sed -E 's/^[[:space:]]*X-Hash:[[:space:]]*//' | awk '{print $1}')"
+          test -s v41_xhash.txt
+          normalized="$(tr '\r\n\t' '   ' < v41_xhash.txt | sed -E 's/^[[:space:]]*X-Hash:[[:space:]]*//' | awk '{print $1}')"
           test -n "$normalized"
+          [[ "$normalized" != 'PEGAR_AQUI_SOLO_EL_X_HASH' ]]
           if [[ "$normalized" == X-Hash:* || "$normalized" == X-Did:* ]]; then
-            echo 'X-Hash secret format is invalid.' >&2
+            echo 'X-Hash test value format is invalid.' >&2
             exit 1
           fi
+          echo "::add-mask::$normalized"
           echo "TV_FULL_DYNAMIC_X_HASH_SANITIZED=$normalized" >> "$GITHUB_ENV"
-          echo "X-Hash secret accepted (normalized length=${#normalized})"
+          echo "X-Hash test value accepted (length=${#normalized})"
 
       - name: Install Java 17
         uses: actions/setup-java@v5
@@ -151,7 +151,7 @@ jobs:
             --prerelease \
             --target feature/dynamic-stream-resolver-v40-protocol-final \
             --title 'TV FULL PRO 1.4.9+41 - X-Hash test' \
-            --notes 'Compatibility test using provider-supplied X-Hash through build secret. Same TV FULL package and historical signing certificate.'
+            --notes 'Compatibility test using provider-supplied X-Hash from isolated test branch. Same TV FULL package and historical signing certificate.'
           echo "tag=$TAG" >> "$GITHUB_OUTPUT"
           echo "base=https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}" >> "$GITHUB_OUTPUT"
 
