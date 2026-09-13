@@ -1,4 +1,4 @@
-name: Build V45 JSON Playback Compatibility Test
+name: Build V44 JSON Playback Compatibility Test
 
 on:
   push:
@@ -6,7 +6,6 @@ on:
       - experiment/json-playback-compat-v44
     paths:
       - 'tool/apply_transport_compat_v44.py'
-      - 'android/app/build.gradle.kts'
       - '.github/workflows/build-v44-json-playback-compat.yml'
   workflow_dispatch:
 
@@ -14,8 +13,8 @@ permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.13'
-  BUILD_NUMBER: '45'
+  BUILD_NAME: '1.4.12'
+  BUILD_NUMBER: '44'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
 
 jobs:
@@ -23,7 +22,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 55
     steps:
-      - name: Checkout V45 experiment
+      - name: Checkout V44 experiment
         uses: actions/checkout@v4
         with:
           ref: experiment/json-playback-compat-v44
@@ -38,10 +37,10 @@ jobs:
           test -n "$value"
           echo "TV_FULL_JSON_CATALOG_URL=$value" >> "$GITHUB_ENV"
 
-      - name: Apply JSON catalog integration
+      - name: Apply V43 JSON catalog integration
         run: python3 tool/apply_json_remote_patch.py
 
-      - name: Apply transport compatibility
+      - name: Apply V44 transport compatibility
         run: python3 tool/apply_transport_compat_v44.py
 
       - name: Install Java 17
@@ -99,8 +98,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V45-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V45-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V44-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V44-ARM64.apk
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
           for apk in artifact/*.apk; do
@@ -109,23 +108,23 @@ jobs:
             printf '%s' "$normalized" | grep -q "$CERT_SHA256"
             "$AAPT" dump badging "$apk" > "$apk.badging.txt"
             grep -q "name='com.tvfull.pro.tv.v10safe'" "$apk.badging.txt"
-            grep -q "versionName='1.4.13'" "$apk.badging.txt"
+            grep -q "versionName='1.4.12'" "$apk.badging.txt"
           done
 
-      - name: Publish V45 experiment release
+      - name: Publish V44 experiment release
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v45-json-playback-${GITHUB_RUN_ID}"
+          TAG="tv-full-pro-v44-json-playback-${GITHUB_RUN_ID}"
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V45-ARM32.apk \
-            artifact/TV-FULL-PRO-V45-ARM64.apk \
+            artifact/TV-FULL-PRO-V44-ARM32.apk \
+            artifact/TV-FULL-PRO-V44-ARM64.apk \
             --prerelease \
             --target experiment/json-playback-compat-v44 \
-            --title 'TV FULL PRO 1.4.13+45 - DASH playback compatibility' \
-            --notes 'Experimental compatibility build: adds the Media3 DASH module and improves HLS/DASH detection when the manifest extension is embedded in a generated URL. Installer is intentionally not changed.'
+            --title 'TV FULL PRO 1.4.12+44 - JSON playback compatibility' \
+            --notes 'Experimental transport compatibility: preserves JSON header groups, detects HLS/DASH, forces the correct Media3 manifest type, and identifies protected entries that still require provider-authorized license configuration. Installer is intentionally not changed.'
 
       - name: Remove signing material
         if: always()
@@ -135,7 +134,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V45-JSON-PLAYBACK
+          name: TV-FULL-PRO-V44-JSON-PLAYBACK
           path: artifact/
           if-no-files-found: warn
           retention-days: 30
