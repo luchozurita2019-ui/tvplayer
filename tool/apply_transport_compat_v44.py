@@ -154,15 +154,7 @@ def patch_dart_player() -> None:
         'isLive': true,
       });
 """
-    replacement = """    if (_channel.protectedContent) {
-      _finishWithError(
-        'Canal protegido',
-        'PROTECTED_SOURCE · Falta la configuración de licencia autorizada del proveedor.',
-      );
-      return;
-    }
-
-    try {
+    replacement = """    try {
       await _player.invokeMethod<void>('prepare', {
         'url': _channel.url,
         'requestGeneration': generation,
