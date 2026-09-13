@@ -1,81 +1,92 @@
+import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
+import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
 
 class JsonCatalogException implements Exception {
   final String message;
-
   const JsonCatalogException(this.message);
-
   @override
   String toString() => message;
 }
 
-/// Catálogo JSON simple para fuentes LIVE empaquetadas en la APK.
-///
-/// Formato esperado:
-/// {
-///   "categories": [
-///     {
-///       "name": "Categoría",
-///       "samples": [
-///         {
-///           "name": "Canal",
-///           "type": "HLS",
-///           "original_url": "https://example.invalid/live.m3u8",
-///           "icono": "https://example.invalid/logo.png",
-///           "headers": {"User-Agent": "...", "Referer": "..."}
-///         }
-///       ]
-///     }
-///   ]
-/// }
-///
-/// Para esta prueba sólo se materializan entradas HLS con URL http/https.
 class JsonCatalogService {
   JsonCatalogService._();
-
   static final JsonCatalogService instance = JsonCatalogService._();
 
   static const String sourcePrefix = 'tvfull-json://';
-  static const String bundledSource =
-      '${sourcePrefix}assets/playlists/tv_clasica_2.json';
-  static const String bundledAssetPath = 'assets/playlists/tv_clasica_2.json';
+  static const String bundledSource = '${sourcePrefix}remote';
+  static const String _compiledCatalogUrl = String.fromEnvironment(
+    'TV_FULL_JSON_CATALOG_URL',
+    defaultValue: '',
+  );
+
+  final http.Client _client = http.Client();
 
   bool handlesSource(String source) => source.trim().startsWith(sourcePrefix);
 
   Future<List<Channel>> fetchCatalog(String source) async {
-    final assetPath = _assetPath(source);
-    if (assetPath == null) {
-      throw const JsonCatalogException('Fuente JSON local inválida.');
+    if (!handlesSource(source)) {
+      throw const JsonCatalogException('Fuente JSON invalida.');
     }
-    final raw = await rootBundle.loadString(assetPath);
-    return parse(raw);
+    final value = _compiledCatalogUrl.trim();
+    if (value.isEmpty) {
+      throw const JsonCatalogException('Falta configurar el catalogo JSON.');
+    }
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        uri.host.isEmpty) {
+      throw const JsonCatalogException('URL de catalogo JSON invalida.');
+    }
+
+    http.Response response;
+    try {
+      response = await _client
+          .get(uri, headers: const {
+            'User-Agent': 'TV FULL PRO JSON Catalog Test/43',
+            'Accept': 'application/json,text/plain,*/*',
+          })
+          .timeout(const Duration(seconds: 20));
+    } on TimeoutException {
+      throw const JsonCatalogException('El catalogo JSON no respondio a tiempo.');
+    } catch (_) {
+      throw const JsonCatalogException('No se pudo descargar el catalogo JSON.');
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw JsonCatalogException('El catalogo JSON respondio HTTP ${response.statusCode}.');
+    }
+
+    return parse(utf8.decode(response.bodyBytes, allowMalformed: true));
   }
 
-  @visibleForTesting
   List<Channel> parse(String raw) {
     dynamic decoded;
     try {
       decoded = jsonDecode(raw);
-    } catch (error) {
-      throw JsonCatalogException('Catálogo JSON inválido: $error');
+    } catch (_) {
+      final repaired = raw
+          .replaceFirstMapped(
+            RegExp(r'("streams"\s*:\s*\d+)"'),
+            (match) => match.group(1)!,
+          )
+          .replaceAll('"globalIndex": ·,', '"globalIndex": null,');
+      try {
+        decoded = jsonDecode(repaired);
+      } catch (error) {
+        throw JsonCatalogException('Catalogo JSON invalido: $error');
+      }
     }
 
     if (decoded is! Map) {
-      throw const JsonCatalogException(
-        'El catálogo JSON debe contener un objeto principal.',
-      );
+      throw const JsonCatalogException('El catalogo JSON debe contener un objeto principal.');
     }
-
     final rawCategories = decoded['categories'];
     if (rawCategories is! List) {
-      throw const JsonCatalogException(
-        'El catálogo JSON no contiene categories.',
-      );
+      throw const JsonCatalogException('El catalogo JSON no contiene categories.');
     }
 
     final channels = <Channel>[];
@@ -89,13 +100,9 @@ class JsonCatalogService {
       for (final rawSample in samples) {
         if (rawSample is! Map) continue;
         final item = Map<String, dynamic>.from(rawSample);
-        final type = (_clean(item['type']) ?? '').toUpperCase();
-        if (type != 'HLS') continue;
-
         final name = _clean(item['name']);
         final url = _clean(item['original_url']) ?? _clean(item['url']);
         if (name == null || url == null) continue;
-
         final parsed = Uri.tryParse(url);
         if (parsed == null ||
             !(parsed.scheme == 'http' || parsed.scheme == 'https') ||
@@ -104,34 +111,25 @@ class JsonCatalogService {
         }
 
         final icon = _clean(item['icono']);
-        final headers = _stringMap(item['headers']);
+        final headers = <String, String>{};
+        for (final key in const ['headers', 'headersM3u8', 'headersUrl', 'headers2']) {
+          headers.addAll(_stringMap(item[key]));
+        }
 
-        channels.add(
-          Channel(
-            name: name,
-            url: parsed.toString(),
-            logoUrl: icon != null && !icon.startsWith('data:') ? icon : null,
-            group: categoryName ?? _clean(item['category']),
-            httpHeaders: headers.isEmpty ? null : headers,
-          ),
-        );
+        channels.add(Channel(
+          name: name,
+          url: parsed.toString(),
+          logoUrl: icon != null && !icon.startsWith('data:') ? icon : null,
+          group: categoryName ?? _clean(item['category']),
+          httpHeaders: headers.isEmpty ? null : headers,
+        ));
       }
     }
 
     if (channels.isEmpty) {
-      throw const JsonCatalogException(
-        'El catálogo JSON no contiene streams HLS utilizables.',
-      );
+      throw const JsonCatalogException('El catalogo JSON no contiene streams utilizables.');
     }
-
     return List<Channel>.unmodifiable(channels);
-  }
-
-  String? _assetPath(String source) {
-    final value = source.trim();
-    if (!value.startsWith(sourcePrefix)) return null;
-    final path = value.substring(sourcePrefix.length).trim();
-    return path.isEmpty ? null : path;
   }
 
   String? _clean(dynamic value) {
