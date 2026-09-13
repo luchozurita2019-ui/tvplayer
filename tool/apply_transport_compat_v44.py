@@ -104,10 +104,10 @@ def patch_json_catalog() -> None:
         final urlHeaders = _stringMap(item['headersUrl']);
         final secondaryHeaders = _stringMap(item['headers2']);
         final rawType = (_clean(item['type']) ?? '').toUpperCase();
-        final cleanPath = parsed.path.toLowerCase();
-        final streamType = cleanPath.endsWith('.mpd') || rawType == 'DASH'
+        final fullUrl = parsed.toString().toLowerCase();
+        final streamType = fullUrl.contains('.mpd') || rawType == 'DASH'
             ? 'dash'
-            : cleanPath.endsWith('.m3u8') || rawType == 'HLS'
+            : fullUrl.contains('.m3u8') || rawType == 'HLS'
                 ? 'hls'
                 : null;
         final protectedContent = _clean(item['drm_license_uri']) != null ||
@@ -206,9 +206,9 @@ def patch_android_player() -> None:
 """
     new_media = """        val factory = mediaSourceFactory(headers, userAgent, useFallbackDns)
         val requestedType = currentContentType?.trim()?.lowercase()
-        val useDashMime = requestedType == "dash" || url.substringBefore('?').lowercase().endsWith(".mpd")
+        val useDashMime = requestedType == \"dash\" || url.substringBefore('?').lowercase().endsWith(\".mpd\")
         val useHlsMime = !useDashMime &&
-            (requestedType == "hls" ||
+            (requestedType == \"hls\" ||
                 (isLive && (currentSourceForcedHls || forceHls || looksLikeHls(url))))
         currentSourceForcedHls = useHlsMime
         val itemBuilder = MediaItem.Builder()
