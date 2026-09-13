@@ -103,6 +103,15 @@ def patch_json_catalog() -> None:
         final manifestHeaders = _stringMap(item['headersM3u8']);
         final urlHeaders = _stringMap(item['headersUrl']);
         final secondaryHeaders = _stringMap(item['headers2']);
+        // Preserve V43 request behavior exactly: all declared header groups are
+        // still sent to Media3. The groups remain stored separately as metadata
+        // for future per-request routing, but this experiment must not regress
+        // channels that already worked in V43.
+        final mergedHeaders = <String, String>{}
+          ..addAll(baseHeaders)
+          ..addAll(manifestHeaders)
+          ..addAll(urlHeaders)
+          ..addAll(secondaryHeaders);
         final rawType = (_clean(item['type']) ?? '').toUpperCase();
         final fullUrl = parsed.toString().toLowerCase();
         final streamType = fullUrl.contains('.mpd') || rawType == 'DASH'
@@ -124,7 +133,7 @@ def patch_json_catalog() -> None:
           secondaryHeaders: secondaryHeaders.isEmpty ? null : secondaryHeaders,
           protectedContent: protectedContent,
           protectionType: protectedContent ? rawType : null,
-          httpHeaders: baseHeaders.isEmpty ? null : baseHeaders,
+          httpHeaders: mergedHeaders.isEmpty ? null : mergedHeaders,
         ));
 """
     text = replace_once(text, old, new, 'json mapping')
