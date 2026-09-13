@@ -56,28 +56,26 @@ jobs:
           if 'media3-exoplayer-dash:1.8.0' not in text:
               if marker not in text:
                   raise SystemExit('HLS dependency marker not found')
-              text = text.replace(marker, marker + '    implementation("androidx.media3:media3-exoplayer-dash:1.8.0")\n', 1)
+              text = text.replace(
+                  marker,
+                  marker + '    implementation("androidx.media3:media3-exoplayer-dash:1.8.0")\n',
+                  1,
+              )
           gradle.write_text(text, encoding='utf-8')
 
           catalog = Path('lib/services/json_catalog_service.dart')
           text = catalog.read_text(encoding='utf-8')
-          old = """        final cleanPath = parsed.path.toLowerCase();
-          final streamType = cleanPath.endsWith('.mpd') || rawType == 'DASH'
-              ? 'dash'
-              : cleanPath.endsWith('.m3u8') || rawType == 'HLS'
-                  ? 'hls'
-                  : null;
-          """
-          new = """        final fullUrl = parsed.toString().toLowerCase();
-          final streamType = fullUrl.contains('.mpd') || rawType == 'DASH'
-              ? 'dash'
-              : fullUrl.contains('.m3u8') || rawType == 'HLS'
-                  ? 'hls'
-                  : null;
-          """
-          if old not in text:
-              raise SystemExit('stream detection marker not found')
-          catalog.write_text(text.replace(old, new, 1), encoding='utf-8')
+          replacements = {
+              "final cleanPath = parsed.path.toLowerCase();":
+                  "final fullUrl = parsed.toString().toLowerCase();",
+              "cleanPath.endsWith('.mpd')": "fullUrl.contains('.mpd')",
+              "cleanPath.endsWith('.m3u8')": "fullUrl.contains('.m3u8')",
+          }
+          for old, new in replacements.items():
+              if old not in text:
+                  raise SystemExit(f'source detection marker not found: {old}')
+              text = text.replace(old, new, 1)
+          catalog.write_text(text, encoding='utf-8')
           PY
 
       - name: Install Java 17
