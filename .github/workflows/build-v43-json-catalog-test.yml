@@ -1,0 +1,23 @@
+name: Build V43 JSON Catalog Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - experiment/json-catalog-loader
+    paths:
+      - 'lib/services/json_catalog_service.dart'
+      - '.github/workflows/build-v43-json-catalog-test.yml'
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: experiment/json-catalog-loader
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+      - run: flutter pub get
+      - run: flutter analyze --no-fatal-warnings --no-fatal-infos
