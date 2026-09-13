@@ -1,0 +1,22 @@
+{
+  "categories": [
+    {
+      "name": "Categoria de prueba",
+      "samples": [
+        {
+          "name": "Canal de prueba",
+          "type": "HLS",
+          "original_url": "https://example.invalid/stream.m3u8",
+          "icono": "",
+          "headers": {},
+          "headersM3u8": {},
+          "headersUrl": {},
+          "headers2": {},
+          "drm_license_uri": "",
+          "keyid": "",
+          "key": ""
+        }
+      ]
+    }
+  ]
+}
