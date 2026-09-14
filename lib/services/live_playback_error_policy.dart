@@ -35,12 +35,18 @@ class LivePlaybackErrorPolicy {
     final normalizedCategory = (category ?? '').toLowerCase();
     final combined = '$code $detail ${category ?? ''}'.toLowerCase();
 
-    final terminalHttp = _isTerminalHttp(httpStatus, combined);
+    // 401/403 pueden indicar que una URL temporal del proveedor venció. TV
+    // FULL vuelve a preparar el canal; los resolvedores dinámicos aprovechan
+    // ese intento para renovar la sesión/token. 404/410 siguen siendo finales.
+    final refreshableAuth = _isRefreshableAuth(httpStatus, combined);
+    final terminalHttp = !refreshableAuth && _isTerminalHttp(httpStatus, combined);
     final transientHttp = !terminalHttp &&
-        (httpStatus == 408 ||
+        (refreshableAuth ||
+            httpStatus == 408 ||
             httpStatus == 429 ||
             (httpStatus != null && httpStatus >= 500 && httpStatus <= 599));
-    final exhaustedSignal = normalizedCode.contains('tvfull_no_progress') ||
+    final exhaustedSignal =
+        normalizedCode.contains('tvfull_no_progress') ||
         normalizedCode.contains('tvfull_stall_exhausted') ||
         normalizedCode.contains('stream_ended');
     final transientCategory = <String>{
@@ -50,21 +56,27 @@ class LivePlaybackErrorPolicy {
       'segment',
       'microcut',
       'http_transient',
+      'http_auth',
     }.contains(normalizedCategory);
-    final transientText = combined.contains('tvfull_fast_io') ||
+    final transientText =
+        combined.contains('tvfull_fast_io') ||
         combined.contains('network') ||
         combined.contains('timeout') ||
         combined.contains('connection reset') ||
         combined.contains('connection refused');
 
-    final retryableSignal = !terminalHttp &&
+    final retryableSignal =
+        !terminalHttp &&
         !exhaustedSignal &&
         (transientHttp ||
             nativeRetryable == true ||
             transientCategory ||
             transientText);
-    final shouldRetry = retryableSignal && retryCount < _retryBackoff.length;
-    final markDead = terminalHttp || exhaustedSignal;
+    final shouldRetry =
+        retryableSignal && retryCount < _retryBackoff.length;
+    final authExhausted =
+        refreshableAuth && retryCount >= _retryBackoff.length;
+    final markDead = terminalHttp || exhaustedSignal || authExhausted;
 
     return LivePlaybackDecision(
       shouldRetry: shouldRetry,
@@ -77,6 +89,11 @@ class LivePlaybackErrorPolicy {
       ),
       category: normalizedCategory.isEmpty ? 'playback' : normalizedCategory,
     );
+  }
+
+  static bool _isRefreshableAuth(int? status, String text) {
+    if (status != null) return status == 401 || status == 403;
+    return text.contains('401') || text.contains('403');
   }
 
   static bool _isTerminalHttp(int? status, String text) {
