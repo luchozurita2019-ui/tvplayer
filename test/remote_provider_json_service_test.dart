@@ -6,6 +6,13 @@ import 'package:http/testing.dart';
 import 'package:iptv_player/services/remote_provider_json_service.dart';
 
 void main() {
+  test('usa por defecto el mismo catálogo que la APK del proveedor', () {
+    expect(
+      RemoteProviderJsonService.catalogUrl,
+      'https://archive.org/download/prueba9_202607/prueba.9/prueba9.json',
+    );
+  });
+
   test('la fuente remota conserva intactos los registros del proveedor', () async {
     final body = jsonEncode({
       'summary': {'categories': 1, 'streams': 3},
