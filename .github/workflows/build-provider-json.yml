@@ -1,4 +1,4 @@
-name: Build V48 provider JSON resolver
+name: Build V49 provider JSON resolver
 
 on:
   push:
@@ -14,9 +14,9 @@ concurrency:
   cancel-in-progress: true
 
 env:
-  BUILD_NAME: '1.4.16'
-  BUILD_NUMBER: '3048'
-  RELEASE_NUMBER: '48'
+  BUILD_NAME: '1.4.17'
+  BUILD_NUMBER: '3049'
+  RELEASE_NUMBER: '49'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
 
 jobs:
@@ -185,9 +185,11 @@ jobs:
           set -euo pipefail
           TAG="tv-full-pro-v${RELEASE_NUMBER}-provider-json-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cat > artifact/release-notes.md <<EOF
-          TV FULL · Proveedor conserva el catálogo provider.json completo y lo entrega sin reescrituras al parser.
+          TV FULL · Proveedor usa por defecto el mismo catálogo remoto que la APK PlayTV Premium entregada para integración.
+          Se mantiene el catálogo provider.json completo y sin reescrituras antes del parser.
+          ClearKey acepta tanto Base64URL como Base64 estándar del catálogo del proveedor y se normaliza internamente antes de Media3.
           Los streams directos siguen reproduciendo de forma directa.
-          Las rutas Flow usan la ruta original live/c... para obtener un host/token temporal del motor suministrado por el proveedor justo al pulsar Play.
+          Las rutas Flow usan la ruta original live/c... para obtener un host/token temporal justo al pulsar Play.
           Los metadatos de reproducción, headers y ClearKey suministrados por el proveedor permanecen disponibles para Media3.
           ClearKey se habilita también para HLS cuando el catálogo autorizado del proveedor lo indica.
           HTTP 401/403 permite renovación acotada de la sesión/token antes de marcar un canal como no disponible; 404/410 siguen siendo terminales.
@@ -198,12 +200,12 @@ jobs:
           ARM32 y ARM64 conservan el paquete y certificado históricos de TV FULL PRO.
           EOF
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V48-ARM32.apk \
-            artifact/TV-FULL-PRO-V48-ARM64.apk \
+            artifact/TV-FULL-PRO-V49-ARM32.apk \
+            artifact/TV-FULL-PRO-V49-ARM64.apk \
             artifact/latest.json \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO ${BUILD_NAME}+${BUILD_NUMBER} - provider resolver" \
+            --title "TV FULL PRO ${BUILD_NAME}+${BUILD_NUMBER} - provider catalog parity" \
             --notes-file artifact/release-notes.md
 
       - name: Remove signing material
@@ -214,7 +216,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V48-PROVIDER-RESOLVER
+          name: TV-FULL-PRO-V49-PROVIDER-CATALOG-PARITY
           path: artifact/
           if-no-files-found: warn
           retention-days: 30
