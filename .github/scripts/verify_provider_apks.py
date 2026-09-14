@@ -40,19 +40,25 @@ def main():
         "certificateSha256": certificate,
     }
     signer, aapt = build_tool("apksigner"), build_tool("aapt")
-    for label, abi in (("arm32", "armeabi-v7a"), ("arm64", "arm64-v8a")):
+    variants = (("arm32", "armeabi-v7a"), ("arm64", "arm64-v8a"))
+    for label, abi in variants:
         apk = artifact / f"TV-FULL-PRO-V{release_number}-{label.upper()}.apk"
         shutil.copyfile(f"build/app/outputs/flutter-apk/app-{abi}-release.apk", apk)
+    for label, abi in variants:
+        apk = artifact / f"TV-FULL-PRO-V{release_number}-{label.upper()}.apk"
         signature = subprocess.check_output(
             [signer, "verify", "--verbose", "--print-certs", apk], text=True
         )
         apk.with_suffix(".apk.signature.txt").write_text(signature)
+        # Build Tools now report "V2 Signer:"; older releases used "Signer #1".
         fingerprints = re.findall(
-            r"Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9:]+)", signature
+            r"^(?:Signer #\d+|V\d+(?:\.\d+)? Signer):? certificate SHA-256 digest: ([a-fA-F0-9:]+)$",
+            signature, re.MULTILINE,
         )
-        require(fingerprints and all(value.replace(":", "").lower() == certificate
-                                    for value in fingerprints),
+        require(fingerprints, f"No signing certificate found in apksigner output: {apk.name}")
+        require(all(value.replace(":", "").lower() == certificate for value in fingerprints),
                 f"Historical certificate mismatch: {apk.name}")
+        print(f"Verified historical certificate for {apk.name}: {certificate}")
         badging = subprocess.check_output([aapt, "dump", "badging", apk], text=True)
         apk.with_suffix(".apk.badging.txt").write_text(badging)
         package_line = next(line for line in badging.splitlines() if line.startswith("package: "))
