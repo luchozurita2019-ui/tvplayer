@@ -16,7 +16,11 @@ void main() {
     },
   };
 
-  String catalog({String? baseUrl, String? streamBaseUrl, required String url}) {
+  String catalog({
+    String? baseUrl,
+    String? streamBaseUrl,
+    required String url,
+  }) {
     return jsonEncode({
       if (baseUrl != null) 'base_url': baseUrl,
       if (streamBaseUrl != null) 'stream_base_url': streamBaseUrl,
@@ -37,8 +41,10 @@ void main() {
       ),
     );
 
-    expect(result.channels.single.url,
-        'https://provider.example.test/content/live/channel/manifest.mpd');
+    expect(
+      result.channels.single.url,
+      'https://provider.example.test/content/live/channel/manifest.mpd',
+    );
     expect(result.channels.single.streamMimeType, 'application/dash+xml');
     expect(result.warnings, isEmpty);
   });
@@ -51,15 +57,20 @@ void main() {
       ),
     );
 
-    expect(result.channels.single.url,
-        'https://provider.example.test/root/live/channel/manifest.mpd');
+    expect(
+      result.channels.single.url,
+      'https://provider.example.test/root/live/channel/manifest.mpd',
+    );
   });
 
-  test('ruta relativa sin base del proveedor no se acepta', () {
-    expect(
-      () => parser.parse(catalog(url: 'live/channel/manifest.mpd')),
-      throwsFormatException,
-    );
+  test('ruta relativa sin base se conserva para el resolvedor', () {
+    final result = parser.parse(catalog(url: 'live/channel/manifest.mpd'));
+    final channel = result.channels.single;
+
+    expect(channel.dynamicStreamId, 'live/channel/manifest.mpd');
+    expect(channel.dynamicStreamPath, 'live/channel/manifest.mpd');
+    expect(channel.url, startsWith('tvfull-dynamic://stream/'));
+    expect(channel.streamMimeType, 'application/dash+xml');
   });
 
   test('base_url no HTTP/HTTPS se rechaza', () {

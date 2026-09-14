@@ -25,6 +25,7 @@ class ProviderJsonCatalog {
 class ProviderJsonCatalogParser {
   static const maxCatalogBytes = 16 * 1024 * 1024;
   static const maxIconBytes = 2 * 1024 * 1024;
+  static const dynamicStreamPrefix = 'tvfull-dynamic://stream/';
 
   const ProviderJsonCatalogParser();
 
@@ -65,6 +66,8 @@ class ProviderJsonCatalogParser {
     final warnings = <String>[];
     final channels = <Channel>[];
     final baseUri = _catalogBaseUri(root);
+    final resolveAll =
+        root['resolver_mode']?.toString().trim().toLowerCase() == 'all';
     final categories = root['categories'] as List;
     for (var i = 0; i < categories.length; i++) {
       final category = categories[i];
@@ -87,7 +90,14 @@ class ProviderJsonCatalogParser {
         final samplePath = '$path.samples[$j]';
         try {
           channels.add(
-            _sample(samples[j], group, samplePath, warnings, baseUri),
+            _sample(
+              samples[j],
+              group,
+              samplePath,
+              warnings,
+              baseUri,
+              resolveAll,
+            ),
           );
         } on FormatException catch (error) {
           warnings.add('$samplePath: ${error.message} Canal omitido.');
@@ -98,9 +108,7 @@ class ProviderJsonCatalogParser {
     // summary es informativo: los conteos reales provienen de samples.
     if (channels.isEmpty) {
       final detail = warnings.isEmpty ? '' : ' ${warnings.take(3).join(' ')}';
-      throw FormatException(
-        'El catálogo no contiene canales válidos.$detail',
-      );
+      throw FormatException('El catálogo no contiene canales válidos.$detail');
     }
     return ProviderJsonCatalog(channels, warnings);
   }
@@ -126,6 +134,7 @@ class ProviderJsonCatalogParser {
     String path,
     List<String> warnings,
     Uri? baseUri,
+    bool resolveAll,
   ) {
     if (raw is! Map) {
       throw const FormatException('El sample debe ser un objeto.');
@@ -139,7 +148,35 @@ class ProviderJsonCatalogParser {
       throw const FormatException('Falta original_url de tipo texto.');
     }
 
-    final url = _resolveStreamUrl(rawUrl.trim(), baseUri);
+    final originalUrl = rawUrl.trim();
+    final parsedOriginal = Uri.tryParse(originalUrl);
+    final direct = _isHttpUrl(originalUrl);
+    if (!direct &&
+        (parsedOriginal == null ||
+            parsedOriginal.hasScheme ||
+            parsedOriginal.hasAuthority ||
+            originalUrl.startsWith('//') ||
+            RegExp(r'[\x00-\x20]').hasMatch(originalUrl))) {
+      throw const FormatException('original_url relativa inválida.');
+    }
+    final explicitResolverId = _firstText(raw, const [
+      'resolver_id',
+      'stream_id',
+      'id',
+    ]);
+    final globalIndexRaw = raw['globalIndex']?.toString().trim();
+    final globalIndex = globalIndexRaw == null || globalIndexRaw.isEmpty
+        ? null
+        : globalIndexRaw;
+    final dynamicId = explicitResolverId ?? globalIndex ?? originalUrl;
+    final sampleResolverRequired =
+        raw['resolver_required'] == true ||
+        raw['resolver_required']?.toString().toLowerCase() == 'true';
+    final shouldResolve =
+        resolveAll || sampleResolverRequired || (!direct && baseUri == null);
+    final url = shouldResolve
+        ? '$dynamicStreamPrefix${Uri.encodeComponent(dynamicId)}'
+        : _resolveStreamUrl(originalUrl, baseUri);
 
     ClearKeyDrmConfig? drm;
     final rawDrm = raw['drm_license_uri'];
@@ -222,7 +259,7 @@ class ProviderJsonCatalogParser {
         '$path.type: debe ser texto; formato a detectar al reproducir.',
       );
     }
-    final uriPath = Uri.parse(url).path.toLowerCase();
+    final uriPath = Uri.parse(originalUrl).path.toLowerCase();
     mime ??= uriPath.endsWith('.mpd')
         ? 'application/dash+xml'
         : uriPath.endsWith('.m3u8')
@@ -241,10 +278,23 @@ class ProviderJsonCatalogParser {
       logoUrl: logoUrl,
       logoBytes: logoBytes,
       httpHeaders: headers.isEmpty ? null : Map.unmodifiable(headers),
+      dynamicStreamId: shouldResolve ? dynamicId : null,
+      dynamicStreamPath: shouldResolve ? originalUrl : null,
+      providerGlobalIndex: globalIndex,
       drmKeyId: drm?.keyId,
       drmKey: drm?.key,
       streamMimeType: mime,
     );
+  }
+
+  String? _firstText(Map raw, List<String> keys) {
+    for (final key in keys) {
+      final value = raw[key]?.toString().trim();
+      if (value != null && value.isNotEmpty && value.toLowerCase() != 'null') {
+        return value;
+      }
+    }
+    return null;
   }
 
   String _resolveStreamUrl(String value, Uri? baseUri) {
@@ -263,7 +313,9 @@ class ProviderJsonCatalogParser {
     }
     final resolved = baseUri.resolveUri(relative).toString();
     if (!_isHttpUrl(resolved)) {
-      throw const FormatException('original_url no pudo resolverse de forma segura.');
+      throw const FormatException(
+        'original_url no pudo resolverse de forma segura.',
+      );
     }
     return resolved;
   }

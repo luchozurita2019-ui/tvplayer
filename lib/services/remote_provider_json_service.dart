@@ -25,10 +25,10 @@ class RemoteProviderJsonPayload {
 /// La URL queda compilada dentro de la APK, pero puede reemplazarse en CI con
 /// --dart-define=TV_FULL_PROVIDER_JSON_URL=... sin tocar M3U/Xtream/Stalker.
 ///
-/// Esta ruta remota sólo importa streams HTTP/HTTPS directos y sin DRM. Las
-/// rutas relativas y las entradas protegidas se contabilizan pero se omiten;
-/// el soporte ClearKey local sigue disponible para catálogos autorizados que el
-/// usuario importe manualmente.
+/// La fuente remota conserva el catálogo completo. Las rutas relativas y las
+/// entradas protegidas se marcan para resolución justo antes de reproducir.
+/// El material DRM remoto no se propaga: un resolvedor autorizado debe
+/// devolver la URL/sesión reproducible. El ClearKey local sigue disponible.
 class RemoteProviderJsonService {
   RemoteProviderJsonService._();
 
@@ -36,8 +36,7 @@ class RemoteProviderJsonService {
 
   static const catalogUrl = String.fromEnvironment(
     'TV_FULL_PROVIDER_JSON_URL',
-    defaultValue:
-        'https://raw.githubusercontent.com/monchotv/MonchoApps/main/original_url.json',
+    defaultValue: 'https://raw.githubusercontent.com/monchotv/MonchoApps/main/original_url.json',
   );
 
   static const _userAgent =
@@ -60,9 +59,9 @@ class RemoteProviderJsonService {
           'User-Agent': _userAgent,
           'Cache-Control': 'no-cache',
         });
-      final response = await httpClient.send(request).timeout(
-            const Duration(seconds: 15),
-          );
+      final response = await httpClient
+          .send(request)
+          .timeout(const Duration(seconds: 15));
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw FormatException(
           'El servidor del catálogo respondió ${response.statusCode}.',
@@ -87,7 +86,9 @@ class RemoteProviderJsonService {
       try {
         decoded = jsonDecode(text);
       } on FormatException {
-        throw const FormatException('El catálogo remoto no contiene JSON válido.');
+        throw const FormatException(
+          'El catálogo remoto no contiene JSON válido.',
+        );
       }
       if (decoded is! Map || decoded['categories'] is! List) {
         throw const FormatException(
@@ -109,18 +110,17 @@ class RemoteProviderJsonService {
           sourceSamples++;
           final sample = Map<String, Object?>.from(rawSample);
           final url = sample['original_url'];
-          if (url is! String || !_absoluteHttpUrl(url.trim())) {
-            relativeUrlSamples++;
-            continue;
-          }
+          if (url is! String || url.trim().isEmpty) continue;
+          final relative = !_absoluteHttpUrl(url.trim());
+          if (relative) relativeUrlSamples++;
 
           final drm = sample['drm_license_uri'];
-          if (drm is String && drm.trim().isNotEmpty) {
-            protectedSamples++;
-            continue;
-          }
+          final protected = drm is String && drm.trim().isNotEmpty;
+          if (protected) protectedSamples++;
 
-          // Nunca propagar material DRM por la fuente remota integrada.
+          if (relative || protected) {
+            sample['resolver_required'] = true;
+          }
           sample.remove('drm_license_uri');
           samples.add(sample);
           usableSamples++;
@@ -137,15 +137,12 @@ class RemoteProviderJsonService {
 
       if (usableSamples == 0) {
         throw const FormatException(
-          'El catálogo remoto no contiene URLs HTTP/HTTPS directas y sin DRM utilizables.',
+          'El catálogo remoto no contiene canales utilizables.',
         );
       }
 
       final normalized = <String, Object?>{
-        'summary': {
-          'categories': categories.length,
-          'streams': usableSamples,
-        },
+        'summary': {'categories': categories.length, 'streams': usableSamples},
         'categories': categories,
       };
 

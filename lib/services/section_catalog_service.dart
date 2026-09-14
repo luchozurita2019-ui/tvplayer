@@ -117,7 +117,8 @@ class SectionCatalogService {
     final result = <TvSectionKind, SectionCatalogSnapshot>{};
     for (final kind in TvSectionKind.values) {
       final snapshot = await loadCached(playlist, kind);
-      result[kind] = snapshot ??
+      result[kind] =
+          snapshot ??
           const SectionCatalogSnapshot(
             channels: [],
             categories: [],
@@ -133,7 +134,8 @@ class SectionCatalogService {
     TvSectionKind? kind,
   }) async {
     // Esta fuente es una copia importada localmente, sin actualización de red.
-    if (playlist.sourceType == PlaylistSourceType.localProviderJson) return null;
+    if (playlist.sourceType == PlaylistSourceType.localProviderJson)
+      return null;
     final targetKind = kind ?? _lastRequestedKind[playlist.id];
     final key = '${playlist.id}|${playlist.source}';
     final pending = _pending[key];
@@ -150,8 +152,10 @@ class SectionCatalogService {
     for (final sectionKind in TvSectionKind.values) {
       final snapshotKey = 'm3u_${sectionKind.name}';
       persisted = await _catalogFiles.loadUpdatedAt(playlist.id, snapshotKey);
-      persisted ??=
-          await _store.loadLegacySnapshotUpdatedAt(playlist.id, snapshotKey);
+      persisted ??= await _store.loadLegacySnapshotUpdatedAt(
+        playlist.id,
+        snapshotKey,
+      );
       if (persisted != null) break;
     }
     if (persisted != null && now.difference(persisted) < freshFor) {
@@ -212,7 +216,9 @@ class SectionCatalogService {
     // en vivo, no una clasificación de películas o episodios.
     if (kind != TvSectionKind.live) {
       return const SectionCatalogSnapshot(
-        channels: [], categories: [], fromCache: true,
+        channels: [],
+        categories: [],
+        fromCache: true,
       );
     }
     final memoryKey = playlist.id + '|provider_json_live';
@@ -351,6 +357,9 @@ class SectionCatalogService {
       bytes += _stringBytes(channel.streamMimeType);
       bytes += _stringBytes(channel.group);
       bytes += _stringBytes(channel.tvgId);
+      bytes += _stringBytes(channel.dynamicStreamId);
+      bytes += _stringBytes(channel.dynamicStreamPath);
+      bytes += _stringBytes(channel.providerGlobalIndex);
       bytes += _stringBytes(channel.httpUserAgent);
       bytes += _stringBytes(channel.httpReferrer);
       final headers = channel.httpHeaders;
