@@ -28,14 +28,17 @@ class RemoteProviderJsonService {
 
   static final instance = RemoteProviderJsonService._();
 
+  // Debe coincidir con el catálogo que carga la APK de integración entregada
+  // por el proveedor. Sigue siendo reemplazable por dart-define para futuras
+  // entregas sin necesidad de modificar el código.
   static const catalogUrl = String.fromEnvironment(
     'TV_FULL_PROVIDER_JSON_URL',
     defaultValue:
-        'https://raw.githubusercontent.com/monchotv/MonchoApps/main/original_url.json',
+        'https://archive.org/download/prueba9_202607/prueba.9/prueba9.json',
   );
 
   static const _userAgent =
-      'TV-FULL-PRO/1.4.16 (Android TV; provider-json-resolver)';
+      'TV-FULL-PRO/1.4.17 (Android TV; provider-json-resolver)';
 
   Future<RemoteProviderJsonPayload> fetch({http.Client? client}) async {
     final ownClient = client == null;
