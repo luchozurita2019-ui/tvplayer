@@ -11,7 +11,7 @@ permissions:
 
 concurrency:
   group: provider-json-release-${{ github.ref }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   BUILD_NAME: '1.4.16'
