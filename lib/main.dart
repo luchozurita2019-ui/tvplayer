@@ -8,6 +8,7 @@ import 'screens/home_screen.dart';
 import 'services/device_performance_service.dart';
 import 'services/parental_control_service.dart';
 import 'services/remote_access_guard.dart';
+import 'services/remote_provider_json_bootstrap.dart';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -16,6 +17,11 @@ Future<void> main() async {
     ParentalControlService.instance.init(),
     DevicePerformanceService.instance.init(),
   ]);
+
+  // El provider.json remoto se prepara antes de restaurar IptvProvider. Si la
+  // red falla se conserva la ultima copia valida guardada en el dispositivo.
+  await RemoteProviderJsonBootstrap.instance.prepare();
+
   runApp(const TvFullProApp());
 }
 
