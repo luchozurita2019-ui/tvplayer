@@ -79,6 +79,15 @@ class ProviderFlowStreamService {
 
   static const String _defaultUserAgent = 'PlayTVPremium';
 
+  // FlowTokenManager de la APK de integración no usa el UA particular del
+  // canal para pedir el token. Usa default_user_agent de worldtv6.json.
+  // Mantenerlo separado de los headers de playback evita vincular la sesión
+  // CDN a un UA distinto del que usa la referencia del proveedor.
+  static const String _tokenProbeUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+      'AppleWebKit/537.36 (KHTML, like Gecko) '
+      'Chrome/132.0.0.0 Safari/537.36';
+
   // Seeds de compatibilidad incluidas por el proveedor en su APK de prueba.
   // Pueden reemplazarse en una futura entrega sin tocar el catálogo.
   static const List<String> _providerSeeds = <String>[
@@ -114,7 +123,6 @@ class ProviderFlowStreamService {
 
     final token = await _freshToken(
       forceRefresh: forceRefresh || immediateSameChannelRetry,
-      userAgent: _channelUserAgent(channel),
     );
     _lastResolvedPath = relativePath;
     _lastResolvedAt = now;
@@ -141,10 +149,7 @@ class ProviderFlowStreamService {
     _cachedToken = null;
   }
 
-  Future<_ProviderFlowToken> _freshToken({
-    required bool forceRefresh,
-    required String userAgent,
-  }) async {
+  Future<_ProviderFlowToken> _freshToken({required bool forceRefresh}) async {
     final now = DateTime.now();
     final cached = _cachedToken;
     if (!forceRefresh && cached != null && cached.expiresAt.isAfter(now)) {
@@ -155,7 +160,7 @@ class ProviderFlowStreamService {
     final active = _refreshing;
     if (active != null) return active;
 
-    final future = _refreshToken(userAgent);
+    final future = _refreshToken();
     _refreshing = future;
     try {
       final token = await future;
@@ -166,11 +171,11 @@ class ProviderFlowStreamService {
     }
   }
 
-  Future<_ProviderFlowToken> _refreshToken(String userAgent) async {
+  Future<_ProviderFlowToken> _refreshToken() async {
     Object? lastError;
     for (final seed in _seeds) {
       try {
-        final found = await _probeSeed(seed, userAgent);
+        final found = await _probeSeed(seed);
         if (found != null) {
           final ttl = _tokenTtlOverride ??
               Duration(milliseconds: 45000 + _random.nextInt(15001));
@@ -192,12 +197,12 @@ class ProviderFlowStreamService {
     );
   }
 
-  Future<(String, String)?> _probeSeed(String seed, String userAgent) async {
+  Future<(String, String)?> _probeSeed(String seed) async {
     var current = Uri.parse(seed);
     for (var hop = 0; hop < 5; hop++) {
       final request = http.Request('GET', current)
         ..followRedirects = false
-        ..headers['User-Agent'] = userAgent;
+        ..headers['User-Agent'] = _tokenProbeUserAgent;
       final response = await _client.send(request).timeout(
         const Duration(seconds: 10),
       );
@@ -235,19 +240,6 @@ class ProviderFlowStreamService {
         .firstMatch(value);
     final path = alternate?.group(1);
     return path == null ? null : 'live/$path';
-  }
-
-  String _channelUserAgent(Channel channel) {
-    final headers = channel.resolvedHttpHeaders(
-      _defaultUserAgent,
-      includeDefaultUserAgent: true,
-    );
-    for (final entry in headers.entries) {
-      if (entry.key.toLowerCase() == 'user-agent' && entry.value.isNotEmpty) {
-        return entry.value;
-      }
-    }
-    return _defaultUserAgent;
   }
 
   bool _redirectStatus(int status) =>
