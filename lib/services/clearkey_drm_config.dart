@@ -43,18 +43,19 @@ class ClearKeyDrmConfig {
       return raw.toLowerCase();
     }
 
-    // El APK/catálogo de integración del proveedor usa frecuentemente
-    // Base64URL sin padding para kid/k. Deben decodificar exactamente 16 bytes.
-    if (!RegExp(r'^[A-Za-z0-9_-]{20,24}={0,2}$').hasMatch(raw)) {
+    // La APK/catálogo del proveedor mezcla Base64URL (-, _) y Base64 estándar
+    // (+, /), normalmente sin padding. Ambas formas representan el mismo
+    // material ClearKey de 16 bytes y se normalizan a HEX antes de persistir.
+    if (!RegExp(r'^[A-Za-z0-9_+/-]{20,24}={0,2}$').hasMatch(raw)) {
       throw const FormatException(
-        'kid y k deben ser ClearKey de 16 bytes en HEX o Base64URL.',
+        'kid y k deben ser ClearKey de 16 bytes en HEX o Base64.',
       );
     }
     try {
-      var padded = raw;
+      var padded = raw.replaceAll('-', '+').replaceAll('_', '/');
       final remainder = padded.length % 4;
       if (remainder != 0) padded += '=' * (4 - remainder);
-      final bytes = base64Url.decode(padded);
+      final bytes = base64.decode(padded);
       if (bytes.length != 16) {
         throw const FormatException(
           'kid y k deben representar exactamente 16 bytes.',
@@ -67,7 +68,7 @@ class ClearKeyDrmConfig {
       return out.toString();
     } on FormatException {
       throw const FormatException(
-        'kid y k deben ser ClearKey de 16 bytes en HEX o Base64URL.',
+        'kid y k deben ser ClearKey de 16 bytes en HEX o Base64.',
       );
     }
   }
