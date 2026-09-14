@@ -18,6 +18,10 @@ class ProviderJsonCatalog {
 }
 
 /// Parser local y sin red. Los errores nunca incluyen JSON, URLs o claves.
+///
+/// Un proveedor autorizado puede entregar URLs absolutas en `original_url` o
+/// rutas relativas acompañadas por `base_url` (también se acepta
+/// `stream_base_url`) en la raíz del catálogo.
 class ProviderJsonCatalogParser {
   static const maxCatalogBytes = 16 * 1024 * 1024;
   static const maxIconBytes = 2 * 1024 * 1024;
@@ -57,8 +61,10 @@ class ProviderJsonCatalogParser {
         'El JSON debe contener una lista categories.',
       );
     }
+
     final warnings = <String>[];
     final channels = <Channel>[];
+    final baseUri = _catalogBaseUri(root);
     final categories = root['categories'] as List;
     for (var i = 0; i < categories.length; i++) {
       final category = categories[i];
@@ -80,20 +86,38 @@ class ProviderJsonCatalogParser {
       for (var j = 0; j < samples.length; j++) {
         final samplePath = '$path.samples[$j]';
         try {
-          channels.add(_sample(samples[j], group, samplePath, warnings));
+          channels.add(
+            _sample(samples[j], group, samplePath, warnings, baseUri),
+          );
         } on FormatException catch (error) {
-          warnings.add('$samplePath: ' + error.message + ' Canal omitido.');
+          warnings.add('$samplePath: ${error.message} Canal omitido.');
         }
       }
     }
+
     // summary es informativo: los conteos reales provienen de samples.
     if (channels.isEmpty) {
-      final detail = warnings.isEmpty ? '' : ' ' + warnings.take(3).join(' ');
+      final detail = warnings.isEmpty ? '' : ' ${warnings.take(3).join(' ')}';
       throw FormatException(
-        'El catálogo no contiene canales válidos.' + detail,
+        'El catálogo no contiene canales válidos.$detail',
       );
     }
     return ProviderJsonCatalog(channels, warnings);
+  }
+
+  Uri? _catalogBaseUri(Map root) {
+    final rawBase = root.containsKey('base_url')
+        ? root['base_url']
+        : root['stream_base_url'];
+    if (rawBase == null) return null;
+    if (rawBase is! String || !_isHttpUrl(rawBase.trim())) {
+      throw const FormatException(
+        'base_url debe ser una URL HTTP/HTTPS absoluta válida.',
+      );
+    }
+    final value = rawBase.trim();
+    final normalized = value.endsWith('/') ? value : '$value/';
+    return Uri.parse(normalized);
   }
 
   Channel _sample(
@@ -101,19 +125,21 @@ class ProviderJsonCatalogParser {
     String group,
     String path,
     List<String> warnings,
+    Uri? baseUri,
   ) {
-    if (raw is! Map)
+    if (raw is! Map) {
       throw const FormatException('El sample debe ser un objeto.');
+    }
     final name = raw['name'];
-    final url = raw['original_url'];
+    final rawUrl = raw['original_url'];
     if (name is! String || name.trim().isEmpty) {
       throw const FormatException('Falta un name de tipo texto.');
     }
-    if (url is! String || !_isHttpUrl(url.trim())) {
-      throw const FormatException(
-        'original_url debe ser una URL HTTP/HTTPS válida.',
-      );
+    if (rawUrl is! String || rawUrl.trim().isEmpty) {
+      throw const FormatException('Falta original_url de tipo texto.');
     }
+
+    final url = _resolveStreamUrl(rawUrl.trim(), baseUri);
 
     ClearKeyDrmConfig? drm;
     final rawDrm = raw['drm_license_uri'];
@@ -185,17 +211,18 @@ class ProviderJsonCatalogParser {
     if (type is String) {
       mime = switch (type.trim().toUpperCase()) {
         'HLS' || 'M3U8' => 'application/x-mpegURL',
-        'DASH' || 'MPD' => 'application/dash+xml',
+        'DASH' || 'MPD' || 'CLEARKEY' => 'application/dash+xml',
         _ => null,
       };
-      if (mime == null)
+      if (mime == null) {
         warnings.add('$path.type: formato a detectar al reproducir.');
+      }
     } else if (type != null) {
       warnings.add(
         '$path.type: debe ser texto; formato a detectar al reproducir.',
       );
     }
-    final uriPath = Uri.parse(url.trim()).path.toLowerCase();
+    final uriPath = Uri.parse(url).path.toLowerCase();
     mime ??= uriPath.endsWith('.mpd')
         ? 'application/dash+xml'
         : uriPath.endsWith('.m3u8')
@@ -209,7 +236,7 @@ class ProviderJsonCatalogParser {
 
     return Channel(
       name: name.trim(),
-      url: url.trim(),
+      url: url,
       group: group,
       logoUrl: logoUrl,
       logoBytes: logoBytes,
@@ -218,6 +245,27 @@ class ProviderJsonCatalogParser {
       drmKey: drm?.key,
       streamMimeType: mime,
     );
+  }
+
+  String _resolveStreamUrl(String value, Uri? baseUri) {
+    if (_isHttpUrl(value)) return value;
+    if (baseUri == null ||
+        RegExp(r'[\x00-\x20]').hasMatch(value) ||
+        value.startsWith('//')) {
+      throw const FormatException(
+        'original_url relativa requiere base_url del proveedor.',
+      );
+    }
+
+    final relative = Uri.tryParse(value);
+    if (relative == null || relative.hasScheme || relative.hasAuthority) {
+      throw const FormatException('original_url relativa inválida.');
+    }
+    final resolved = baseUri.resolveUri(relative).toString();
+    if (!_isHttpUrl(resolved)) {
+      throw const FormatException('original_url no pudo resolverse de forma segura.');
+    }
+    return resolved;
   }
 
   bool _isHttpUrl(String value) {
