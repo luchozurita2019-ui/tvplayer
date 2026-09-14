@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
+import 'provider_flow_stream_service.dart';
 
 class DynamicStreamException implements Exception {
   final String message;
@@ -28,24 +29,22 @@ class ResolvedDynamicStream {
 /// Fuente LIVE compatible con servidores que exponen catálogo Xtream y
 /// requieren resolver el stream_id justo antes de iniciar la reproducción.
 ///
-/// El catálogo provider.json puede usar el mismo resolvedor sin credenciales
-/// Xtream: el JSON aporta la identidad estable del canal y `resolve` obtiene la
-/// URL temporal justo al abrirlo. El bloque opcional `session` permite pedir al
-/// proveedor headers/tokens emitidos específicamente para TV FULL.
-///
-/// La configuración se inyecta con TV_FULL_DYNAMIC_SOURCE_JSON. X-Hash es un
-/// fallback heredado opcional; el flujo preferido es `session`, que evita fijar
-/// valores capturados de otra instalación.
+/// El catálogo provider.json puede usar dos rutas dinámicas: el motor Flow
+/// suministrado por el proveedor cuando existe una ruta `live/c...`, o el
+/// resolvedor configurable tradicional para stream_id. Ambos devuelven una URL
+/// temporal justo antes de abrir Media3 y nunca la persisten en el catálogo.
 class DynamicStreamService {
   DynamicStreamService._({
     String? rawConfig,
     http.Client? client,
     Future<String?> Function()? androidIdProvider,
     String? xHashOverride,
+    ProviderFlowStreamService? flowService,
   }) : _rawConfigOverride = rawConfig,
        _client = client ?? http.Client(),
        _androidIdProvider = androidIdProvider ?? _platformAndroidId,
-       _xHashOverride = xHashOverride;
+       _xHashOverride = xHashOverride,
+       _flowService = flowService ?? ProviderFlowStreamService.instance;
 
   static final DynamicStreamService instance = DynamicStreamService._();
 
@@ -68,6 +67,7 @@ class DynamicStreamService {
   final http.Client _client;
   final Future<String?> Function() _androidIdProvider;
   final String? _xHashOverride;
+  final ProviderFlowStreamService _flowService;
 
   _DynamicSourceConfig? _config;
   bool _configLoaded = false;
@@ -81,12 +81,14 @@ class DynamicStreamService {
     required http.Client client,
     Future<String?> Function()? androidIdProvider,
     String? xHashOverride,
+    ProviderFlowStreamService? flowService,
   }) {
     return DynamicStreamService._(
       rawConfig: configJson,
       client: client,
       androidIdProvider: androidIdProvider,
       xHashOverride: xHashOverride,
+      flowService: flowService,
     );
   }
 
@@ -174,6 +176,21 @@ class DynamicStreamService {
   }
 
   Future<ResolvedDynamicStream> resolve(Channel channel) async {
+    if (_flowService.handles(channel)) {
+      try {
+        final resolved = await _flowService.resolve(channel);
+        return ResolvedDynamicStream(
+          url: resolved.url,
+          headers: resolved.headers,
+        );
+      } on ProviderFlowException catch (error) {
+        throw DynamicStreamException(
+          error.message,
+          retryable: error.retryable,
+        );
+      }
+    }
+
     final config = _requireConfig();
     final id =
         (channel.dynamicStreamId ?? channel.xtreamStreamId)?.trim() ?? '';
