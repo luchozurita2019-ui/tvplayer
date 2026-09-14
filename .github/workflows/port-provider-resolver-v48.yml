@@ -5,7 +5,7 @@ on:
     branches:
       - feature/local-provider-json-clearkey
     paths:
-      - '.github/scripts/port_provider_resolver.py'
+      - '.github/scripts/port_provider_resolver_v2.py'
 
 permissions:
   contents: write
@@ -29,7 +29,7 @@ jobs:
           git show origin/feature/dynamic-stream-resolver-v40-protocol-final:lib/services/dynamic_stream_service.dart > lib/services/dynamic_stream_service.dart
 
       - name: Apply provider JSON resolver port
-        run: python3 .github/scripts/port_provider_resolver.py
+        run: python3 .github/scripts/port_provider_resolver_v2.py
 
       - name: Install Flutter
         uses: subosito/flutter-action@v2
