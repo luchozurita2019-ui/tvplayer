@@ -95,6 +95,7 @@ jobs:
           TAG="tv-full-pro-v${RELEASE_NUMBER}-provider-json-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cat > artifact/release-notes.md <<'EOF'
           Catálogos provider.json locales desde archivo o pegando JSON, iconos base64 y headers del proveedor.
+          La fuente remota integrada sólo importa URLs HTTP/HTTPS directas sin DRM; rutas relativas o protegidas se omiten.
           ClearKey con licencia 100% local para DASH/CENC compatible. Media3 no admite ClearKey en HLS.
           Inicio → Cargar JSON → Cargar provider.json local o Pegar JSON → Importar catálogo.
           Archivo recomendado: Descargas/provider.json. No se incluye ningún catálogo privado en la APK.

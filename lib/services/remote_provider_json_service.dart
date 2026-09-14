@@ -25,8 +25,10 @@ class RemoteProviderJsonPayload {
 /// La URL queda compilada dentro de la APK, pero puede reemplazarse en CI con
 /// --dart-define=TV_FULL_PROVIDER_JSON_URL=... sin tocar M3U/Xtream/Stalker.
 ///
-/// Esta capa sólo transporta y normaliza catálogo. El material DRM embebido se
-/// mantiene fuera de esta ruta remota de prueba.
+/// Esta ruta remota sólo importa streams HTTP/HTTPS directos y sin DRM. Las
+/// rutas relativas y las entradas protegidas se contabilizan pero se omiten;
+/// el soporte ClearKey local sigue disponible para catálogos autorizados que el
+/// usuario importe manualmente.
 class RemoteProviderJsonService {
   RemoteProviderJsonService._();
 
@@ -113,10 +115,12 @@ class RemoteProviderJsonService {
           }
 
           final drm = sample['drm_license_uri'];
-          if (drm is String && drm.trim().isNotEmpty) protectedSamples++;
+          if (drm is String && drm.trim().isNotEmpty) {
+            protectedSamples++;
+            continue;
+          }
 
-          // Conserva URL, headers, logo, categoría y type para validar el
-          // catálogo remoto sin copiar material DRM embebido a Channel.
+          // Nunca propagar material DRM por la fuente remota integrada.
           sample.remove('drm_license_uri');
           samples.add(sample);
           usableSamples++;
@@ -133,7 +137,7 @@ class RemoteProviderJsonService {
 
       if (usableSamples == 0) {
         throw const FormatException(
-          'El catálogo remoto no contiene URLs HTTP/HTTPS utilizables.',
+          'El catálogo remoto no contiene URLs HTTP/HTTPS directas y sin DRM utilizables.',
         );
       }
 
