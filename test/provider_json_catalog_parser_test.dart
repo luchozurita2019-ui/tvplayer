@@ -22,7 +22,9 @@ void main() {
       'Referer': 'https://provider.example.test/',
       'User-Agent': 'Provider test agent',
     });
-    expect(result.warnings.single, contains('ClearKey con HLS'));
+    // El APK de integración del proveedor aplica ClearKey también sobre HLS;
+    // por eso esta combinación ya no debe degradarse ni generar advertencia.
+    expect(result.warnings, isEmpty);
   });
 
   test('sin drm_license_uri produce un canal sin DRM', () {
