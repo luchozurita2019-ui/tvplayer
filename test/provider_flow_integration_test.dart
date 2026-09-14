@@ -66,7 +66,12 @@ void main() {
     final flowClient = MockClient((request) async {
       probes++;
       expect(request.method, 'GET');
-      expect(request.headers['User-Agent'], 'Provider Integration Test');
+      expect(
+        request.headers['User-Agent'],
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+        'AppleWebKit/537.36 (KHTML, like Gecko) '
+        'Chrome/132.0.0.0 Safari/537.36',
+      );
       return http.Response(
         '',
         302,
@@ -112,6 +117,7 @@ void main() {
       'https://edge.example/tok_demo_session/live/c4eds/Other/SA_Live_dash_enc/Other.mpd',
     );
     expect(resolvedA.headers['Referer'], 'https://portal.app.flow.com.ar/');
+    expect(resolvedA.headers['User-Agent'], 'Provider Integration Test');
     expect(probes, 1, reason: 'el segundo canal debe reutilizar el token fresco');
   });
 
