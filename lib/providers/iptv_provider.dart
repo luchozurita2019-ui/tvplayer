@@ -7,6 +7,9 @@ import '../models/playback_settings.dart';
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../services/m3u_parser.dart';
+import '../services/local_provider_json_store.dart';
+import '../services/provider_json_catalog_parser.dart';
+import '../services/section_catalog_service.dart';
 import '../services/playback_settings_service.dart';
 import '../services/remote_provisioning_service.dart';
 import '../services/storage_service.dart';
@@ -366,6 +369,50 @@ class IptvProvider extends ChangeNotifier {
     }
   }
 
+  Future<ProviderJsonCatalog?> addLocalProviderJson(String name, String content) async {
+    if (_loading) return null;
+    _error = null;
+    _setLoading(true);
+    final id = 'provider-json-' + DateTime.now().microsecondsSinceEpoch.toString();
+    var persisted = false;
+    try {
+      final imported = await LocalProviderJsonStore.instance.importContent(id, content);
+      final playlist = Playlist(
+        id: id,
+        name: name.trim().isEmpty ? 'Proveedor JSON local' : name.trim(),
+        source: imported.path,
+        isRemote: false,
+        channels: const [],
+        lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.localProviderJson,
+      );
+      final next = [..._playlists, playlist];
+      await _localStore.saveServices(next);
+      persisted = true;
+      _playlists = next;
+      _selectedPlaylistId = id;
+      // La fuente ya está guardada; un fallo al recordar la selección no debe
+      // eliminar su archivo ni deshacer una importación correcta.
+      try {
+        await _localStore.saveSelectedServiceId(id);
+      } catch (_) {}
+      return imported.catalog;
+    } on FormatException catch (error) {
+      _error = error.message;
+      return null;
+    } catch (_) {
+      _error = 'No se pudo guardar el catálogo local. Revisá el espacio disponible.';
+      return null;
+    } finally {
+      if (!persisted) {
+        try {
+          await LocalProviderJsonStore.instance.remove(id);
+        } catch (_) {}
+      }
+      _setLoading(false);
+    }
+  }
+
   Future<void> renamePlaylist(String playlistId, String name) async {
     final index = _playlists.indexWhere((item) => item.id == playlistId);
     if (index < 0) return;
@@ -426,6 +473,13 @@ class IptvProvider extends ChangeNotifier {
   }
 
   Future<void> refreshPlaylist(String playlistId) async {
+    for (final playlist in _playlists) {
+      if (playlist.id == playlistId &&
+          playlist.sourceType == PlaylistSourceType.localProviderJson) {
+        SectionCatalogService.instance.invalidateLocalProviderJson(playlistId);
+        break;
+      }
+    }
     await _localStore.clearServiceCatalogs(playlistId);
     final index = _playlists.indexWhere((item) => item.id == playlistId);
     if (index >= 0) {
@@ -438,11 +492,18 @@ class IptvProvider extends ChangeNotifier {
   }
 
   Future<void> removePlaylist(String playlistId) async {
+    final localJson = _playlists.any((item) =>
+        item.id == playlistId &&
+        item.sourceType == PlaylistSourceType.localProviderJson);
     _playlists = _playlists.where((item) => item.id != playlistId).toList();
     await _localStore.clearServiceCatalogs(playlistId);
     _normalizeSelection();
     await _localStore.saveServices(_playlists);
     await _localStore.saveSelectedServiceId(_selectedPlaylistId);
+    if (localJson) {
+      SectionCatalogService.instance.invalidateLocalProviderJson(playlistId);
+      await LocalProviderJsonStore.instance.remove(playlistId);
+    }
     notifyListeners();
   }
 

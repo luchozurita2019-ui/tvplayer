@@ -65,8 +65,12 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final androidTv = _androidTvBuild &&
         !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android;
+    final androidDrm = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        (widget.channel.hasDrmConfiguration ||
+            widget.playlist.any((channel) => channel.hasDrmConfiguration));
 
-    if (androidTv) {
+    if (androidTv || androidDrm) {
       if (widget.isLiveContent) {
         return AndroidMedia3TexturePlayerScreen(
           playlist: widget.playlist,

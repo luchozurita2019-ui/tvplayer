@@ -78,6 +78,8 @@ class MainActivity : FlutterActivity() {
     private var currentUrl: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
     private var currentUserAgent: String = DEFAULT_UA
+    private var currentClearKeyJwk: String? = null
+    private var currentStreamMimeType: String? = null
     private var isLive = false
     private var endedRecoveries = 0
     private var dnsFallbackActive = false
@@ -243,7 +245,11 @@ class MainActivity : FlutterActivity() {
                     val requestGeneration =
                         call.argument<Number>("requestGeneration")?.toLong() ?: 0L
                     isLive = call.argument<Boolean>("isLive") ?: true
-                    prepare(url, headers, userAgent, position, requestGeneration)
+                    prepare(
+                        url, headers, userAgent, position, requestGeneration,
+                        call.argument<String>("clearKeyJwk"),
+                        call.argument<String>("mimeType"),
+                    )
                     result.success(null)
                 }
 
@@ -326,6 +332,8 @@ class MainActivity : FlutterActivity() {
 
                 else -> result.notImplemented()
             }
+        } catch (t: LocalClearKeyDrm.ConfigurationException) {
+            result.error("TVFULL_DRM_CONFIG", t.message, null)
         } catch (t: Throwable) {
             eventSink?.success(
                 mapOf(
@@ -517,6 +525,8 @@ class MainActivity : FlutterActivity() {
         userAgent: String,
         positionMs: Long,
         requestGeneration: Long,
+        clearKeyJwk: String? = null,
+        streamMimeType: String? = null,
     ) {
         // Cada fuente recibe listeners que capturan su propia generación. Si
         // queda un callback antiguo en cola, conserva la generación vieja y
@@ -531,6 +541,16 @@ class MainActivity : FlutterActivity() {
         currentUrl = url
         currentHeaders = headers.toMap()
         currentUserAgent = userAgent
+        // Las transiciones con DRM liberan la fuente anterior. Las listas sin
+        // DRM mantienen el comportamiento de zapping existente.
+        if (currentClearKeyJwk != null || clearKeyJwk != null) {
+            player?.stop()
+            player?.clearMediaItems()
+        }
+        currentClearKeyJwk = clearKeyJwk
+        currentStreamMimeType = streamMimeType?.takeIf {
+            it == MimeTypes.APPLICATION_M3U8 || it == MimeTypes.APPLICATION_MPD
+        }
         currentAdaptiveLevel = if (isLive) adaptiveProfiles.loadLevel(url) else 0
         liveLoadErrorPolicy.protectionLevel = currentAdaptiveLevel
         endedRecoveries = 0
@@ -564,13 +584,30 @@ class MainActivity : FlutterActivity() {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
         applyPlaybackGuards()
 
+        val useHlsMime = currentStreamMimeType == MimeTypes.APPLICATION_M3U8 ||
+            (currentStreamMimeType == null && isLive &&
+                (currentSourceForcedHls || forceHls || looksLikeHls(url)))
+        val jwk = currentClearKeyJwk
+        if (jwk != null) {
+            LocalClearKeyDrm.validate(jwk)
+            if (useHlsMime || (currentStreamMimeType == null && looksLikeHls(url))) {
+                throw LocalClearKeyDrm.ConfigurationException(
+                    "ClearKey con HLS no está soportado. Pedí al proveedor un stream DASH/CENC compatible."
+                )
+            }
+        }
         val factory = mediaSourceFactory(headers, userAgent, useFallbackDns)
-        val useHlsMime = isLive && (currentSourceForcedHls || forceHls || looksLikeHls(url))
         currentSourceForcedHls = useHlsMime
         val itemBuilder = MediaItem.Builder()
             .setUri(Uri.parse(url))
             .setMediaId(clientGeneration.toString())
         if (useHlsMime) itemBuilder.setMimeType(MimeTypes.APPLICATION_M3U8)
+        else currentStreamMimeType?.let(itemBuilder::setMimeType)
+        if (jwk != null) {
+            itemBuilder.setDrmConfiguration(
+                MediaItem.DrmConfiguration.Builder(C.CLEARKEY_UUID).build()
+            )
+        }
         if (isLive) {
             val targetOffset = adaptiveTargetOffsetMs(currentAdaptiveLevel)
             itemBuilder.setLiveConfiguration(
@@ -609,6 +646,28 @@ class MainActivity : FlutterActivity() {
         userAgent: String,
         useFallbackDns: Boolean,
     ): DefaultMediaSourceFactory {
+        val jwk = currentClearKeyJwk
+        if (jwk != null) {
+            // Factory exclusiva para esta fuente: nunca modificar las factories
+            // cacheadas de canales sin DRM ni reutilizar una licencia anterior.
+            val httpFactory: HttpDataSource.Factory = when {
+                useFallbackDns -> OkHttpDataSource.Factory(fallbackHttpClient)
+                    .setUserAgent(userAgent)
+                isLive -> OkHttpDataSource.Factory(liveHttpClient)
+                    .setUserAgent(userAgent)
+                else -> DefaultHttpDataSource.Factory()
+                    .setUserAgent(userAgent)
+                    .setAllowCrossProtocolRedirects(true)
+                    .setConnectTimeoutMs(12000)
+                    .setReadTimeoutMs(30000)
+            }
+            httpFactory.setDefaultRequestProperties(headers)
+            return DefaultMediaSourceFactory(httpFactory)
+                .setDrmSessionManagerProvider { LocalClearKeyDrm.create(jwk) }
+                .also {
+                    if (isLive) it.setLoadErrorHandlingPolicy(liveLoadErrorPolicy)
+                }
+        }
         val key = sourceFactoryKey(headers, userAgent)
         if (useFallbackDns) {
             val cached = fallbackMediaSourceFactory
@@ -1345,6 +1404,7 @@ class MainActivity : FlutterActivity() {
     }
 
     private fun isLikelyOpaqueHlsParserError(error: PlaybackException): Boolean {
+        if (currentClearKeyJwk != null || currentStreamMimeType != null) return false
         val url = currentUrl ?: return false
         if (looksLikeHls(url)) return false
         val name = error.errorCodeName.uppercase(Locale.US)
@@ -1395,6 +1455,8 @@ class MainActivity : FlutterActivity() {
         textureEntry?.release()
         textureEntry = null
         currentUrl = null
+        currentClearKeyJwk = null
+        currentStreamMimeType = null
         currentHeaders = emptyMap()
         currentUserAgent = DEFAULT_UA
         endedRecoveries = 0

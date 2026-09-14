@@ -5,6 +5,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
+import '../services/clearkey_drm_config.dart';
 import '../services/channel_health_service.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
@@ -179,9 +180,21 @@ class _AndroidMedia3TexturePlayerScreenState
         'headers': headers,
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
+        if (_channel.streamMimeType != null) 'mimeType': _channel.streamMimeType,
+        if (_channel.hasDrmConfiguration)
+          'clearKeyJwk': ClearKeyDrmConfig.fromHex(
+            _channel.drmKeyId ?? '', _channel.drmKey ?? '',
+          ).toJwkSet(),
       });
+    } on FormatException catch (error) {
+      if (!mounted || generation != _openGeneration) return;
+      _finishWithError('Configuración ClearKey inválida', error.message);
     } on PlatformException catch (error) {
       if (!mounted || generation != _openGeneration) return;
+      if (error.code == 'TVFULL_DRM_CONFIG') {
+        _finishWithError(error.message ?? 'Configuración ClearKey inválida', error.code);
+        return;
+      }
       _handleTechnicalError(error.code, error.message ?? error.code);
     }
   }

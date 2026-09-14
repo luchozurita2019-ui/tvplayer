@@ -3,11 +3,13 @@ import 'dart:math' as math;
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
+import '../models/playlist_source_type.dart';
 import 'catalog_file_store.dart';
 import 'content_classifier.dart';
 import 'device_performance_service.dart';
 import 'm3u_fetcher.dart';
 import 'm3u_parser.dart';
+import 'local_provider_json_store.dart';
 import 'tv_local_store.dart';
 
 enum TvSectionKind { live, movies, series }
@@ -50,6 +52,9 @@ class SectionCatalogService {
     TvSectionKind kind,
   ) async {
     _lastRequestedKind[playlist.id] = kind;
+    if (playlist.sourceType == PlaylistSourceType.localProviderJson) {
+      return _loadLocalProviderJson(playlist, kind);
+    }
     final key = 'm3u_${kind.name}';
     final memoryKey = '${playlist.id}|$key';
     final memory = _memory.remove(memoryKey);
@@ -127,6 +132,8 @@ class SectionCatalogService {
     Duration freshFor = _defaultFreshFor,
     TvSectionKind? kind,
   }) async {
+    // Esta fuente es una copia importada localmente, sin actualización de red.
+    if (playlist.sourceType == PlaylistSourceType.localProviderJson) return null;
     final targetKind = kind ?? _lastRequestedKind[playlist.id];
     final key = '${playlist.id}|${playlist.source}';
     final pending = _pending[key];
@@ -175,6 +182,10 @@ class SectionCatalogService {
   }
 
   Future<void> _refreshToDisk(Playlist playlist) async {
+    if (playlist.sourceType == PlaylistSourceType.localProviderJson) {
+      await _loadLocalProviderJson(playlist, TvSectionKind.live, reload: true);
+      return;
+    }
     final key = '${playlist.id}|${playlist.source}';
     final existing = _pending[key];
     if (existing != null) return existing;
@@ -186,6 +197,40 @@ class SectionCatalogService {
     } finally {
       if (identical(_pending[key], future)) _pending.remove(key);
     }
+  }
+
+  void invalidateLocalProviderJson(String playlistId) {
+    _forget('$playlistId|provider_json_live');
+  }
+
+  Future<SectionCatalogSnapshot> _loadLocalProviderJson(
+    Playlist playlist,
+    TvSectionKind kind, {
+    bool reload = false,
+  }) async {
+    // HLS/DASH describen el transporte. El formato samples contiene canales
+    // en vivo, no una clasificación de películas o episodios.
+    if (kind != TvSectionKind.live) {
+      return const SectionCatalogSnapshot(
+        channels: [], categories: [], fromCache: true,
+      );
+    }
+    final memoryKey = playlist.id + '|provider_json_live';
+    if (!reload) {
+      final cached = _memory.remove(memoryKey);
+      if (cached != null) {
+        _memory[memoryKey] = cached;
+        return cached;
+      }
+    }
+    final catalog = await LocalProviderJsonStore.instance.load(playlist.id);
+    final snapshot = SectionCatalogSnapshot(
+      channels: catalog.channels,
+      categories: catalog.categories,
+      fromCache: !reload,
+    );
+    _remember(memoryKey, snapshot);
+    return snapshot;
   }
 
   /// Descarga una M3U una sola vez y escribe LIVE/Películas/Series directamente
@@ -300,6 +345,10 @@ class SectionCatalogService {
       bytes += _stringBytes(channel.name);
       bytes += _stringBytes(channel.url);
       bytes += _stringBytes(channel.logoUrl);
+      bytes += channel.logoBytes?.lengthInBytes ?? 0;
+      bytes += _stringBytes(channel.drmKeyId);
+      bytes += _stringBytes(channel.drmKey);
+      bytes += _stringBytes(channel.streamMimeType);
       bytes += _stringBytes(channel.group);
       bytes += _stringBytes(channel.tvgId);
       bytes += _stringBytes(channel.httpUserAgent);

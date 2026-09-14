@@ -1,0 +1,12 @@
+# Catálogos y datos privados del proveedor (en cualquier directorio).
+provider.json
+*.private.json
+*.secrets.json
+
+# Archivos generados localmente por Flutter y las herramientas de prueba.
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+coverage/

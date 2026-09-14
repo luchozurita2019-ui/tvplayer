@@ -1,20 +1,30 @@
+import 'dart:convert';
+import 'dart:typed_data';
+
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
+import '../services/provider_json_catalog_parser.dart';
 
 const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
 
 class AddSourceScreen extends StatefulWidget {
-  const AddSourceScreen({super.key});
+  final PlaylistSourceType initialType;
+
+  const AddSourceScreen({
+    super.key,
+    this.initialType = PlaylistSourceType.m3u,
+  });
 
   @override
   State<AddSourceScreen> createState() => _AddSourceScreenState();
 }
 
 class _AddSourceScreenState extends State<AddSourceScreen> {
-  PlaylistSourceType _type = PlaylistSourceType.m3u;
+  late PlaylistSourceType _type;
 
   final _nameController = TextEditingController();
   final _m3uUrlController = TextEditingController();
@@ -23,6 +33,12 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   final _passwordController = TextEditingController();
   final _portalController = TextEditingController();
   final _macController = TextEditingController();
+  final _providerJsonController = TextEditingController();
+  final _providerJsonFocus = FocusNode();
+  final _providerFileFocus = FocusNode();
+  String? _providerFileName;
+  bool _pasteProviderJson = false;
+  bool _readingProviderFile = false;
 
   final _nameFocus = FocusNode();
   final _m3uUrlFocus = FocusNode();
@@ -36,6 +52,12 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   bool _obscurePassword = true;
 
   @override
+  void initState() {
+    super.initState();
+    _type = widget.initialType;
+  }
+
+  @override
   void dispose() {
     _nameController.dispose();
     _m3uUrlController.dispose();
@@ -44,6 +66,9 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
     _passwordController.dispose();
     _portalController.dispose();
     _macController.dispose();
+    _providerJsonController.dispose();
+    _providerJsonFocus.dispose();
+    _providerFileFocus.dispose();
     _nameFocus.dispose();
     _m3uUrlFocus.dispose();
     _serverFocus.dispose();
@@ -81,7 +106,9 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               ),
               const SizedBox(height: 6),
               Text(
-                'Pegá el enlace que te dio tu proveedor. En M3U/M3U8, TV FULL detecta automáticamente si el enlace pertenece a Xtream. También podés elegir el tipo manualmente.',
+                _type == PlaylistSourceType.localProviderJson
+                    ? 'Seleccioná el archivo de tu proveedor o pegá su JSON completo. El catálogo quedará guardado en este dispositivo.'
+                    : 'Pegá el enlace que te dio tu proveedor. En M3U/M3U8, TV FULL detecta automáticamente si el enlace pertenece a Xtream. También podés elegir el tipo manualmente.',
                 style: Theme.of(context)
                     .textTheme
                     .bodyLarge
@@ -115,7 +142,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
                 child: FilledButton.icon(
                   focusNode: _connectFocus,
                   autofocus: false,
-                  onPressed: provider.loading ? null : _submit,
+                  onPressed: provider.loading || _readingProviderFile ? null : _submit,
                   icon: provider.loading
                       ? const SizedBox(
                           width: 18,
@@ -123,7 +150,9 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
                           child: CircularProgressIndicator(strokeWidth: 2),
                         )
                       : const Icon(Icons.login_rounded),
-                  label: Text(provider.loading ? 'Conectando…' : 'Conectar'),
+                  label: Text(_type == PlaylistSourceType.localProviderJson
+                      ? (provider.loading ? 'Importando…' : 'Importar catálogo')
+                      : (provider.loading ? 'Conectando…' : 'Conectar')),
                 ),
               ),
             ],
@@ -158,9 +187,115 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
           PlaylistSourceType.m3u => _m3uFields(),
           PlaylistSourceType.xtream => _xtreamFields(),
           PlaylistSourceType.stalker => _stalkerFields(),
+          PlaylistSourceType.localProviderJson => _providerJsonFields(),
         },
       ],
     );
+  }
+
+  Widget _providerJsonFields() {
+    final busy = _readingProviderFile || context.read<IptvProvider>().loading;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: 12,
+          runSpacing: 12,
+          children: [
+            OutlinedButton.icon(
+              focusNode: _providerFileFocus,
+              onPressed: busy ? null : _pickProviderJson,
+              icon: const Icon(Icons.file_open_outlined),
+              label: Text(_readingProviderFile
+                  ? 'Leyendo archivo…' : 'Cargar provider.json local'),
+            ),
+            TextButton.icon(
+              onPressed: busy ? null : () {
+                setState(() => _pasteProviderJson = !_pasteProviderJson);
+                if (_pasteProviderJson) _providerJsonFocus.requestFocus();
+              },
+              icon: const Icon(Icons.content_paste_rounded),
+              label: Text(_pasteProviderJson ? 'Ocultar JSON' : 'Pegar JSON'),
+            ),
+          ],
+        ),
+        if (_providerFileName != null) ...[
+          const SizedBox(height: 10),
+          Text('Archivo seleccionado: ' + _providerFileName!),
+        ],
+        if (_pasteProviderJson) ...[
+          const SizedBox(height: 14),
+          TextField(
+            controller: _providerJsonController,
+            focusNode: _providerJsonFocus,
+            readOnly: busy,
+            minLines: 4,
+            maxLines: 8,
+            keyboardType: TextInputType.multiline,
+            autocorrect: false,
+            enableSuggestions: false,
+            enableIMEPersonalizedLearning: false,
+            onChanged: (_) {
+              if (_providerFileName != null) setState(() => _providerFileName = null);
+            },
+            decoration: const InputDecoration(
+              labelText: 'JSON del proveedor',
+              hintText: 'Pegá aquí el objeto completo con categories y samples.',
+              alignLabelWithHint: true,
+            ),
+          ),
+        ],
+        const SizedBox(height: 14),
+        const _InfoBox(
+          text: 'Elegí un archivo .json o pegá su contenido y presioná Importar catálogo. Los canales aparecerán en TV en vivo. Máximo: 16 MB.',
+        ),
+      ],
+    );
+  }
+
+  Future<void> _pickProviderJson() async {
+    if (_readingProviderFile) return;
+    setState(() => _readingProviderFile = true);
+    try {
+      final file = await FilePicker.pickFile(
+        type: FileType.custom,
+        allowedExtensions: const ['json'],
+      );
+      if (file == null) return;
+      if (await file.length() > ProviderJsonCatalogParser.maxCatalogBytes) {
+        throw const FormatException('El catálogo supera el límite de 16 MB.');
+      }
+      final bytes = BytesBuilder(copy: false);
+      await for (final chunk in file.readAsByteStream()) {
+        if (bytes.length + chunk.length > ProviderJsonCatalogParser.maxCatalogBytes) {
+          throw const FormatException('El catálogo supera el límite de 16 MB.');
+        }
+        bytes.add(chunk);
+      }
+      String content;
+      try {
+        content = utf8.decode(bytes.takeBytes());
+      } on FormatException {
+        throw const FormatException('El archivo debe estar codificado en UTF-8.');
+      }
+      if (!mounted) return;
+      setState(() {
+        _providerFileName = file.name;
+        _providerJsonController.text = content;
+        _pasteProviderJson = false;
+      });
+    } on FormatException catch (error) {
+      if (mounted) _showMessage(error.message);
+    } catch (_) {
+      if (mounted) {
+        _showMessage('No se pudo abrir el selector o leer el archivo. Podés usar Pegar JSON.');
+      }
+    } finally {
+      if (mounted) setState(() => _readingProviderFile = false);
+      try {
+        await FilePicker.clearTemporaryFiles();
+      } catch (_) {}
+    }
   }
 
   Widget _m3uFields() {
@@ -313,6 +448,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         _serverFocus.requestFocus();
       case PlaylistSourceType.stalker:
         _portalFocus.requestFocus();
+      case PlaylistSourceType.localProviderJson:
+        (_pasteProviderJson ? _providerJsonFocus : _providerFileFocus).requestFocus();
     }
   }
 
@@ -323,6 +460,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
 
   Future<void> _submit() async {
     final provider = context.read<IptvProvider>();
+    if (_readingProviderFile || provider.loading) return;
     FocusScope.of(context).unfocus();
 
     switch (_type) {
@@ -348,6 +486,43 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
           'Portal Stalker está preparado en la interfaz, pero todavía no activamos la conexión real en esta primera entrega.',
         );
         return;
+      case PlaylistSourceType.localProviderJson:
+        if (_providerJsonController.text.trim().isEmpty) {
+          _showMessage('Seleccioná provider.json o pegá el JSON de tu proveedor.');
+          return;
+        }
+        final catalog = await provider.addLocalProviderJson(
+          _nameController.text.trim(),
+          _providerJsonController.text,
+        );
+        if (!mounted || catalog == null) return;
+        final count = catalog.channels.length;
+        if (catalog.warnings.isNotEmpty) {
+          final warningCount = catalog.warnings.length;
+          await showDialog<void>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: Text('$count canales importados'),
+              content: SizedBox(
+                width: 600,
+                child: SingleChildScrollView(
+                  child: Text('$warningCount avisos:\n\n' +
+                      catalog.warnings.take(20).join('\n\n') +
+                      (warningCount > 20 ? '\n\nSe muestran los primeros 20 avisos.' : '')),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  autofocus: true,
+                  onPressed: () => Navigator.of(context).pop(),
+                  child: const Text('Continuar'),
+                ),
+              ],
+            ),
+          );
+        } else {
+          _showMessage('$count canales importados.');
+        }
     }
 
     if (!mounted) return;
@@ -446,6 +621,7 @@ class _TitleRow extends StatelessWidget {
       PlaylistSourceType.m3u => Icons.playlist_play_rounded,
       PlaylistSourceType.xtream => Icons.key_rounded,
       PlaylistSourceType.stalker => Icons.router_rounded,
+      PlaylistSourceType.localProviderJson => Icons.description_outlined,
     };
 
     return Row(

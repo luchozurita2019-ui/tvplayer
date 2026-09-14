@@ -1,8 +1,15 @@
-/// Representa un único canal/entrada dentro de una lista M3U.
+import 'dart:convert';
+import 'dart:typed_data';
+
+/// Representa un canal de cualquiera de las fuentes soportadas.
 class Channel {
   final String name;
   final String url;
   final String? logoUrl;
+  final Uint8List? logoBytes;
+  final String? drmKeyId;
+  final String? drmKey;
+  final String? streamMimeType;
   final String? group; // categoría (ej: "Deportes", "Noticias")
   final String? tvgId; // id XMLTV/EPG del proveedor
   final String? xtreamStreamId; // stream_id real para APIs Xtream (EPG, etc.)
@@ -21,6 +28,10 @@ class Channel {
     required this.name,
     required this.url,
     this.logoUrl,
+    this.logoBytes,
+    this.drmKeyId,
+    this.drmKey,
+    this.streamMimeType,
     this.group,
     this.tvgId,
     this.xtreamStreamId,
@@ -28,6 +39,12 @@ class Channel {
     this.httpReferrer,
     this.httpHeaders,
   });
+
+  bool get hasClearKey => drmKeyId != null && drmKey != null;
+
+  // También reconoce configuraciones incompletas para que fallen con un mensaje
+  // claro en Media3, en lugar de enviarlas a un reproductor sin DRM.
+  bool get hasDrmConfiguration => drmKeyId != null || drmKey != null;
 
   Map<String, String> resolvedHttpHeaders(
     String defaultUserAgent, {
@@ -96,9 +113,31 @@ class Channel {
         'httpUserAgent': httpUserAgent,
         'httpReferrer': httpReferrer,
         if (httpHeaders != null) 'httpHeaders': httpHeaders,
+        if (logoBytes != null) 'logoBase64': base64Encode(logoBytes!),
+        if (drmKeyId != null) 'drmKeyId': drmKeyId,
+        if (drmKey != null) 'drmKey': drmKey,
+        if (streamMimeType != null) 'streamMimeType': streamMimeType,
       };
 
   factory Channel.fromJson(Map<String, dynamic> json) {
+    Uint8List? logoBytes;
+    final rawLogo = json['logoBase64'];
+    if (rawLogo is String) {
+      try {
+        logoBytes = base64Decode(rawLogo);
+      } on FormatException {
+        // Una imagen dañada no impide recuperar el canal.
+      }
+    }
+    final keyId = json['drmKeyId'];
+    final key = json['drmKey'];
+    if (keyId != null || key != null) {
+      final hex = RegExp(r'^[0-9a-fA-F]{32}$');
+      if (keyId is! String || key is! String ||
+          !hex.hasMatch(keyId) || !hex.hasMatch(key)) {
+        throw const FormatException('Configuración ClearKey guardada inválida.');
+      }
+    }
     final rawHeaders = json['httpHeaders'];
     Map<String, String>? headers;
     if (rawHeaders is Map) {
@@ -115,6 +154,12 @@ class Channel {
       name: json['name'] as String,
       url: json['url'] as String,
       logoUrl: json['logoUrl'] as String?,
+      logoBytes: logoBytes,
+      drmKeyId: keyId as String?,
+      drmKey: key as String?,
+      streamMimeType: json['streamMimeType'] is String
+          ? json['streamMimeType'] as String
+          : null,
       group: json['group'] as String?,
       tvgId: json['tvgId'] as String?,
       xtreamStreamId: json['xtreamStreamId'] as String?,
