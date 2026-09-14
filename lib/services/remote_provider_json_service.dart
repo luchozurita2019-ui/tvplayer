@@ -3,6 +3,7 @@ import 'dart:convert';
 import 'package:http/http.dart' as http;
 
 import 'provider_json_catalog_parser.dart';
+import 'provider_json_document_decoder.dart';
 
 class RemoteProviderJsonPayload {
   final String content;
@@ -21,8 +22,9 @@ class RemoteProviderJsonPayload {
 }
 
 /// Descarga el catálogo provider.json y lo entrega al parser sin reescribir
-/// sus registros. El parser es la única capa que decide si un canal es directo
-/// o si debe pasar por el resolvedor dinámico antes de abrir Media3.
+/// sus datos semánticos. Sólo normaliza las irregularidades sintácticas
+/// conocidas del archivo de integración del proveedor para producir JSON
+/// estricto antes de persistirlo.
 class RemoteProviderJsonService {
   RemoteProviderJsonService._();
 
@@ -38,7 +40,7 @@ class RemoteProviderJsonService {
   );
 
   static const _userAgent =
-      'TV-FULL-PRO/1.4.17 (Android TV; provider-json-resolver)';
+      'TV-FULL-PRO/1.4.18 (Android TV; provider-json-resolver)';
 
   Future<RemoteProviderJsonPayload> fetch({http.Client? client}) async {
     final ownClient = client == null;
@@ -82,10 +84,10 @@ class RemoteProviderJsonService {
       final text = utf8.decode(bytes);
       dynamic decoded;
       try {
-        decoded = jsonDecode(text);
+        decoded = decodeProviderJsonDocument(text);
       } on FormatException {
         throw const FormatException(
-          'El catálogo remoto no contiene JSON válido.',
+          'El catálogo remoto no contiene JSON compatible.',
         );
       }
       if (decoded is! Map || decoded['categories'] is! List) {
@@ -123,8 +125,18 @@ class RemoteProviderJsonService {
         );
       }
 
+      // Persistimos JSON estricto. De esta forma las siguientes lecturas desde
+      // disco no vuelven a depender de la sintaxis tolerante del archivo remoto.
+      final normalizedContent = jsonEncode(decoded);
+      if (utf8.encode(normalizedContent).length >
+          ProviderJsonCatalogParser.maxCatalogBytes) {
+        throw const FormatException(
+          'El catálogo normalizado supera el límite de 16 MB.',
+        );
+      }
+
       return RemoteProviderJsonPayload(
-        content: text,
+        content: normalizedContent,
         sourceSamples: sourceSamples,
         usableSamples: usableSamples,
         protectedSamples: protectedSamples,
