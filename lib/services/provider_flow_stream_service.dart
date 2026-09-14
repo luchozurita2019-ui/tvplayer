@@ -51,6 +51,8 @@ class ProviderFlowStreamService {
   final Random _random;
   _ProviderFlowToken? _cachedToken;
   Future<_ProviderFlowToken>? _refreshing;
+  String? _lastResolvedPath;
+  DateTime? _lastResolvedAt;
 
   static const String _defaultUserAgent = 'PlayTVPremium';
 
@@ -81,10 +83,19 @@ class ProviderFlowStreamService {
       );
     }
 
+    final now = DateTime.now();
+    final immediateSameChannelRetry =
+        _lastResolvedPath == relativePath &&
+        _lastResolvedAt != null &&
+        now.difference(_lastResolvedAt!) < const Duration(seconds: 12);
+
     final token = await _freshToken(
-      forceRefresh: forceRefresh,
+      forceRefresh: forceRefresh || immediateSameChannelRetry,
       userAgent: _channelUserAgent(channel),
     );
+    _lastResolvedPath = relativePath;
+    _lastResolvedAt = now;
+
     final cleanPath = relativePath.replaceFirst(RegExp(r'^/+'), '');
     final url = 'https://${token.host}/${token.token}/$cleanPath';
     final parsed = Uri.tryParse(url);
