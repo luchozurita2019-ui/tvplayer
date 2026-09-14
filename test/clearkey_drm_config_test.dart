@@ -23,6 +23,20 @@ void main() {
     expect(value, isNot(contains('/')));
   });
 
+  test('acepta Base64 estándar del catálogo y lo normaliza a Base64URL', () {
+    final config = ClearKeyDrmConfig.parse(
+      'kid:+LIHwQ8/dq66MqNg7FK55A,k:r61J0g6zlnDpPjccHWaZIQ',
+    );
+
+    expect(config.keyId, 'f8b207c10f3f76aeba32a360ec52b9e4');
+    expect(config.key, 'afad49d20eb39670e93e371c1d669921');
+
+    final jwk = jsonDecode(config.toJwkSet()) as Map<String, dynamic>;
+    final keys = jwk['keys'] as List<dynamic>;
+    expect(keys.single['kid'], '-LIHwQ8_dq66MqNg7FK55A');
+    expect(keys.single['k'], 'r61J0g6zlnDpPjccHWaZIQ');
+  });
+
   test(
     'claves incompletas, longitud incorrecta o no hex fallan sin exponerlas',
     () {
