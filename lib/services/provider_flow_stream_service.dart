@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:math';
 
+import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
 
 import '../models/channel.dart';
@@ -40,15 +41,37 @@ class _ProviderFlowToken {
 /// `live/c...` y de un host/token CDN fresco obtenido desde las seeds del
 /// proveedor.
 class ProviderFlowStreamService {
-  ProviderFlowStreamService._({http.Client? client, Random? random})
-    : _client = client ?? http.Client(),
-      _random = random ?? Random();
+  ProviderFlowStreamService._({
+    http.Client? client,
+    Random? random,
+    List<String>? seeds,
+    Duration? tokenTtlOverride,
+  }) : _client = client ?? http.Client(),
+       _random = random ?? Random(),
+       _seeds = List<String>.unmodifiable(seeds ?? _providerSeeds),
+       _tokenTtlOverride = tokenTtlOverride;
 
   static final ProviderFlowStreamService instance =
       ProviderFlowStreamService._();
 
+  @visibleForTesting
+  factory ProviderFlowStreamService.forTesting({
+    required http.Client client,
+    required List<String> seeds,
+    Duration tokenTtl = const Duration(seconds: 60),
+  }) {
+    return ProviderFlowStreamService._(
+      client: client,
+      random: Random(1),
+      seeds: seeds,
+      tokenTtlOverride: tokenTtl,
+    );
+  }
+
   final http.Client _client;
   final Random _random;
+  final List<String> _seeds;
+  final Duration? _tokenTtlOverride;
   _ProviderFlowToken? _cachedToken;
   Future<_ProviderFlowToken>? _refreshing;
   String? _lastResolvedPath;
@@ -145,11 +168,12 @@ class ProviderFlowStreamService {
 
   Future<_ProviderFlowToken> _refreshToken(String userAgent) async {
     Object? lastError;
-    for (final seed in _providerSeeds) {
+    for (final seed in _seeds) {
       try {
         final found = await _probeSeed(seed, userAgent);
         if (found != null) {
-          final ttl = Duration(milliseconds: 45000 + _random.nextInt(15001));
+          final ttl = _tokenTtlOverride ??
+              Duration(milliseconds: 45000 + _random.nextInt(15001));
           return _ProviderFlowToken(
             host: found.$1,
             token: found.$2,
