@@ -18,6 +18,12 @@ dynamic decodeProviderJsonDocument(String content) {
   }
 }
 
+/// Devuelve una representación JSON estricta que el parser interno puede
+/// persistir y volver a leer sin depender de las irregularidades del archivo
+/// original suministrado por el proveedor.
+String normalizeProviderJsonDocument(String content) =>
+    jsonEncode(decodeProviderJsonDocument(content));
+
 String _normalizeKnownProviderSyntax(String source) {
   var value = source;
 
