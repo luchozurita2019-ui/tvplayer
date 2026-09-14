@@ -21,7 +21,8 @@ class ProviderJsonCatalog {
 ///
 /// Un proveedor autorizado puede entregar URLs absolutas en `original_url` o
 /// rutas relativas acompañadas por `base_url` (también se acepta
-/// `stream_base_url`) en la raíz del catálogo.
+/// `stream_base_url`) en la raíz del catálogo. Las rutas Flow suministradas por
+/// el proveedor se conservan para resolución justo antes de abrir Media3.
 class ProviderJsonCatalogParser {
   static const maxCatalogBytes = 16 * 1024 * 1024;
   static const maxIconBytes = 2 * 1024 * 1024;
@@ -105,7 +106,6 @@ class ProviderJsonCatalogParser {
       }
     }
 
-    // summary es informativo: los conteos reales provienen de samples.
     if (channels.isEmpty) {
       final detail = warnings.isEmpty ? '' : ' ${warnings.take(3).join(' ')}';
       throw FormatException('El catálogo no contiene canales válidos.$detail');
@@ -159,6 +159,7 @@ class ProviderJsonCatalogParser {
             RegExp(r'[\x00-\x20]').hasMatch(originalUrl))) {
       throw const FormatException('original_url relativa inválida.');
     }
+
     final explicitResolverId = _firstText(raw, const [
       'resolver_id',
       'stream_id',
@@ -172,8 +173,12 @@ class ProviderJsonCatalogParser {
     final sampleResolverRequired =
         raw['resolver_required'] == true ||
         raw['resolver_required']?.toString().toLowerCase() == 'true';
+    final providerFlow = _looksLikeProviderFlow(raw, originalUrl);
     final shouldResolve =
-        resolveAll || sampleResolverRequired || (!direct && baseUri == null);
+        resolveAll ||
+        sampleResolverRequired ||
+        providerFlow ||
+        (!direct && baseUri == null);
     final url = shouldResolve
         ? '$dynamicStreamPrefix${Uri.encodeComponent(dynamicId)}'
         : _resolveStreamUrl(originalUrl, baseUri);
@@ -243,12 +248,27 @@ class ProviderJsonCatalogParser {
       warnings.add('$path.icono: debe ser texto; se omitió el logo.');
     }
 
+    final uriPath = Uri.tryParse(originalUrl)?.path.toLowerCase() ?? '';
+    String? extensionMime = uriPath.endsWith('.mpd')
+        ? 'application/dash+xml'
+        : uriPath.endsWith('.m3u8')
+        ? 'application/x-mpegURL'
+        : null;
+    // En URLs generadoras la ruta multimedia puede estar dentro del query.
+    extensionMime ??= originalUrl.toLowerCase().contains('.mpd')
+        ? 'application/dash+xml'
+        : originalUrl.toLowerCase().contains('.m3u8')
+        ? 'application/x-mpegURL'
+        : null;
+
     final type = raw['type'];
     String? mime;
     if (type is String) {
       mime = switch (type.trim().toUpperCase()) {
         'HLS' || 'M3U8' => 'application/x-mpegURL',
-        'DASH' || 'MPD' || 'CLEARKEY' => 'application/dash+xml',
+        'DASH' || 'MPD' => 'application/dash+xml',
+        // CLEARKEY describe DRM, no el contenedor: priorizamos la extensión.
+        'CLEARKEY' => extensionMime ?? 'application/dash+xml',
         _ => null,
       };
       if (mime == null) {
@@ -259,17 +279,7 @@ class ProviderJsonCatalogParser {
         '$path.type: debe ser texto; formato a detectar al reproducir.',
       );
     }
-    final uriPath = Uri.parse(originalUrl).path.toLowerCase();
-    mime ??= uriPath.endsWith('.mpd')
-        ? 'application/dash+xml'
-        : uriPath.endsWith('.m3u8')
-        ? 'application/x-mpegURL'
-        : null;
-    if (drm != null && mime == 'application/x-mpegURL') {
-      warnings.add(
-        '$path: ClearKey con HLS no está soportado por Media3; el proveedor debe entregar DASH/CENC compatible.',
-      );
-    }
+    mime ??= extensionMime;
 
     return Channel(
       name: name.trim(),
@@ -285,6 +295,31 @@ class ProviderJsonCatalogParser {
       drmKey: drm?.key,
       streamMimeType: mime,
     );
+  }
+
+  bool _looksLikeProviderFlow(Map raw, String originalUrl) {
+    final lowerUrl = originalUrl.toLowerCase();
+    if (!RegExp(r'live/c\d+eds/', caseSensitive: false).hasMatch(originalUrl)) {
+      return false;
+    }
+
+    if (lowerUrl.contains('flow.com.ar') ||
+        lowerUrl.contains('cvattv.com.ar')) {
+      return true;
+    }
+
+    final rawHeaders = raw['headers'];
+    if (rawHeaders is Map) {
+      for (final entry in rawHeaders.entries) {
+        final key = entry.key?.toString().trim().toLowerCase() ?? '';
+        if (key != 'referer' && key != 'referrer' && key != 'origin') continue;
+        final value = entry.value?.toString().trim().toLowerCase() ?? '';
+        if (value.contains('flow.com.ar') || value.contains('cvattv.com.ar')) {
+          return true;
+        }
+      }
+    }
+    return false;
   }
 
   String? _firstText(Map raw, List<String> keys) {
