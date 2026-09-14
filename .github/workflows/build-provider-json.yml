@@ -47,6 +47,17 @@ jobs:
           flutter pub get
           git diff --exit-code -- pubspec.lock
 
+      - name: Enable provider ClearKey HLS compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/enable_provider_clearkey_hls.py
+          if grep -q 'ClearKey con HLS no está soportado' android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt; then
+            echo 'Legacy ClearKey/HLS rejection is still present.' >&2
+            exit 1
+          fi
+          git diff --check
+
       - name: Analyze application and tests
         run: dart analyze lib test
 
@@ -176,11 +187,12 @@ jobs:
           cat > artifact/release-notes.md <<EOF
           TV FULL · Proveedor conserva el catálogo provider.json completo y lo entrega sin reescrituras al parser.
           Los streams directos siguen reproduciendo de forma directa.
-          Las rutas relativas conservan su identidad, ruta original y globalIndex y se resuelven justo al pulsar Play.
-          Los metadatos de reproducción suministrados por el proveedor permanecen disponibles para Media3.
-          El motor dinámico admite configuración oficial mediante TV_FULL_DYNAMIC_SOURCE_JSON y sesión autorizada por dispositivo o stream.
+          Las rutas Flow usan la ruta original live/c... para obtener un host/token temporal del motor suministrado por el proveedor justo al pulsar Play.
+          Los metadatos de reproducción, headers y ClearKey suministrados por el proveedor permanecen disponibles para Media3.
+          ClearKey se habilita también para HLS cuando el catálogo autorizado del proveedor lo indica.
+          HTTP 401/403 permite renovación acotada de la sesión/token antes de marcar un canal como no disponible; 404/410 siguen siendo terminales.
+          El motor dinámico mantiene compatibilidad con el resolver tradicional de stream_id para las fuentes que realmente usan ese protocolo.
           Esta build fue compilada en modo de configuración: ${TV_FULL_PROVIDER_CONFIG_MODE}.
-          Cuando no existe configuración oficial, el fallback usa únicamente el contrato temporal de laboratorio ya validado en V41/V42.
           La URL temporal final nunca se guarda en el catálogo.
           M3U, Xtream y Stalker mantienen su flujo existente.
           ARM32 y ARM64 conservan el paquete y certificado históricos de TV FULL PRO.
