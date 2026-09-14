@@ -28,17 +28,14 @@ class ResolvedDynamicStream {
 /// Fuente LIVE compatible con servidores que exponen catálogo Xtream y
 /// requieren resolver el stream_id justo antes de iniciar la reproducción.
 ///
-/// Flujo:
-/// 1. player_api.php?action=get_live_categories
-/// 2. player_api.php?action=get_live_streams
-/// 3. el usuario abre un canal (stream_id estable)
-/// 4. POST al endpoint de resolución (por defecto /stream/gen/{id})
-/// 5. el cuerpo de la respuesta contiene la URL HLS temporal
-/// 6. Media3 recibe esa URL y los headers de reproducción configurados.
+/// El catálogo provider.json puede usar el mismo resolvedor sin credenciales
+/// Xtream: el JSON aporta la identidad estable del canal y `resolve` obtiene la
+/// URL temporal justo al abrirlo. El bloque opcional `session` permite pedir al
+/// proveedor headers/tokens emitidos específicamente para TV FULL.
 ///
-/// La configuración se inyecta con TV_FULL_DYNAMIC_SOURCE_JSON. X-Hash es
-/// opcional y nunca se genera copiando lógica de otra aplicación: puede
-/// proporcionarse en la configuración o con TV_FULL_DYNAMIC_X_HASH.
+/// La configuración se inyecta con TV_FULL_DYNAMIC_SOURCE_JSON. X-Hash es un
+/// fallback heredado opcional; el flujo preferido es `session`, que evita fijar
+/// valores capturados de otra instalación.
 class DynamicStreamService {
   DynamicStreamService._({
     String? rawConfig,
@@ -75,6 +72,8 @@ class DynamicStreamService {
   _DynamicSourceConfig? _config;
   bool _configLoaded = false;
   String? _configurationError;
+  final Map<String, _SessionCacheEntry> _sessionCache =
+      <String, _SessionCacheEntry>{};
 
   @visibleForTesting
   factory DynamicStreamService.forTesting({
@@ -265,13 +264,27 @@ class DynamicStreamService {
       keepEmpty: false,
     );
 
-    // En las capturas el mismo ANDROID_ID viaja como device= y X-Did.
+    // El ANDROID_ID real sigue siendo la identidad por dispositivo. No se fija
+    // un X-Did capturado de otra instalación.
     if (androidId != null && androidId.isNotEmpty) {
       _putIfMissingCaseInsensitive(playbackHeaders, 'X-Did', androidId);
     }
 
-    // X-Hash queda deliberadamente opcional. Sirve para una prueba A/B sin
-    // atar TV FULL a un algoritmo nativo de otra aplicación.
+    // Si el proveedor dispone de un emisor de sesión para TV FULL, sus headers
+    // tienen prioridad sobre la configuración estática. El emisor puede
+    // devolver headers de reproducción autorizados para esa sesión.
+    final sessionHeaders = await _resolveProviderSessionHeaders(config, vars);
+    for (final entry in sessionHeaders.entries) {
+      _putCaseInsensitive(
+        playbackHeaders,
+        entry.key,
+        entry.value,
+        replace: true,
+      );
+    }
+
+    // Compatibilidad heredada: un valor configurado manualmente sólo se usa si
+    // el emisor de sesión no entregó ya X-Hash.
     final xHash = (_xHashOverride ?? '').trim().isNotEmpty
         ? _xHashOverride!.trim()
         : _compiledXHash.trim().isNotEmpty
@@ -285,6 +298,177 @@ class DynamicStreamService {
       url: parsed.toString(),
       headers: playbackHeaders,
     );
+  }
+
+  Future<Map<String, String>> _resolveProviderSessionHeaders(
+    _DynamicSourceConfig config,
+    Map<String, String> vars,
+  ) async {
+    final session = config.session;
+    if (session == null) return const <String, String>{};
+
+    final cacheKey = _sessionCacheKey(config, session, vars);
+    final cached = _sessionCache[cacheKey];
+    final now = DateTime.now();
+    if (cached != null && cached.expiresAt.isAfter(now)) {
+      return Map<String, String>.from(cached.headers);
+    }
+
+    final uri = _sessionUri(config, session, vars);
+    final headers = _expandMap(session.headers, vars, keepEmpty: false);
+    final form = _expandMap(session.form, vars, keepEmpty: true);
+
+    http.Response response;
+    try {
+      if (session.method == 'GET') {
+        final requestUri = uri.replace(
+          queryParameters: <String, String>{
+            ...uri.queryParameters,
+            ...form,
+          },
+        );
+        response = await _client
+            .get(requestUri, headers: headers)
+            .timeout(session.timeout);
+      } else {
+        response = await _client
+            .post(
+              uri,
+              headers: headers,
+              body: form,
+              encoding: utf8,
+            )
+            .timeout(session.timeout);
+      }
+    } on TimeoutException {
+      throw const DynamicStreamException(
+        'Tiempo de espera agotado al solicitar la sesión del proveedor.',
+        retryable: true,
+      );
+    } catch (_) {
+      throw const DynamicStreamException(
+        'No se pudo solicitar la sesión del proveedor.',
+        retryable: true,
+      );
+    }
+
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw DynamicStreamException(
+        'La sesión del proveedor respondió HTTP ${response.statusCode}.',
+        retryable:
+            response.statusCode == 408 ||
+            response.statusCode == 429 ||
+            response.statusCode >= 500,
+      );
+    }
+
+    final result = _sessionResponseHeaders(response);
+    if (result.isEmpty) {
+      throw const DynamicStreamException(
+        'La sesión del proveedor no devolvió headers de reproducción.',
+        retryable: true,
+      );
+    }
+
+    if (session.ttl > Duration.zero) {
+      _sessionCache[cacheKey] = _SessionCacheEntry(
+        headers: Map<String, String>.unmodifiable(result),
+        expiresAt: now.add(session.ttl),
+      );
+    }
+    return result;
+  }
+
+  Map<String, String> _sessionResponseHeaders(http.Response response) {
+    final result = <String, String>{};
+
+    for (final entry in response.headers.entries) {
+      final canonical = _sessionHeaderName(entry.key);
+      if (canonical != null && entry.value.trim().isNotEmpty) {
+        result[canonical] = entry.value.trim();
+      }
+    }
+
+    final body = utf8.decode(response.bodyBytes, allowMalformed: true).trim();
+    if (body.isEmpty) return result;
+
+    try {
+      final decoded = jsonDecode(body);
+      if (decoded is Map) {
+        final map = Map<String, dynamic>.from(decoded);
+        final headers = map['headers'];
+        if (headers is Map) {
+          for (final entry in headers.entries) {
+            final key = entry.key?.toString().trim() ?? '';
+            final value = entry.value?.toString().trim() ?? '';
+            if (key.isEmpty || value.isEmpty) continue;
+            result[key] = value;
+          }
+        }
+
+        for (final key in const [
+          'x_hash',
+          'x-hash',
+          'xHash',
+          'X-Hash',
+          'x_hash2',
+          'x-hash2',
+          'xHash2',
+          'X-Hash2',
+        ]) {
+          final value = map[key]?.toString().trim();
+          if (value == null || value.isEmpty) continue;
+          final canonical = key.toLowerCase().contains('hash2')
+              ? 'X-Hash2'
+              : 'X-Hash';
+          result[canonical] = value;
+        }
+      }
+    } catch (_) {
+      // Un body no JSON no invalida headers HTTP ya recibidos.
+    }
+
+    return result;
+  }
+
+  String? _sessionHeaderName(String raw) {
+    final key = raw.trim();
+    if (key.isEmpty) return null;
+    final lower = key.toLowerCase();
+    if (lower == 'x-hash') return 'X-Hash';
+    if (lower == 'x-hash2') return 'X-Hash2';
+    if (lower == 'x-app') return 'X-App';
+    if (lower == 'x-version') return 'X-Version';
+    if (lower == 'x-did') return 'X-Did';
+    if (lower == 'user-agent') return 'User-Agent';
+    if (lower == 'referer') return 'Referer';
+    if (lower == 'origin') return 'Origin';
+    return null;
+  }
+
+  String _sessionCacheKey(
+    _DynamicSourceConfig config,
+    _ProviderSessionConfig session,
+    Map<String, String> vars,
+  ) {
+    final device = vars['androidId'] ?? '';
+    final stream = session.scope == 'stream' ? vars['id'] ?? '' : '';
+    return '${config.server}|${session.path}|${session.scope}|$device|$stream';
+  }
+
+  Uri _sessionUri(
+    _DynamicSourceConfig config,
+    _ProviderSessionConfig session,
+    Map<String, String> vars,
+  ) {
+    final rawPath = _expand(session.path, vars).trim();
+    final parsed = Uri.tryParse(rawPath);
+    if (parsed != null &&
+        (parsed.scheme == 'http' || parsed.scheme == 'https') &&
+        parsed.host.isNotEmpty) {
+      return parsed;
+    }
+    return _endpoint(config.server, rawPath);
   }
 
   Future<List<dynamic>> _xtreamList(
@@ -393,7 +577,6 @@ class DynamicStreamService {
       return body;
     }
 
-    // Compatibilidad defensiva por si otra implementación devuelve JSON.
     try {
       final decoded = jsonDecode(body);
       if (decoded is String) return decoded.trim();
@@ -461,9 +644,26 @@ class DynamicStreamService {
     String key,
     String value,
   ) {
+    _putCaseInsensitive(headers, key, value, replace: false);
+  }
+
+  void _putCaseInsensitive(
+    Map<String, String> headers,
+    String key,
+    String value, {
+    required bool replace,
+  }) {
     final target = key.toLowerCase();
+    String? existing;
     for (final current in headers.keys) {
-      if (current.toLowerCase() == target) return;
+      if (current.toLowerCase() == target) {
+        existing = current;
+        break;
+      }
+    }
+    if (existing != null) {
+      if (!replace) return;
+      headers.remove(existing);
     }
     headers[key] = value;
   }
@@ -509,6 +709,7 @@ class _DynamicSourceConfig {
   final Duration resolverTimeout;
   final Map<String, String> playbackHeaders;
   final String xHash;
+  final _ProviderSessionConfig? session;
 
   const _DynamicSourceConfig({
     required this.name,
@@ -524,6 +725,7 @@ class _DynamicSourceConfig {
     required this.resolverTimeout,
     required this.playbackHeaders,
     required this.xHash,
+    required this.session,
   });
 
   factory _DynamicSourceConfig.fromMap(Map<String, dynamic> map) {
@@ -532,7 +734,7 @@ class _DynamicSourceConfig {
     if (server == null ||
         !(server.scheme == 'http' || server.scheme == 'https') ||
         server.host.isEmpty) {
-      throw const FormatException('Servidor Xtream dinámico inválido.');
+      throw const FormatException('Servidor dinámico inválido.');
     }
 
     final username = map['username']?.toString().trim() ?? '';
@@ -542,6 +744,12 @@ class _DynamicSourceConfig {
     final resolver = resolverRaw is Map
         ? Map<String, dynamic>.from(resolverRaw)
         : const <String, dynamic>{};
+    final sessionRaw = map['session'];
+    final session = sessionRaw is Map
+        ? _ProviderSessionConfig.fromMap(
+            Map<String, dynamic>.from(sessionRaw),
+          )
+        : null;
 
     final catalogTimeoutMs =
         int.tryParse(map['catalogTimeoutMs']?.toString() ?? '') ?? 12000;
@@ -559,7 +767,7 @@ class _DynamicSourceConfig {
     return _DynamicSourceConfig(
       name: map['name']?.toString().trim().isNotEmpty == true
           ? map['name'].toString().trim()
-          : 'TV clásica 2',
+          : 'TV FULL · Proveedor',
       server: server.replace(query: '', fragment: ''),
       username: username,
       password: password,
@@ -585,17 +793,76 @@ class _DynamicSourceConfig {
       ),
       playbackHeaders: _stringMap(map['playbackHeaders']),
       xHash: map['xHash']?.toString().trim() ?? '',
+      session: session,
     );
   }
+}
+
+class _ProviderSessionConfig {
+  final String path;
+  final String method;
+  final Map<String, String> headers;
+  final Map<String, String> form;
+  final Duration timeout;
+  final Duration ttl;
+  final String scope;
+
+  const _ProviderSessionConfig({
+    required this.path,
+    required this.method,
+    required this.headers,
+    required this.form,
+    required this.timeout,
+    required this.ttl,
+    required this.scope,
+  });
+
+  factory _ProviderSessionConfig.fromMap(Map<String, dynamic> map) {
+    final path = map['path']?.toString().trim() ?? '';
+    if (path.isEmpty) {
+      throw const FormatException('Falta session.path.');
+    }
+
+    final method = map['method']?.toString().trim().toUpperCase() ?? 'POST';
+    if (method != 'GET' && method != 'POST') {
+      throw const FormatException('session.method sólo admite GET o POST.');
+    }
+
+    final timeoutMs =
+        int.tryParse(map['timeoutMs']?.toString() ?? '') ?? 6000;
+    final ttlSeconds = int.tryParse(map['ttlSeconds']?.toString() ?? '') ?? 0;
+    final scope = map['scope']?.toString().trim().toLowerCase() ?? 'device';
+    if (scope != 'device' && scope != 'stream') {
+      throw const FormatException('session.scope debe ser device o stream.');
+    }
+
+    return _ProviderSessionConfig(
+      path: path,
+      method: method,
+      headers: _stringMap(map['headers']),
+      form: _stringMap(map['form']),
+      timeout: Duration(milliseconds: timeoutMs.clamp(1000, 30000)),
+      ttl: Duration(seconds: ttlSeconds.clamp(0, 3600)),
+      scope: scope,
+    );
+  }
+}
+
+class _SessionCacheEntry {
+  final Map<String, String> headers;
+  final DateTime expiresAt;
+
+  const _SessionCacheEntry({required this.headers, required this.expiresAt});
 }
 
 Map<String, String> _stringMap(dynamic raw) {
   if (raw is! Map) return const <String, String>{};
   final result = <String, String>{};
   for (final entry in raw.entries) {
-    final key = entry.key.toString().trim();
+    final key = entry.key?.toString().trim() ?? '';
     final value = entry.value?.toString() ?? '';
-    if (key.isNotEmpty) result[key] = value;
+    if (key.isEmpty) continue;
+    result[key] = value;
   }
-  return result;
+  return Map<String, String>.unmodifiable(result);
 }
