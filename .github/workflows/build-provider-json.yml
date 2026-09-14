@@ -1,4 +1,4 @@
-name: Build V47 local provider JSON
+name: Build V48 provider JSON resolver
 
 on:
   push:
@@ -14,9 +14,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  BUILD_NAME: '1.4.15'
-  BUILD_NUMBER: '3047'
-  RELEASE_NUMBER: '47'
+  BUILD_NAME: '1.4.16'
+  BUILD_NUMBER: '3048'
+  RELEASE_NUMBER: '48'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
 
 jobs:
@@ -51,6 +51,26 @@ jobs:
       - name: Run application tests
         run: flutter test --no-pub --reporter expanded
 
+      - name: Verify provider resolver configuration
+        shell: bash
+        env:
+          TV_FULL_DYNAMIC_SOURCE_JSON: ${{ secrets.TV_FULL_DYNAMIC_SOURCE_JSON }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_DYNAMIC_SOURCE_JSON"
+          python3 - <<'PY'
+          import json, os
+          value = json.loads(os.environ['TV_FULL_DYNAMIC_SOURCE_JSON'])
+          assert isinstance(value, dict)
+          server = str(value.get('server', '')).strip()
+          resolver = value.get('resolver')
+          assert server.startswith(('http://', 'https://'))
+          assert isinstance(resolver, dict)
+          assert str(resolver.get('path', '')).strip()
+          print('Provider resolver configuration is present and structurally valid.')
+          print('Authorized session block:', 'yes' if isinstance(value.get('session'), dict) else 'no')
+          PY
+
       - name: Configure historical TV FULL signing
         shell: bash
         env:
@@ -75,13 +95,16 @@ jobs:
 
       - name: Build signed ARM32 and ARM64 APKs
         shell: bash
+        env:
+          TV_FULL_DYNAMIC_SOURCE_JSON: ${{ secrets.TV_FULL_DYNAMIC_SOURCE_JSON }}
         run: |
           set -euo pipefail
           flutter build apk --release --split-per-abi \
             --target-platform android-arm,android-arm64 \
             --build-name="$BUILD_NAME" \
             --build-number="$BUILD_NUMBER" \
-            --dart-define=TV_FULL_ANDROID_TV=true
+            --dart-define=TV_FULL_ANDROID_TV=true \
+            --dart-define="TV_FULL_DYNAMIC_SOURCE_JSON=$TV_FULL_DYNAMIC_SOURCE_JSON"
 
       - name: Verify certificate, package, version and architectures
         run: python3 .github/scripts/verify_provider_apks.py
@@ -94,20 +117,22 @@ jobs:
           set -euo pipefail
           TAG="tv-full-pro-v${RELEASE_NUMBER}-provider-json-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
           cat > artifact/release-notes.md <<'EOF'
-          Catálogos provider.json locales desde archivo o pegando JSON, iconos base64 y headers del proveedor.
-          La fuente remota integrada sólo importa URLs HTTP/HTTPS directas sin DRM; rutas relativas o protegidas se omiten.
-          ClearKey con licencia 100% local para DASH/CENC compatible. Media3 no admite ClearKey en HLS.
-          Inicio → Cargar JSON → Cargar provider.json local o Pegar JSON → Importar catálogo.
-          Archivo recomendado: Descargas/provider.json. No se incluye ningún catálogo privado en la APK.
+          TV FULL · Proveedor conserva el catálogo provider.json completo.
+          Los streams directos siguen reproduciendo de forma directa.
+          Las rutas relativas o entradas que requieren autorización conservan su ID, ruta original y globalIndex y se resuelven justo al pulsar Play.
+          El motor de proveedor V43 admite un bloque session autorizado para obtener headers/tokens propios de TV FULL y cachearlos por dispositivo o stream.
+          La URL temporal final nunca se guarda en el catálogo.
+          No se incorporan valores X-Hash/X-Did capturados de otras instalaciones.
+          M3U, Xtream y Stalker mantienen su flujo existente.
           ARM32 y ARM64 conservan el paquete y certificado históricos de TV FULL PRO.
           EOF
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V47-ARM32.apk \
-            artifact/TV-FULL-PRO-V47-ARM64.apk \
+            artifact/TV-FULL-PRO-V48-ARM32.apk \
+            artifact/TV-FULL-PRO-V48-ARM64.apk \
             artifact/latest.json \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO ${BUILD_NAME}+${BUILD_NUMBER} - provider.json local" \
+            --title "TV FULL PRO ${BUILD_NAME}+${BUILD_NUMBER} - provider resolver" \
             --notes-file artifact/release-notes.md
 
       - name: Remove signing material
@@ -118,7 +143,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V47-PROVIDER-JSON
+          name: TV-FULL-PRO-V48-PROVIDER-RESOLVER
           path: artifact/
           if-no-files-found: warn
           retention-days: 30
