@@ -17,10 +17,11 @@ class RemoteProviderJsonBootstrap {
 
   Future<void> prepare() async {
     try {
-      // El arranque ya muestra su UI mientras consulta la fuente. Aun así,
-      // limitamos la espera total para que una red lenta no retenga el inicio.
+      // HomeScreen ya muestra su vista de inicio durante esta operación. El
+      // catálogo del proveedor puede venir desde Archive.org y necesitar más
+      // de 12 s en una conexión lenta; no cortamos antes que el propio fetch.
       final payload = await RemoteProviderJsonService.instance.fetch().timeout(
-            const Duration(seconds: 12),
+            const Duration(seconds: 35),
           );
       final imported = await LocalProviderJsonStore.instance.importContent(
         playlistId,
