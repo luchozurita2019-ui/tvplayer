@@ -12,7 +12,17 @@ import 'provider_json_catalog_parser.dart';
 /// copian al modelo Channel; la copia privada del JSON sigue bajo el almacenamiento
 /// interno que ya utiliza V50 para catálogos locales.
 class CompatibleProviderJsonCatalogParser {
-  const CompatibleProviderJsonCatalogParser();
+  static const String _compiledListaTv3Resolver = String.fromEnvironment(
+    'TV_FULL_LISTA3_RESOLVER_URL',
+    defaultValue: '',
+  );
+
+  final String? _resolverOverride;
+
+  const CompatibleProviderJsonCatalogParser({String? resolverUrl})
+    : _resolverOverride = resolverUrl;
+
+  String get _resolverBase => (_resolverOverride ?? _compiledListaTv3Resolver).trim();
 
   Future<ProviderJsonCatalog> parseFile(File file) async {
     try {
@@ -67,6 +77,7 @@ class CompatibleProviderJsonCatalogParser {
     final channels = <Channel>[];
     final warnings = <String>[];
     final seen = <String>{};
+    final resolver = _parseResolverBase(_resolverBase);
 
     for (var i = 0; i < rawChannels.length; i++) {
       final raw = rawChannels[i];
@@ -100,15 +111,28 @@ class CompatibleProviderJsonCatalogParser {
       }
       playCode ??= channelCode;
 
+      final directResolverUrl = resolver == null
+          ? null
+          : _resolverUrl(
+              resolver,
+              channelCode: channelCode,
+              playCode: playCode,
+              name: name,
+              channelNumber: channelNumber,
+            );
+
       channels.add(
         Channel(
           name: name,
-          url:
+          url: directResolverUrl ??
               '${ProviderJsonCatalogParser.dynamicStreamPrefix}${Uri.encodeComponent(channelCode)}',
           logoUrl: poster,
           group: 'Lista TV 3',
           tvgId: channelCode,
-          dynamicStreamId: channelCode,
+          // Si existe un resolver HTTP propio, Media3 abre ese endpoint y sigue
+          // su redirección al stream final. Sin resolver compilado conservamos
+          // el camino dinámico de V50 para diagnóstico/configuración posterior.
+          dynamicStreamId: directResolverUrl == null ? channelCode : null,
           dynamicStreamPath: playCode,
           providerGlobalIndex: channelNumber,
           streamMimeType: _mimeFor(avFormat),
@@ -122,7 +146,45 @@ class CompatibleProviderJsonCatalogParser {
       );
     }
 
+    if (resolver == null && _resolverBase.isNotEmpty) {
+      warnings.add(
+        'TV_FULL_LISTA3_RESOLVER_URL no es una URL HTTP/HTTPS válida; '
+        'Lista TV 3 quedó en modo dinámico.',
+      );
+    }
+
     return ProviderJsonCatalog(channels, warnings);
+  }
+
+  Uri? _parseResolverBase(String value) {
+    if (value.isEmpty) return null;
+    final uri = Uri.tryParse(value);
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty) {
+      return null;
+    }
+    return uri;
+  }
+
+  String _resolverUrl(
+    Uri base, {
+    required String channelCode,
+    required String playCode,
+    required String name,
+    String? channelNumber,
+  }) {
+    return base
+        .replace(
+          queryParameters: <String, String>{
+            ...base.queryParameters,
+            'channelCode': channelCode,
+            'playCode': playCode,
+            'name': name,
+            if (channelNumber != null) 'channelNumber': channelNumber,
+          },
+        )
+        .toString();
   }
 
   String? _text(dynamic value) {
