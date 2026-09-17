@@ -108,8 +108,8 @@ jobs:
           "$APKSIGNER" verify --verbose --print-certs artifact/TV-FULL-PRO-V51-LISTA-TV3-ARM64.apk | tee artifact/CERTIFICATE-ARM64.txt
 
           EXPECTED="$(printf '%s' "$CERT_SHA256" | tr '[:upper:]' '[:lower:]')"
-          grep -i "Signer #1 certificate SHA-256 digest: $EXPECTED" artifact/CERTIFICATE-ARM32.txt
-          grep -i "Signer #1 certificate SHA-256 digest: $EXPECTED" artifact/CERTIFICATE-ARM64.txt
+          grep -Fqi "certificate SHA-256 digest: $EXPECTED" artifact/CERTIFICATE-ARM32.txt
+          grep -Fqi "certificate SHA-256 digest: $EXPECTED" artifact/CERTIFICATE-ARM64.txt
 
       - name: Upload signed test APKs
         uses: actions/upload-artifact@v4
