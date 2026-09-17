@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import '../models/channel.dart';
 import 'provider_json_catalog_parser.dart';
@@ -12,7 +13,23 @@ import 'provider_json_catalog_parser.dart';
 class CompatibleProviderJsonCatalogParser {
   const CompatibleProviderJsonCatalogParser();
 
+  Future<ProviderJsonCatalog> parseFile(File file) async {
+    try {
+      if (await file.length() > ProviderJsonCatalogParser.maxCatalogBytes) {
+        throw const FormatException('El catálogo supera el límite de 16 MB.');
+      }
+      return parse(await file.readAsString());
+    } on FileSystemException {
+      throw const FormatException('No se pudo leer el archivo JSON local.');
+    }
+  }
+
   ProviderJsonCatalog parse(String content) {
+    if (content.length > ProviderJsonCatalogParser.maxCatalogBytes ||
+        utf8.encode(content).length > ProviderJsonCatalogParser.maxCatalogBytes) {
+      throw const FormatException('El catálogo supera el límite de 16 MB.');
+    }
+
     dynamic root;
     try {
       root = jsonDecode(
