@@ -8,8 +8,9 @@ import 'provider_json_catalog_parser.dart';
 ///
 /// Mantiene intacto el formato provider.json de TV FULL y, únicamente para
 /// archivos locales importados por el usuario, acepta también el catálogo LIVE
-/// con raíz `data.channelList`. Las credenciales/licencias presentes en ese
-/// documento no se copian al modelo Channel ni a la persistencia de TV FULL.
+/// con raíz `data.channelList`. Las credenciales/licencias del documento no se
+/// copian al modelo Channel; la copia privada del JSON sigue bajo el almacenamiento
+/// interno que ya utiliza V50 para catálogos locales.
 class CompatibleProviderJsonCatalogParser {
   const CompatibleProviderJsonCatalogParser();
 
