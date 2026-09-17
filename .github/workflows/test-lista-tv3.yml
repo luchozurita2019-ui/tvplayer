@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - experiment/lista-tv-3-v50
+      - experiment/lista-tv-3-v50-clean
   workflow_dispatch:
 
 permissions:
