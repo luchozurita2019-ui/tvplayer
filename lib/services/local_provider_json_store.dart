@@ -3,6 +3,7 @@ import 'dart:isolate';
 
 import 'package:path_provider/path_provider.dart';
 
+import 'compatible_provider_json_catalog_parser.dart';
 import 'provider_json_catalog_parser.dart';
 import 'provider_json_document_decoder.dart';
 
@@ -39,7 +40,7 @@ class LocalProviderJsonStore {
       () => normalizeProviderJsonDocument(content),
     );
     final catalog = await Isolate.run(
-      () => const ProviderJsonCatalogParser().parse(normalized),
+      () => const CompatibleProviderJsonCatalogParser().parse(normalized),
     );
     // Validar antes de escribir: un JSON inválido conserva la copia anterior.
     final directory = await _directory(serviceId);
@@ -62,7 +63,7 @@ class LocalProviderJsonStore {
     final directory = await _directory(serviceId);
     final path = directory.path + '/catalog.private.json';
     return Isolate.run(
-      () => const ProviderJsonCatalogParser().parseFile(File(path)),
+      () => const CompatibleProviderJsonCatalogParser().parseFile(File(path)),
     );
   }
 
