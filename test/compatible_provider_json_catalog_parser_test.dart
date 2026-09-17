@@ -2,6 +2,7 @@ import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:iptv_player/services/compatible_provider_json_catalog_parser.dart';
+import 'package:iptv_player/services/lista_tv3_metadata_registry.dart';
 
 String _catalog({String token = 'SECRET_TOKEN_SHOULD_NOT_REACH_CHANNEL'}) {
   return jsonEncode({
@@ -18,8 +19,10 @@ String _catalog({String token = 'SECRET_TOKEN_SHOULD_NOT_REACH_CHANNEL'}) {
               'cdnType': '4',
               'quality': '1',
               'AVFormat': 'ts',
+              'supportVideoType': 'h264',
               'tag': 'free',
-              'license': 'media_code=cyx_demo_720p&token=$token',
+              'license':
+                  'app_id=demo&tag=free&scheme=md5-01&media_code=cyx_demo_720p&expired=9999999999&token=$token',
             },
           ],
         },
@@ -29,6 +32,8 @@ String _catalog({String token = 'SECRET_TOKEN_SHOULD_NOT_REACH_CHANNEL'}) {
 }
 
 void main() {
+  tearDown(() => ListaTv3MetadataRegistry.instance.clear());
+
   test('imports data.channelList as dynamic Lista TV 3 channels', () {
     const token = 'SECRET_TOKEN_SHOULD_NOT_REACH_CHANNEL';
     final catalog = const CompatibleProviderJsonCatalogParser().parse(
@@ -46,6 +51,26 @@ void main() {
     expect(channel.url, 'tvfull-dynamic://stream/cyx_demo_720p');
     expect(channel.streamMimeType, 'video/mp2t');
     expect(channel.toJson().toString(), isNot(contains(token)));
+  });
+
+  test('keeps original resolver metadata only in the in-memory registry', () {
+    const token = 'SECRET_TOKEN_SHOULD_NOT_REACH_CHANNEL';
+    const CompatibleProviderJsonCatalogParser().parse(_catalog(token: token));
+
+    final metadata = ListaTv3MetadataRegistry.instance.channel(
+      'cyx_demo_720p',
+    );
+    expect(metadata, isNotNull);
+    expect(metadata!.variants, hasLength(1));
+    final variant = metadata.variants.single;
+    expect(variant.playCode, 'cyx_demo_720p');
+    expect(variant.mediaCode, 'cyx_demo_720p');
+    expect(variant.cdnType, '4');
+    expect(variant.tag, 'free');
+    expect(variant.quality, '1');
+    expect(variant.avFormat, 'ts');
+    expect(variant.supportVideoType, 'h264');
+    expect(variant.license, contains(token));
   });
 
   test('uses an authorized HTTP resolver without changing the normal player', () {
