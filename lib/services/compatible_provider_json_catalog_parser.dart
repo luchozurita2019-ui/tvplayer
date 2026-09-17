@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import '../models/channel.dart';
+import 'lista_tv3_metadata_registry.dart';
 import 'provider_json_catalog_parser.dart';
 
 /// Adaptador de importación local.
@@ -22,7 +23,8 @@ class CompatibleProviderJsonCatalogParser {
   const CompatibleProviderJsonCatalogParser({String? resolverUrl})
     : _resolverOverride = resolverUrl;
 
-  String get _resolverBase => (_resolverOverride ?? _compiledListaTv3Resolver).trim();
+  String get _resolverBase =>
+      (_resolverOverride ?? _compiledListaTv3Resolver).trim();
 
   Future<ProviderJsonCatalog> parseFile(File file) async {
     try {
@@ -74,6 +76,11 @@ class CompatibleProviderJsonCatalogParser {
       throw const FormatException('data.channelList debe ser una lista.');
     }
 
+    // La metadata completa (incluido license) sólo vive en memoria. El registro
+    // se reconstruye también al reabrir la app porque esta función vuelve a leer
+    // la copia privada del JSON antes de materializar el catálogo.
+    ListaTv3MetadataRegistry.instance.replaceFromRawChannels(rawChannels);
+
     final channels = <Channel>[];
     final warnings = <String>[];
     final seen = <String>{};
@@ -124,7 +131,8 @@ class CompatibleProviderJsonCatalogParser {
       channels.add(
         Channel(
           name: name,
-          url: directResolverUrl ??
+          url:
+              directResolverUrl ??
               '${ProviderJsonCatalogParser.dynamicStreamPrefix}${Uri.encodeComponent(channelCode)}',
           logoUrl: poster,
           group: 'Lista TV 3',
@@ -141,6 +149,7 @@ class CompatibleProviderJsonCatalogParser {
     }
 
     if (channels.isEmpty) {
+      ListaTv3MetadataRegistry.instance.clear();
       throw const FormatException(
         'data.channelList no contiene canales válidos.',
       );
