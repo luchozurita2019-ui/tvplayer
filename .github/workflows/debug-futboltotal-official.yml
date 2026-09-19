@@ -1,0 +1,109 @@
+name: Debug official Fútbol Total v3.6 auth
+
+on:
+  push:
+    branches:
+      - feature/v50-futboltotal-authorized
+    paths:
+      - '.github/workflows/debug-futboltotal-official.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Download official v3.6 and verify native signing compatibility
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3             -o /tmp/FutbolTotal.apk             https://github.com/ByRafaelSystem/futboltotal/releases/download/v3.6/FutbolTotal.apk
+
+          echo "apk_sha256=$(sha256sum /tmp/FutbolTotal.apk | cut -d' ' -f1)"
+          test "$(sha256sum /tmp/FutbolTotal.apk | cut -d' ' -f1)" =             "96ce60bb4adf7bb42718f7c2c856f5b5232cef41596bc970824b82294a67939f"
+
+          mkdir -p /tmp/ft
+          unzip -q /tmp/FutbolTotal.apk 'META-INF/CERT.RSA' 'lib/x86_64/libguard.so' -d /tmp/ft
+          openssl pkcs7 -inform DER             -in /tmp/ft/META-INF/CERT.RSA             -print_certs -out /tmp/ft/cert.pem
+          openssl x509 -in /tmp/ft/cert.pem -outform DER -out /tmp/ft/cert.der
+
+          echo "cert_sha256=$(sha256sum /tmp/ft/cert.der | cut -d' ' -f1)"
+          echo "libguard_x86_64_sha256=$(sha256sum /tmp/ft/lib/x86_64/libguard.so | cut -d' ' -f1)"
+
+          python3 - <<'PY'
+          import hashlib, hmac, json, urllib.request, urllib.error, uuid
+
+          cert = open('/tmp/ft/cert.der','rb').read()
+          lib = open('/tmp/ft/lib/x86_64/libguard.so','rb').read()
+          cert_hash = hashlib.sha256(cert).digest()
+
+          salt = bytes.fromhex('261734c048fcf64a0f0121fe56a351e7')
+          inner_a = bytes.fromhex('e7117953adac0953efc8774fa81573cf')
+          inner_b = bytes.fromhex('fabbe7d42b414318bbc0b144e8ae18e3')
+
+          for needle, name in [(salt,'salt'),(inner_a,'inner_a'),(inner_b,'inner_b')]:
+              if lib.find(needle) < 0:
+                  raise SystemExit(f'official libguard missing expected {name}')
+
+          derived = hashlib.sha256(cert_hash + salt).digest()
+          key = bytes(a ^ b ^ 0x36 for a,b in zip(derived[:16], inner_a))
+          key += bytes(a ^ b ^ 0x36 for a,b in zip(derived[16:], inner_b))
+
+          install_id = str(uuid.uuid4())
+          hw = hashlib.sha256(('github-probe|' + install_id).encode()).hexdigest()
+          base = 'https://novax-online.iptvnovax.workers.dev'
+
+          def request(path, payload):
+              data=json.dumps(payload,separators=(',',':')).encode()
+              req=urllib.request.Request(
+                  base+path,
+                  data=data,
+                  headers={
+                      'Content-Type':'application/json',
+                      'User-Agent':'Dalvik/2.1.0 (Linux; U; Android 12; TV Build/STT1.220616.001)',
+                  },
+                  method='POST',
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as r:
+                      return r.status, r.read().decode('utf-8','replace')
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read().decode('utf-8','replace')
+
+          ps, pb = request('/ping', {'id':install_id,'app':'ft','vc':26})
+          print('ping_status=', ps)
+          if ps < 200 or ps >= 300:
+              print('ping_body=', pb[:200])
+              raise SystemExit('ping failed')
+
+          def sign(message):
+              return hmac.new(key, message.encode(), hashlib.sha256).hexdigest()
+
+          message=f'sesion:ft:26:{install_id}:{hw}'
+          ss, sb = request('/sesion', {
+              'id':install_id,'vc':26,'hw':hw,
+              'sig':sign(message),'quiero':1,
+          })
+          print('session_with_hw_status=', ss)
+          print('session_with_hw_body=', sb[:240])
+
+          if ss == 401:
+              message=f'sesion:ft:26:{install_id}'
+              ss, sb = request('/sesion', {
+                  'id':install_id,'vc':26,'hw':'',
+                  'sig':sign(message),'quiero':1,
+              })
+              print('session_legacy_status=', ss)
+              print('session_legacy_body=', sb[:240])
+
+          if ss != 200:
+              raise SystemExit('official auth derivation did not authenticate')
+
+          parsed=json.loads(sb)
+          print('session_ok=', bool(parsed.get('ok')))
+          print('has_token=', bool(parsed.get('t')))
+          print('libre=', parsed.get('libre',0))
+          PY
