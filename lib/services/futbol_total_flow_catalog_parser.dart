@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../models/channel.dart';
+import 'clearkey_drm_config.dart';
 
 class FutbolTotalFlowCatalog {
   final List<Channel> channels;
@@ -92,9 +93,17 @@ class FutbolTotalFlowCatalogParser {
         }
 
         final drm = _text(sample['drm_license_uri']) ?? _text(sample['drm']);
+        ClearKeyDrmConfig? clearKey;
         if (drm != null) {
-          skippedDrm++;
-          continue;
+          try {
+            clearKey = ClearKeyDrmConfig.parse(drm);
+          } on FormatException {
+            skippedDrm++;
+            warnings.add(
+              'categories[$i].samples[$j]: DRM no compatible; canal omitido.',
+            );
+            continue;
+          }
         }
 
         final url = _text(sample['original_url']) ?? _text(sample['url']);
@@ -108,6 +117,12 @@ class FutbolTotalFlowCatalogParser {
         final headers = _headers(sample['headers'], warnings, i, j);
         final logo = _text(sample['icono']) ?? _text(sample['logo']);
         final name = _text(sample['name']) ?? 'Canal';
+        final lowerUrl = url.toLowerCase();
+        final streamMimeType = lowerUrl.contains('.mpd')
+            ? 'application/dash+xml'
+            : lowerUrl.contains('.m3u8')
+            ? 'application/x-mpegURL'
+            : null;
 
         channels.add(
           Channel(
@@ -115,6 +130,9 @@ class FutbolTotalFlowCatalogParser {
             url: url,
             logoUrl: logo != null && _isHttpUrl(logo) ? logo : null,
             group: group,
+            drmKeyId: clearKey?.keyId,
+            drmKey: clearKey?.key,
+            streamMimeType: streamMimeType,
             httpUserAgent: _headerValue(headers, 'user-agent'),
             httpReferrer:
                 _headerValue(headers, 'referer') ??
