@@ -902,3 +902,36 @@ AS) Validación
    - versionName: 1.4.26.
    - versionCode: 3058.
    - Misma firma histórica TV FULL.
+
+
+ETAPA 15 - V59 CACHÉ DE SESIÓN ESTABLE
+---------------------------------------
+Fecha: 19/09/2026
+
+Objetivo:
+Evitar que Fútbol Total vuelva a descargar todas sus TvList cada vez que el
+usuario entra y sale de TV en vivo, sin perder la capacidad de actualizar el
+catálogo entre ejecuciones de la app.
+
+AT) lib/screens/xtream_live_screen.dart
+   - Si existe una generación válida y completa en disco, se muestra de inmediato.
+   - Durante una misma ejecución de la app sólo se programa una comprobación de
+     red por fuente Fútbol Total.
+   - Volver a entrar a la pantalla reutiliza exactamente el catálogo persistido;
+     no vuelve a descargar las 13 TvList.
+   - La comprobación silenciosa usa una ventana de frescura de 6 horas.
+   - Si una actualización parcial falla, SectionCatalogService conserva las
+     TvList faltantes desde la última generación buena, por lo que nunca publica
+     un catálogo recortado.
+   - Las categorías persistidas también se reutilizan desde disco.
+
+AU) Reproducción
+   - Se conserva íntegra la corrección V58: rutas Flow se resuelven antes de
+     Media3, incluidos generator?path=..., manteniendo headers, DRM y MIME.
+   - El workflow conserva la compatibilidad ClearKey/HLS ya usada por TV FULL.
+
+AV) Build
+   - Identificación: V59.
+   - versionName: 1.4.27.
+   - versionCode: 3059.
+   - Misma firma histórica TV FULL.

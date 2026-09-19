@@ -37,6 +37,10 @@ class XtreamLiveScreen extends StatefulWidget {
 
 class _XtreamLiveScreenState extends State<XtreamLiveScreen>
     with WidgetsBindingObserver {
+  // Fútbol Total: durante una misma ejecución de la app sólo se programa
+  // una comprobación de red por fuente. El catálogo válido se sirve siempre
+  // desde la generación persistida en disco al volver a entrar a la pantalla.
+  static final Set<String> _futbolTotalRefreshScheduledThisSession = <String>{};
   static const Duration _cacheFreshFor = Duration(minutes: 3);
 
   late Future<_LiveData> _future;
@@ -253,8 +257,16 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
           );
 
       if (hierarchyReady) {
-        unawaited(_refreshM3u());
-        return _adoptFutbolTotalHierarchy(_LiveData(cached.channels));
+        // Mostrar inmediatamente la generación completa persistida. Sólo la
+        // primera entrada a esta fuente durante la ejecución actual puede
+        // programar una comprobación silenciosa; entradas posteriores no
+        // vuelven a descargar las 13 TvList.
+        if (_futbolTotalRefreshScheduledThisSession.add(widget.playlist.id)) {
+          unawaited(_refreshM3u());
+        }
+        return _adoptFutbolTotalHierarchy(
+          _LiveData(cached.channels, categories: cached.categories),
+        );
       }
 
       // Versiones anteriores guardaron todas las listas de Fútbol Total
@@ -350,7 +362,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
       final all = await SectionCatalogService.instance.refreshIfStale(
         widget.playlist,
         freshFor: widget.playlist.sourceType == PlaylistSourceType.futbolTotal
-            ? const Duration(minutes: 30)
+            ? const Duration(hours: 6)
             : const Duration(minutes: 5),
       );
       if (all == null) return;
