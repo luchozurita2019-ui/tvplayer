@@ -1,9 +1,31 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:iptv_player/services/futbol_total_agenda_parser.dart';
+import 'package:iptv_player/services/futbol_total_embedded_config.dart';
 import 'package:iptv_player/services/futbol_total_flow_catalog_parser.dart';
 import 'package:iptv_player/services/futbol_total_manifest_parser.dart';
 
 void main() {
+  group('FutbolTotalEmbeddedConfig', () {
+    test('replica el fallback Flow completo observado en v3.6', () {
+      final manifest = FutbolTotalEmbeddedConfig.fallbackManifest();
+      expect(manifest.lists, hasLength(1));
+      expect(manifest.lists.single.name, 'Flow completo');
+      expect(manifest.lists.single.kind, 'flow');
+      expect(
+        manifest.lists.single.url,
+        FutbolTotalEmbeddedConfig.flowFallbackUrl,
+      );
+      expect(manifest.lists.single.ttlSeconds, 0);
+    });
+
+    test('conserva los endpoints públicos embebidos sin secretos', () {
+      expect(FutbolTotalEmbeddedConfig.manifestUrl, contains('ft-tv-lists2.json'));
+      expect(FutbolTotalEmbeddedConfig.linksUrl, contains('links2.json'));
+      expect(FutbolTotalEmbeddedConfig.primaryWorker, startsWith('https://'));
+      expect(FutbolTotalEmbeddedConfig.secondaryWorker, startsWith('https://'));
+    });
+  });
+
   group('FutbolTotalManifestParser', () {
     test('lee lists y reglas de futbol', () {
       const json = r'''
