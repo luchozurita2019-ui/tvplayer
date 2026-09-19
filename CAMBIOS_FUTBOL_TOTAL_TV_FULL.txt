@@ -542,3 +542,43 @@ V) lib/providers/iptv_provider.dart
      dos canales Test.
    - No se modifica ninguna fuente M3U/Xtream/provider.json ni otras fuentes
      Fútbol Total con URL personalizada.
+
+
+ETAPA 7 - V53 ORIGEN REAL POR DEFECTO
+--------------------------------------
+Fecha: 19/09/2026
+
+Objetivo:
+Eliminar la confusión del catálogo sintético de 2 canales y dejar Fútbol Total
+orientado directamente al origen real autorizado.
+
+W) lib/screens/add_source_screen.dart
+   - Al elegir Fútbol Total, el campo ya se completa con el manifiesto real
+     detectado en la APK v3.6.
+   - Se retiró de la interfaz normal el botón "Usar manifiesto de prueba".
+   - El manifiesto sintético se conserva únicamente como herramienta interna
+     de diagnóstico.
+   - El texto informativo ahora explica que TV FULL usa el puente privado y
+     que provider.json permanece separado.
+
+X) Migración desde V52
+   - Se conserva _upgradeFutbolTotalTestSources().
+   - Si la instalación existente apunta exactamente al manifiesto de prueba,
+     se cambia automáticamente a ft-tv-lists2.json real.
+   - Se limpia únicamente el caché de esa fuente Fútbol Total.
+   - No se modifican M3U, Xtream, provider.json ni otras fuentes personalizadas.
+
+Y) Backend verificado
+   - Proyecto Supabase: ACTIVE_HEALTHY.
+   - Edge Function tvf-futboltotal-proxy: ACTIVE.
+   - Versión desplegada comprobada: 1.
+   - El APK no contiene la firma criptográfica original ni secretos internos.
+
+Z) Nueva compilación
+   - Identificación: V53.
+   - versionName: 1.4.21.
+   - versionCode: 3053.
+   - Misma firma histórica de TV FULL.
+   - ARM32 y ARM64.
+   - La receta sigue validando ClearKey/HLS existente, dart analyze y toda
+     la suite Flutter antes de construir.
