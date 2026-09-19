@@ -7,6 +7,9 @@ import '../models/playlist_source_type.dart';
 import 'catalog_file_store.dart';
 import 'content_classifier.dart';
 import 'device_performance_service.dart';
+import 'futbol_total_catalog_service.dart';
+import 'futbol_total_flow_catalog_parser.dart';
+import 'futbol_total_manifest_parser.dart';
 import 'm3u_fetcher.dart';
 import 'm3u_parser.dart';
 import 'local_provider_json_store.dart';
@@ -243,6 +246,11 @@ class SectionCatalogService {
   /// en generaciones temporales independientes. No se crean tres listas de
   /// Channel en RAM: sólo viven el parser incremental y las categorías únicas.
   Future<void> _downloadAndPartitionToDisk(Playlist playlist) async {
+    if (playlist.sourceType == PlaylistSourceType.futbolTotal) {
+      await _downloadFutbolTotalToDisk(playlist);
+      return;
+    }
+
     final parser = M3uLineParser();
     final writers = <TvSectionKind, CatalogFileWriter>{};
     final categorySets = <TvSectionKind, Set<String>>{
@@ -299,6 +307,98 @@ class SectionCatalogService {
       }
 
       _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
+    } catch (_) {
+      for (final writer in writers.values) {
+        await writer.abort();
+      }
+      rethrow;
+    }
+  }
+
+  Future<void> _downloadFutbolTotalToDisk(Playlist playlist) async {
+    final raw = await M3uFetcher.fetch(playlist.source);
+    final catalogs = <FutbolTotalFlowCatalog>[];
+    FutbolTotalManifest? manifest;
+
+    try {
+      final parsedManifest = const FutbolTotalManifestParser().parse(raw);
+      if (parsedManifest.lists.isNotEmpty) {
+        manifest = parsedManifest;
+      }
+    } on FormatException {
+      // Puede ser un catálogo Flow directo; se prueba debajo.
+    }
+
+    if (manifest != null) {
+      final service = const FutbolTotalCatalogService();
+      for (final definition in manifest.flowLists) {
+        catalogs.add(await service.loadFlow(definition));
+      }
+      if (catalogs.isEmpty && manifest.futbolLists.isNotEmpty) {
+        throw const FormatException(
+          'El manifiesto sólo contiene agenda de fútbol. '
+          'El resolvedor de canal_id todavía no está conectado al reproductor.',
+        );
+      }
+    } else {
+      catalogs.add(const FutbolTotalFlowCatalogParser().parse(raw));
+    }
+
+    if (catalogs.isEmpty) {
+      throw const FormatException(
+        'Fútbol Total no contiene catálogos Flow reproducibles.',
+      );
+    }
+
+    final writers = <TvSectionKind, CatalogFileWriter>{};
+    final categorySets = <TvSectionKind, Set<String>>{
+      for (final kind in TvSectionKind.values) kind: <String>{},
+    };
+    final categories = <TvSectionKind, List<String>>{
+      for (final kind in TvSectionKind.values) kind: <String>[],
+    };
+    for (final kind in TvSectionKind.values) {
+      writers[kind] = await _catalogFiles.beginSnapshot(
+        serviceId: playlist.id,
+        kind: 'm3u_${kind.name}',
+      );
+    }
+
+    final seen = <String>{};
+    var count = 0;
+    try {
+      for (final catalog in catalogs) {
+        for (final channel in catalog.channels) {
+          if (!seen.add(channel.uniqueKey)) continue;
+          count++;
+          final kind = _classify(channel);
+          writers[kind]!.add(channel.toJson());
+          final group = channel.group?.trim();
+          if (group != null &&
+              group.isNotEmpty &&
+              categorySets[kind]!.add(group)) {
+            categories[kind]!.add(group);
+          }
+        }
+      }
+
+      if (count == 0) {
+        throw const FormatException(
+          'Fútbol Total no devolvió canales reproducibles.',
+        );
+      }
+
+      for (final kind in TvSectionKind.values) {
+        final writer = writers[kind]!;
+        if (writer.count == 0) {
+          await writer.abort();
+          continue;
+        }
+        final committed = await writer.commit(categories: categories[kind]!);
+        if (committed) _forget('${playlist.id}|m3u_${kind.name}');
+      }
+      _lastNetworkRefresh['${playlist.id}|${playlist.source}'] =
+          DateTime.now();
     } catch (_) {
       for (final writer in writers.values) {
         await writer.abort();
