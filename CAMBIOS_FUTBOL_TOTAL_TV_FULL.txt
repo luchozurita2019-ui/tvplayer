@@ -181,3 +181,30 @@ La APK original convierte URLs del repositorio privado a peticiones del Worker
 con parámetros f, vc, id y sig. La firma se obtiene mediante Guard nativo.
 Esta etapa documenta el flujo y mantiene el adaptador preparado, pero no expone
 ni escribe secretos en este archivo.
+
+
+ETAPA 4 - CAPTURA AUTORIZADA DE RESPUESTAS JSON
+-----------------------------------------------
+Objetivo:
+Obtener los JSON actuales desde una ejecución legítima de la APK original,
+sin modificar la firma ni alterar la respuesta del servidor.
+
+L) tools/capturar_futboltotal_json.js
+   - Hook de diagnóstico para Q1.i.d(...), método que ya devuelve a la APK el
+     contenido descargado.
+   - Se ejecuta contra la APK ORIGINAL firmada por Rafael.
+   - Sólo observa el resultado después del flujo normal de Worker/firma.
+   - Filtra ft-tv-lists2.json, ft-flow2.json, links2.json, ft-mundotv.json,
+     ft-key-sources.json y ft-logos.json.
+   - No cambia URL, firma, token, cuerpo ni respuesta.
+
+M) tools/CAPTURA_FUTBOL_TOTAL.txt
+   - Instrucciones de uso por ADB/Frida.
+   - Advierte no publicar tokens, claves o secretos capturados.
+
+MOTIVO TECNICO
+--------------
+La APK v3.6 obtiene sig mediante Guard nativo y usa la firma del propio APK
+como parte del mecanismo de acceso al Worker. Para capturar datos reales sin
+introducir diferencias de firma, se usa la APK original y se observa el JSON
+ya recibido por la aplicación.
