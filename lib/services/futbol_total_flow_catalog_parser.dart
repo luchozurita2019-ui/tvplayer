@@ -31,7 +31,10 @@ class FutbolTotalFlowCatalogParser {
 
   const FutbolTotalFlowCatalogParser();
 
-  FutbolTotalFlowCatalog parse(\n    String content, {\n    bool allowWebPlayback = false,\n  }) {
+  FutbolTotalFlowCatalog parse(
+    String content, {
+    bool allowWebPlayback = false,
+  }) {
     dynamic decoded;
     try {
       decoded = jsonDecode(

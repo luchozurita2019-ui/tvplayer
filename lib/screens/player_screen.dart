@@ -9,7 +9,8 @@ import '../services/artwork_cache_service.dart';
 import '../services/m3u_fetcher.dart';
 import '../services/remote_access_guard.dart';
 import '../services/xtream_http_client.dart';
-import 'android_media3_texture_player_screen.dart';\nimport 'android_web_playback_screen.dart';
+import 'android_media3_texture_player_screen.dart';
+import 'android_web_playback_screen.dart';
 import 'android_media3_vod_player_screen.dart';
 import 'tv_full_vod_player_screen.dart';
 
