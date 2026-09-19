@@ -213,41 +213,44 @@ class _SourceContentScreenState extends State<SourceContentScreen>
                             ),
                           ),
                         ),
-                        const SizedBox(width: 26),
-                        Expanded(
-                          child: _SectionButton(
-                            eyebrow: 'CATÁLOGO',
-                            title: 'PELÍCULAS',
-                            subtitle:
-                                'Miles de películas para ver cuando quieras',
-                            icon: Icons.movie_outlined,
-                            accent: tvFullViolet,
-                            onFocused: () => _prewarmMovies(active),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    XtreamMoviesScreen(playlist: active),
+                        if (active.sourceType !=
+                            PlaylistSourceType.futbolTotal) ...[
+                          const SizedBox(width: 26),
+                          Expanded(
+                            child: _SectionButton(
+                              eyebrow: 'CATÁLOGO',
+                              title: 'PELÍCULAS',
+                              subtitle:
+                                  'Miles de películas para ver cuando quieras',
+                              icon: Icons.movie_outlined,
+                              accent: tvFullViolet,
+                              onFocused: () => _prewarmMovies(active),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      XtreamMoviesScreen(playlist: active),
+                                ),
                               ),
                             ),
                           ),
-                        ),
-                        const SizedBox(width: 26),
-                        Expanded(
-                          child: _SectionButton(
-                            eyebrow: 'TEMPORADAS',
-                            title: 'SERIES',
-                            subtitle: 'Las mejores series en un solo lugar',
-                            icon: Icons.ondemand_video_rounded,
-                            accent: const Color(0xFFA04CFF),
-                            onFocused: () => _prewarmSeries(active),
-                            onTap: () => Navigator.of(context).push(
-                              MaterialPageRoute(
-                                builder: (_) =>
-                                    XtreamSeriesScreen(playlist: active),
+                          const SizedBox(width: 26),
+                          Expanded(
+                            child: _SectionButton(
+                              eyebrow: 'TEMPORADAS',
+                              title: 'SERIES',
+                              subtitle: 'Las mejores series en un solo lugar',
+                              icon: Icons.ondemand_video_rounded,
+                              accent: const Color(0xFFA04CFF),
+                              onFocused: () => _prewarmSeries(active),
+                              onTap: () => Navigator.of(context).push(
+                                MaterialPageRoute(
+                                  builder: (_) =>
+                                      XtreamSeriesScreen(playlist: active),
+                                ),
                               ),
                             ),
                           ),
-                        ),
+                        ],
                       ],
                     ),
                   ),
