@@ -761,3 +761,49 @@ AG) tvf-futboltotal-proxy v20
 Resultado esperado:
 - V54/V55 pueden usar el mismo endpoint del proxy sin reinstalación.
 - Deben desaparecer los errores 402 msg=ad y Cloudflare 1042 en la ruta normal.
+
+
+ETAPA 12 - V56 ORDEN Y CLASIFICACIÓN LIVE
+-----------------------------------------
+Fecha: 19/09/2026
+
+Problema observado en dispositivo real:
+- El catálogo ya entra sin publicidad.
+- Algunas señales de Fútbol Total aparecían mezcladas en Películas y Series.
+- Las categorías de las distintas listas se mezclaban entre sí y perdían el
+  contexto de clase/evento.
+
+Causa:
+- _downloadFutbolTotalToDisk reutilizaba ContentClassifier, diseñado para M3U.
+- Grupos con palabras como cine, película, serie o temporada podían clasificarse
+  como VOD aunque Fútbol Total los entrega como señales Flow de TV en vivo.
+- Al fusionar las 13 listas se conservaba solamente channel.group, perdiendo el
+  nombre de la lista de origen.
+- Las generaciones antiguas de Películas/Series podían sobrevivir en caché.
+
+Corrección V56:
+AH) lib/services/section_catalog_service.dart
+   - Los catálogos Flow de Fútbol Total ya no pasan por ContentClassifier.
+   - Todas sus señales se guardan exclusivamente en TV EN VIVO.
+   - Se conserva el orden del manifiesto y el orden original de categorías.
+   - Cada categoría visible se forma como:
+       "Nombre de lista · Categoría/evento"
+     para mantener agrupación por clase y evento en la interfaz de un solo nivel.
+   - La deduplicación de canales se mantiene.
+   - Al confirmar el nuevo catálogo LIVE se eliminan únicamente las generaciones
+     antiguas de Películas/Series de esa fuente.
+
+AI) lib/services/catalog_file_store.dart
+   - Nuevo clearSection(serviceId, kind) para limpiar sólo una sección de una
+     fuente sin afectar las demás.
+
+AJ) lib/screens/source_content_screen.dart
+   - Fútbol Total se presenta como fuente LIVE exclusiva.
+   - No muestra accesos a Películas ni Series para esa fuente.
+   - M3U, Xtream y provider.json conservan sus tres secciones y comportamiento.
+
+AK) Build
+   - Identificación: V56.
+   - versionName: 1.4.24.
+   - versionCode: 3056.
+   - Misma firma histórica TV FULL.
