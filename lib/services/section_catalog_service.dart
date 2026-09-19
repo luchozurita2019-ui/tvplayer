@@ -71,8 +71,16 @@ class SectionCatalogService {
     if (fileSource != null) {
       final decoded = await _decodeFileSource(fileSource);
       if (decoded != null) {
-        _remember(memoryKey, decoded);
-        return decoded;
+        if (playlist.sourceType == PlaylistSourceType.futbolTotal &&
+            decoded.channels.any(
+              (channel) => (channel.catalogSource ?? '').trim().isEmpty,
+            )) {
+          await _catalogFiles.clearSection(playlist.id, key);
+          _forget(memoryKey);
+        } else {
+          _remember(memoryKey, decoded);
+          return decoded;
+        }
       }
     }
 
@@ -415,7 +423,7 @@ class SectionCatalogService {
         for (final channel in loaded.catalog.channels) {
           if (!seen.add(channel.uniqueKey)) continue;
 
-          final grouped = _withFutbolTotalGroup(
+          final grouped = _withFutbolTotalSource(
             channel,
             sourceName: loaded.sourceName,
           );
@@ -473,18 +481,12 @@ class SectionCatalogService {
     }
   }
 
-  Channel _withFutbolTotalGroup(
+  Channel _withFutbolTotalSource(
     Channel channel, {
     required String sourceName,
   }) {
     final listName =
         sourceName.trim().isEmpty ? 'Fútbol Total' : sourceName.trim();
-    final originalGroup = channel.group?.trim() ?? '';
-    final group = originalGroup.isEmpty
-        ? listName
-        : _sameFutbolTotalLabel(listName, originalGroup)
-            ? listName
-            : '$listName · $originalGroup';
 
     return Channel(
       name: channel.name,
@@ -494,7 +496,8 @@ class SectionCatalogService {
       drmKeyId: channel.drmKeyId,
       drmKey: channel.drmKey,
       streamMimeType: channel.streamMimeType,
-      group: group,
+      group: channel.group,
+      catalogSource: listName,
       tvgId: channel.tvgId,
       xtreamStreamId: channel.xtreamStreamId,
       dynamicStreamId: channel.dynamicStreamId,
@@ -504,23 +507,6 @@ class SectionCatalogService {
       httpReferrer: channel.httpReferrer,
       httpHeaders: channel.httpHeaders,
     );
-  }
-
-  bool _sameFutbolTotalLabel(String a, String b) {
-    String normalize(String value) => value
-        .trim()
-        .toLowerCase()
-        .replaceAll('á', 'a')
-        .replaceAll('é', 'e')
-        .replaceAll('í', 'i')
-        .replaceAll('ó', 'o')
-        .replaceAll('ú', 'u')
-        .replaceAll('ü', 'u')
-        .replaceAll('ñ', 'n')
-        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
-        .replaceAll(RegExp(r'\s+'), ' ')
-        .trim();
-    return normalize(a) == normalize(b);
   }
 
   void _remember(String key, SectionCatalogSnapshot snapshot) {
@@ -572,6 +558,7 @@ class SectionCatalogService {
       bytes += _stringBytes(channel.drmKey);
       bytes += _stringBytes(channel.streamMimeType);
       bytes += _stringBytes(channel.group);
+      bytes += _stringBytes(channel.catalogSource);
       bytes += _stringBytes(channel.tvgId);
       bytes += _stringBytes(channel.dynamicStreamId);
       bytes += _stringBytes(channel.dynamicStreamPath);
