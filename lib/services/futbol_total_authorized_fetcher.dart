@@ -6,6 +6,19 @@ import 'futbol_total_endpoints.dart';
 import 'm3u_fetcher.dart';
 import 'remote_provisioning_service.dart';
 
+class FutbolTotalAdRequiredException implements Exception {
+  final String adUrl;
+  final int retryAfterSeconds;
+
+  const FutbolTotalAdRequiredException({
+    required this.adUrl,
+    this.retryAfterSeconds = 2,
+  });
+
+  @override
+  String toString() => 'Fútbol Total requiere completar la publicidad.';
+}
+
 /// Descarga documentos de Fútbol Total sin exponer el mecanismo de firma
 /// original dentro del APK de TV FULL.
 ///
@@ -74,6 +87,27 @@ class FutbolTotalAuthorizedFetcher {
       throw Exception(
         'El dispositivo no tiene acceso activo al puente Fútbol Total.',
       );
+    }
+
+    if (response.statusCode == 402) {
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map &&
+            decoded['error']?.toString() == 'futboltotal_ad_required') {
+          final adUrl = decoded['ad_url']?.toString().trim() ?? '';
+          final retryAfter =
+              int.tryParse(decoded['retry_after_seconds']?.toString() ?? '') ??
+                  2;
+          if (adUrl.startsWith('http://') || adUrl.startsWith('https://')) {
+            throw FutbolTotalAdRequiredException(
+              adUrl: adUrl,
+              retryAfterSeconds: retryAfter,
+            );
+          }
+        }
+      } on FutbolTotalAdRequiredException {
+        rethrow;
+      } catch (_) {}
     }
 
     if (response.statusCode != 200) {
