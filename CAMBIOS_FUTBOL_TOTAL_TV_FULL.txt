@@ -651,3 +651,50 @@ Corrección backend:
 - La telemetría privada registra sólo archivo/estado/hora/error resumido; no
   guarda tokens, claves ni contenido del catálogo.
 - V54 puede volver a probarse sin reinstalar.
+
+
+ETAPA 10 - V55 GATE OFICIAL DE PUBLICIDAD
+-----------------------------------------
+Fecha: 19/09/2026
+
+Diagnóstico definitivo:
+- El proxy recibe token válido del Worker principal.
+- /data responde HTTP 402 con {"ok":false,"msg":"ad"}.
+- Esto confirma que el bloqueo no es de token inválido: el servidor exige
+  completar la publicidad antes de habilitar el catálogo.
+
+Revisión APK oficial v3.6:
+- /sesion devuelve campos t, ad, vast, queda, dur y estado de acceso.
+- Para publicidad Web, MainActivity abre la URL ad en un WebView y espera la
+  señal de finalización de la página.
+- Para VAST, la app usa el token de sesión para confirmar finalización con el
+  endpoint vast/ok.
+- Por tanto no se debe fabricar ni sustituir el token: hay que respetar el
+  gate de publicidad del Worker.
+
+Cambios:
+AC) Backend tvf-futboltotal-proxy v18
+   - Conserva internamente la URL ad de la sesión.
+   - Si /data responde 402 msg=ad, devuelve a TV FULL un 402 estructurado:
+     error=futboltotal_ad_required + ad_url.
+   - El token no se expone.
+   - No se intenta saltar el gate.
+
+AD) lib/services/futbol_total_authorized_fetcher.dart
+   - Nuevo FutbolTotalAdRequiredException.
+   - Reconoce la respuesta estructurada del proxy y transporta sólo la URL de
+     publicidad y el tiempo de reintento.
+
+AE) lib/screens/xtream_live_screen.dart
+   - Para fuentes Fútbol Total, muestra una pantalla específica cuando el
+     servidor exige publicidad.
+   - Botón "Ver publicidad" abre la URL autorizada.
+   - Al volver a TV FULL, reintenta automáticamente la carga del catálogo.
+   - Se mantiene botón manual "Reintentar catálogo".
+   - M3U, Xtream y provider.json no se modifican.
+
+AF) Build
+   - Identificación: V55.
+   - versionName: 1.4.23.
+   - versionCode: 3055.
+   - Misma firma histórica TV FULL.
