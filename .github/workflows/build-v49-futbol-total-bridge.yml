@@ -1,0 +1,127 @@
+name: Build V49 Fútbol Total bridge
+
+on:
+  push:
+    branches:
+      - test/v48-futbol-total-bridge
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: futbol-total-bridge-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  BUILD_NAME: '1.4.17'
+  BUILD_NUMBER: '3049'
+  RELEASE_NUMBER: '49'
+  CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact bridge commit
+        uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install tested Flutter version
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Resolve locked dependencies
+        run: |
+          flutter pub get
+          git diff --exit-code -- pubspec.lock
+
+      - name: Analyze application and tests
+        run: dart analyze lib test
+
+      - name: Run application tests
+        run: flutter test --no-pub --reporter expanded
+
+      - name: Configure historical TV FULL signing
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          test -n "$TV_FULL_KEYSTORE_PASSWORD"
+          test -n "$TV_FULL_KEY_ALIAS"
+          test -n "$TV_FULL_KEY_PASSWORD"
+          umask 077
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > android/tvfull-release.jks
+          cat > android/key.properties <<EOF
+          storeFile=tvfull-release.jks
+          storePassword=$TV_FULL_KEYSTORE_PASSWORD
+          keyAlias=$TV_FULL_KEY_ALIAS
+          keyPassword=$TV_FULL_KEY_PASSWORD
+          EOF
+
+      - name: Build signed ARM32 and ARM64 APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter build apk --release --split-per-abi \
+            --target-platform android-arm,android-arm64 \
+            --build-name="$BUILD_NAME" \
+            --build-number="$BUILD_NUMBER" \
+            --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Verify certificate, package, version and architectures
+        run: python3 .github/scripts/verify_provider_apks.py
+
+      - name: Publish verified test APKs
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="tv-full-pro-v${RELEASE_NUMBER}-provider-json-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          cat > artifact/release-notes.md <<'EOF'
+          TV FULL PRO V49 - prueba Fútbol Total · Puente.
+
+          Mantiene separado el provider.json de V48 y agrega una nueva fuente:
+          Agregar servicio → Fútbol Total · Puente.
+
+          El puente acepta catálogos categories/samples y agendas events/canales.
+          No sustituye, modifica ni mezcla el catálogo provider.json existente.
+
+          Build de prueba firmado con el certificado histórico de TV FULL PRO.
+          EOF
+          gh release create "$TAG" \
+            artifact/TV-FULL-PRO-V49-ARM32.apk \
+            artifact/TV-FULL-PRO-V49-ARM64.apk \
+            artifact/latest.json \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "TV FULL PRO 1.4.17+3049 - Fútbol Total bridge" \
+            --notes-file artifact/release-notes.md
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f android/key.properties android/tvfull-release.jks
+
+      - name: Upload APK verification bundle
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-V49-FUTBOL-TOTAL-BRIDGE
+          path: artifact/
+          if-no-files-found: warn
+          retention-days: 30
