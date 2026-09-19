@@ -141,6 +141,23 @@ class FutbolTotalAgendaReference {
 
   String get encoded => '$baseOrigin|$canalId';
 
+  static FutbolTotalAgendaReference parse(String encoded) {
+    final separator = encoded.lastIndexOf('|');
+    if (separator <= 0 || separator >= encoded.length - 1) {
+      throw const FormatException('Referencia de agenda inválida.');
+    }
+    final base = encoded.substring(0, separator).trim();
+    final id = encoded.substring(separator + 1).trim();
+    final uri = Uri.tryParse(base);
+    if (uri == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty ||
+        id.isEmpty) {
+      throw const FormatException('Referencia de agenda inválida.');
+    }
+    return FutbolTotalAgendaReference(baseOrigin: base, canalId: id);
+  }
+
   static FutbolTotalAgendaReference fromAgendaUrl(
     String agendaUrl,
     String canalId,
@@ -156,6 +173,63 @@ class FutbolTotalAgendaReference {
     return FutbolTotalAgendaReference(
       baseOrigin: '${uri.scheme}://${uri.host}$port',
       canalId: canalId,
+    );
+  }
+}
+
+
+class FutbolTotalEventRequest {
+  final Uri url;
+  final String referer;
+
+  const FutbolTotalEventRequest({
+    required this.url,
+    required this.referer,
+  });
+}
+
+/// Construye la URL de evento exactamente hasta el punto observado en la APK:
+/// base-origen + evento_path + canal_id.
+///
+/// No inspecciona HTML, iframes ni reproductores. Esa etapa queda separada para
+/// el resolvedor autorizado.
+class FutbolTotalEventUrlBuilder {
+  const FutbolTotalEventUrlBuilder();
+
+  FutbolTotalEventRequest build(
+    FutbolTotalAgendaReference reference,
+    String eventoPath,
+  ) {
+    final path = eventoPath.trim();
+    if (path.isEmpty) {
+      throw const FormatException(
+        'El manifiesto no contiene evento_path.',
+      );
+    }
+    if (path.contains('\r') || path.contains('\n')) {
+      throw const FormatException('evento_path inválido.');
+    }
+    if (reference.canalId.contains('\r') ||
+        reference.canalId.contains('\n')) {
+      throw const FormatException('canal_id inválido.');
+    }
+
+    final rawUrl = '${reference.baseOrigin}$path${reference.canalId}';
+    final uri = Uri.tryParse(rawUrl);
+    final base = Uri.tryParse(reference.baseOrigin);
+    if (uri == null ||
+        base == null ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.host.isEmpty ||
+        uri.scheme != base.scheme ||
+        uri.host != base.host ||
+        uri.port != base.port) {
+      throw const FormatException('La URL de evento resultante es inválida.');
+    }
+
+    return FutbolTotalEventRequest(
+      url: uri,
+      referer: reference.baseOrigin,
     );
   }
 }
