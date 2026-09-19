@@ -1,4 +1,4 @@
-enum PlaylistSourceType { m3u, xtream, stalker, localProviderJson }
+enum PlaylistSourceType { m3u, xtream, stalker, localProviderJson, futbolTotal }
 
 extension PlaylistSourceTypeLabel on PlaylistSourceType {
   String get label => switch (this) {
@@ -6,5 +6,6 @@ extension PlaylistSourceTypeLabel on PlaylistSourceType {
         PlaylistSourceType.xtream => 'Xtream Codes',
         PlaylistSourceType.stalker => 'Portal Stalker',
         PlaylistSourceType.localProviderJson => 'provider.json local',
+        PlaylistSourceType.futbolTotal => 'Fútbol Total',
       };
 }
