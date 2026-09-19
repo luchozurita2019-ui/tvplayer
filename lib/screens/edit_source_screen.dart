@@ -36,7 +36,8 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
         _usernameController.text = parsed.username;
         _passwordController.text = parsed.password;
       }
-    } else if (playlist.sourceType == PlaylistSourceType.m3u &&
+    } else if ((playlist.sourceType == PlaylistSourceType.m3u ||
+            playlist.sourceType == PlaylistSourceType.futbolTotalBridge) &&
         playlist.isRemote) {
       _m3uUrlController.text = playlist.source;
     }
@@ -230,6 +231,15 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
         return const Text(
           'Portal Stalker todavía no tiene conexión activa. Por ahora podés editar el nombre del servicio.',
         );
+      case PlaylistSourceType.futbolTotalBridge:
+        return TextField(
+          controller: _m3uUrlController,
+          keyboardType: TextInputType.url,
+          decoration: const InputDecoration(
+            labelText: 'URL del JSON / agenda',
+            prefixIcon: Icon(Icons.sports_soccer_rounded),
+          ),
+        );
     }
   }
 
@@ -278,6 +288,20 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
         );
       case PlaylistSourceType.stalker:
         await provider.renamePlaylist(playlist.id, _nameController.text.trim());
+      case PlaylistSourceType.futbolTotalBridge:
+        final url = _m3uUrlController.text.trim();
+        final uri = Uri.tryParse(url);
+        if (uri == null ||
+            !(uri.scheme == 'http' || uri.scheme == 'https') ||
+            uri.host.isEmpty) {
+          _message('Ingresá una URL JSON http/https válida.');
+          return;
+        }
+        await provider.updateFutbolTotalBridgeSource(
+          playlistId: playlist.id,
+          name: _nameController.text.trim(),
+          url: url,
+        );
     }
 
     if (!mounted) return;
