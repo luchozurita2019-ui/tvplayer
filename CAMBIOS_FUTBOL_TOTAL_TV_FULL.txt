@@ -734,3 +734,30 @@ Nota:
 - Se descartó la descarga GitHub directa desde el APK porque los repositorios
   del propietario pueden no ser accesibles públicamente. La ruta final sigue
   siendo el backend autorizado de TV FULL.
+
+
+ETAPA 11 - AUTORIZACIÓN NO-AD Y ACCESO DIRECTO
+----------------------------------------------
+Fecha: 19/09/2026
+
+Nueva autorización del propietario:
+- Rafael confirmó por escrito que TV FULL puede quitar la publicidad para usar
+  Fútbol Total: "si no hay problema sacale la publicidad para usarlo en tv full
+  no hay problema".
+
+Cambio backend:
+AG) tvf-futboltotal-proxy v20
+   - Se mantiene la validación del dispositivo TV FULL.
+   - Para URLs permitidas de los repositorios ByRafaelSystem/futboltotal-data y
+     ByRafaelSystem/futboltotal-links, el proxy descarga el JSON original
+     directamente desde raw.githubusercontent.com.
+   - La ruta primaria ya no usa /sesion, token, publicidad ni /data del Worker.
+   - Se valida que la respuesta sea JSON no vacío antes de entregarla.
+   - Se conserva el Worker sólo como fallback por si GitHub tiene un fallo
+     temporal.
+   - La telemetría marca éxito con modo owner_raw_no_ad.
+   - M3U, Xtream y provider.json no se modifican.
+
+Resultado esperado:
+- V54/V55 pueden usar el mismo endpoint del proxy sin reinstalación.
+- Deben desaparecer los errores 402 msg=ad y Cloudflare 1042 en la ruta normal.
