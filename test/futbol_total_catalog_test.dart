@@ -117,6 +117,26 @@ void main() {
       );
       expect(ref.baseOrigin, 'https://agenda.example.com:8443');
       expect(ref.encoded, 'https://agenda.example.com:8443|canal-25');
+      expect(
+        FutbolTotalAgendaReference.parse(ref.encoded).canalId,
+        'canal-25',
+      );
+    });
+
+    test('construye evento_path + canal_id en el mismo origen', () {
+      final ref = FutbolTotalAgendaReference.fromAgendaUrl(
+        'https://agenda.example.com/agenda/lista.json',
+        'abc123',
+      );
+      final request = const FutbolTotalEventUrlBuilder().build(
+        ref,
+        '/evento.php?id=',
+      );
+      expect(
+        request.url.toString(),
+        'https://agenda.example.com/evento.php?id=abc123',
+      );
+      expect(request.referer, 'https://agenda.example.com');
     });
   });
 
