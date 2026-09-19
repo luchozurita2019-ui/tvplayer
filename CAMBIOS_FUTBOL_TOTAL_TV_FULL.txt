@@ -807,3 +807,50 @@ AK) Build
    - versionName: 1.4.24.
    - versionCode: 3056.
    - Misma firma histórica TV FULL.
+
+
+ETAPA 13 - V57 JERARQUÍA OFICIAL DE FÚTBOL TOTAL
+-------------------------------------------------
+Fecha: 19/09/2026
+
+Diagnóstico de la APK oficial v3.6:
+- El manifiesto se convierte en objetos TvList(name, url, kind, ttl).
+- Fútbol Total NO mezcla todas las listas del manifiesto.
+- El título de TV abre un selector con las TvList disponibles.
+- Al elegir una TvList, recién se descarga y muestra esa lista.
+- Cada catálogo Flow se transforma en FlowCat(name, channels).
+- La lista lateral de categorías se construye con los nombres FlowCat y la
+  cantidad de canales de cada categoría.
+
+Problema de V56:
+- TV FULL fusionaba las 13 TvList en una sola colección visual.
+- Para conservar contexto concatenaba "Nombre de lista · Categoría".
+- Aunque era mejor que V55, seguía mostrando demasiadas categorías juntas y no
+  reproducía la navegación real de Fútbol Total.
+
+Corrección V57:
+AL) lib/models/channel.dart
+   - Nuevo campo opcional catalogSource para conservar la TvList de origen.
+   - Se persiste en JSON sin afectar canales M3U/Xtream/provider.json.
+
+AM) lib/services/section_catalog_service.dart
+   - Fútbol Total conserva channel.group exactamente como la categoría original.
+   - catalogSource guarda el nombre de la TvList del manifiesto.
+   - Se invalida automáticamente el caché V56 que no tenga catalogSource.
+   - Continúa siendo una fuente exclusivamente LIVE.
+
+AN) lib/screens/xtream_live_screen.dart
+   - Selector superior de TvList inspirado en el selector del título de la APK
+     oficial.
+   - Sólo se muestran canales y categorías de la TvList seleccionada.
+   - La barra lateral muestra los nombres de categorías originales, sin prefijos
+     artificiales.
+   - Al cambiar de TvList se resetea la categoría y se reconstruye el índice.
+   - La búsqueda queda limitada a la TvList seleccionada.
+   - Se conserva el orden original de TvList, categorías y canales.
+
+AO) Build
+   - Identificación: V57.
+   - versionName: 1.4.25.
+   - versionCode: 3057.
+   - Misma firma histórica TV FULL.
