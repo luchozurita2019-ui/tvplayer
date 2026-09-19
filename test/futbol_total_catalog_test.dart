@@ -254,6 +254,78 @@ void main() {
       expect(parsed.skippedDrm, 1);
     });
 
+    test('modo web opcional conserva WEBVIEW y DIRECTO HTML sin tocar HLS', () {
+      const json = r'''
+      {
+        "categories": [
+          {
+            "name": "Partidos",
+            "samples": [
+              {
+                "name": "Web embed",
+                "type": "WEBVIEW",
+                "original_url": "https://embed.example.com/player.html",
+                "headers": {"Referer": "https://origin.example.com/"}
+              },
+              {
+                "name": "Directo HTML",
+                "type": "DIRECTO",
+                "original_url": "https://direct.example.com/live.php?id=1",
+                "headers": {"Referer": "https://origin.example.com/"}
+              },
+              {
+                "name": "Directo HLS",
+                "type": "DIRECTO",
+                "original_url": "https://cdn.example.com/live.m3u8"
+              }
+            ]
+          }
+        ]
+      }
+      ''';
+
+      final parsed = const FutbolTotalFlowCatalogParser().parse(
+        json,
+        allowWebPlayback: true,
+      );
+
+      expect(parsed.channels, hasLength(3));
+      expect(parsed.channels[0].streamMimeType, 'text/html');
+      expect(parsed.channels[1].streamMimeType, 'text/html');
+      expect(parsed.channels[2].streamMimeType, 'application/x-mpegURL');
+      expect(parsed.channels[0].httpReferrer, 'https://origin.example.com/');
+      expect(parsed.skippedWeb, 0);
+    });
+
+    test('modo normal sigue omitiendo WEBVIEW como antes', () {
+      const json = r'''
+      {
+        "categories": [
+          {
+            "name": "TV",
+            "samples": [
+              {
+                "name": "Web",
+                "type": "WEBVIEW",
+                "original_url": "https://example.com/player.html"
+              },
+              {
+                "name": "HLS",
+                "type": "HLS",
+                "original_url": "https://example.com/live.m3u8"
+              }
+            ]
+          }
+        ]
+      }
+      ''';
+
+      final parsed = const FutbolTotalFlowCatalogParser().parse(json);
+      expect(parsed.channels, hasLength(1));
+      expect(parsed.channels.single.name, 'HLS');
+      expect(parsed.skippedWeb, 1);
+    });
+
     test('rutea URLs Flow por el resolvedor dinámico sin perder DRM ni headers', () {
       const json = r'''
       {

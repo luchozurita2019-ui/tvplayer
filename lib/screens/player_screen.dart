@@ -9,7 +9,7 @@ import '../services/artwork_cache_service.dart';
 import '../services/m3u_fetcher.dart';
 import '../services/remote_access_guard.dart';
 import '../services/xtream_http_client.dart';
-import 'android_media3_texture_player_screen.dart';
+import 'android_media3_texture_player_screen.dart';\nimport 'android_web_playback_screen.dart';
 import 'android_media3_vod_player_screen.dart';
 import 'tv_full_vod_player_screen.dart';
 
@@ -62,11 +62,18 @@ class _PlayerScreenState extends State<PlayerScreen> {
       return _BlockedPlayback(message: blocked);
     }
 
-    final androidTv = _androidTvBuild &&
-        !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android;
-    final androidDrm = !kIsWeb &&
-        defaultTargetPlatform == TargetPlatform.android &&
+    final android =
+        !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+    final webPlayback =
+        widget.channel.streamMimeType?.trim().toLowerCase() == 'text/html';
+
+    if (android && webPlayback) {
+      return AndroidWebPlaybackScreen(channel: widget.channel);
+    }
+
+    final androidTv = _androidTvBuild && android;
+    final androidDrm =
+        android &&
         (widget.channel.hasDrmConfiguration ||
             widget.playlist.any((channel) => channel.hasDrmConfiguration));
 

@@ -17,6 +17,12 @@
         android:usesCleartextTraffic="true"
         android:hardwareAccelerated="true">
         <activity
+            android:name=".WebPlaybackActivity"
+            android:exported="false"
+            android:screenOrientation="userLandscape"
+            android:hardwareAccelerated="true"
+            android:theme="@android:style/Theme.Black.NoTitleBar.Fullscreen" />
+        <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"

@@ -370,11 +370,10 @@ class SectionCatalogService {
           bool noCache = false,
         }) async {
           try {
-            final catalog = noCache
-                ? const FutbolTotalFlowCatalogParser().parse(
-                    await service.fetchRaw(definition.url, noCache: true),
-                  )
-                : await service.loadFlow(definition);
+            final catalog = await service.loadFlow(
+              definition,
+              noCache: noCache,
+            );
             if (catalog.channels.isEmpty) return false;
             catalogs.add((sourceName: definition.name, catalog: catalog));
             return true;
@@ -686,6 +685,15 @@ class SectionCatalogService {
   int _stringBytes(String? value) => value == null ? 0 : value.length * 2;
 
   bool _needsFutbolTotalPlaybackUpgrade(Channel channel) {
+    final source = (channel.catalogSource ?? '').trim().toLowerCase();
+    if (source.contains('now futbol')) {
+      final mime = channel.streamMimeType?.trim().toLowerCase();
+      // V58/V59 guardaban los DIRECTO HTML de Now Futbol como URLs
+      // multimedia sin MIME. V60 los reconstruye como text/html y además
+      // recupera los WEBVIEW que antes se omitían.
+      if (mime == null || mime.isEmpty) return true;
+    }
+
     final dynamicPath = channel.dynamicStreamPath?.trim();
     if (dynamicPath != null && dynamicPath.isNotEmpty) return false;
 

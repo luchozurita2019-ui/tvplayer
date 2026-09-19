@@ -31,7 +31,7 @@ class FutbolTotalFlowCatalogParser {
 
   const FutbolTotalFlowCatalogParser();
 
-  FutbolTotalFlowCatalog parse(String content) {
+  FutbolTotalFlowCatalog parse(\n    String content, {\n    bool allowWebPlayback = false,\n  }) {
     dynamic decoded;
     try {
       decoded = jsonDecode(
@@ -89,7 +89,9 @@ class FutbolTotalFlowCatalogParser {
         final sample = Map<String, dynamic>.from(rawSample);
 
         final type = (_text(sample['type']) ?? 'CLEARKEY').toUpperCase();
-        if (type == 'WEBVIEW' || type == 'WEB' || type == 'IFRAME') {
+        final webOnlyType =
+            type == 'WEBVIEW' || type == 'WEB' || type == 'IFRAME';
+        if (webOnlyType && !allowWebPlayback) {
           skippedWeb++;
           continue;
         }
@@ -133,7 +135,14 @@ class FutbolTotalFlowCatalogParser {
         final playbackUrl = providerFlow
             ? '$dynamicStreamPrefix${Uri.encodeComponent(dynamicId)}'
             : originalUrl;
-        final streamMimeType = _streamMimeType(type, originalUrl);
+        final detectedMime = _streamMimeType(type, originalUrl);
+        final webPlayback =
+            allowWebPlayback &&
+            !providerFlow &&
+            (webOnlyType ||
+                ((type == 'DIRECTO' || type == 'DIRECT') &&
+                    detectedMime == null));
+        final streamMimeType = webPlayback ? 'text/html' : detectedMime;
 
         channels.add(
           Channel(

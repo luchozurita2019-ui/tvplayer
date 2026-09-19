@@ -38,15 +38,30 @@ class FutbolTotalCatalogService {
   }
 
   Future<FutbolTotalFlowCatalog> loadFlow(
-    FutbolTotalListDefinition definition,
-  ) async {
+    FutbolTotalListDefinition definition, {
+    bool noCache = false,
+  }) async {
     if (definition.kind != 'flow') {
       throw const FormatException(
         'La lista seleccionada no es un catálogo Flow.',
       );
     }
-    final content = await _fetcher.fetch(definition.url);
-    return const FutbolTotalFlowCatalogParser().parse(content);
+    final content = await _fetcher.fetch(
+      definition.url,
+      noCache: noCache,
+    );
+    return const FutbolTotalFlowCatalogParser().parse(
+      content,
+      allowWebPlayback: _usesWebPlayback(definition),
+    );
   }
+
+  static bool _usesWebPlayback(FutbolTotalListDefinition definition) {
+    final lowerUrl = definition.url.trim().toLowerCase();
+    final lowerName = definition.name.trim().toLowerCase();
+    return lowerUrl.contains('/ft-nowfutbol.json') ||
+        lowerName.contains('now futbol');
+  }
+
   void close() => _fetcher.close();
 }

@@ -6,6 +6,7 @@ import android.content.Intent
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
+import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
@@ -54,6 +55,8 @@ class MainActivity : FlutterActivity() {
         private const val METHOD_CHANNEL = "tvfull/media3_texture"
         private const val EVENT_CHANNEL = "tvfull/media3_texture_events"
         private const val DEVICE_CHANNEL = "tvfull/device_identity"
+        private const val WEB_PLAYBACK_CHANNEL = "tvfull/web_playback"
+        private const val WEB_PLAYBACK_REQUEST_CODE = 9041
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
         private const val LIVE_STARTUP_MAX_WAIT_MS = 25000L
         private const val LIVE_RECOVERY_MAX_WAIT_MS = 12000L
@@ -75,6 +78,7 @@ class MainActivity : FlutterActivity() {
     private var textureEntry: TextureRegistry.SurfaceTextureEntry? = null
     private var surface: Surface? = null
     private var eventSink: EventChannel.EventSink? = null
+    private var pendingWebPlaybackResult: MethodChannel.Result? = null
     private var currentUrl: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
     private var currentUserAgent: String = DEFAULT_UA
@@ -202,10 +206,81 @@ class MainActivity : FlutterActivity() {
                 }
             })
 
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, WEB_PLAYBACK_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "open" -> openWebPlayback(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, METHOD_CHANNEL)
             .setMethodCallHandler { call, result ->
                 handlePlayerCall(flutterEngine, call, result)
             }
+    }
+
+    @Suppress("DEPRECATION")
+    private fun openWebPlayback(
+        call: MethodCall,
+        result: MethodChannel.Result,
+    ) {
+        if (pendingWebPlaybackResult != null) {
+            result.error("WEB_ALREADY_OPEN", "Ya hay una señal web abierta.", null)
+            return
+        }
+
+        val rawUrl = call.argument<String>("url")?.trim().orEmpty()
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull()
+        if (uri == null ||
+            (uri.scheme != "http" && uri.scheme != "https") ||
+            uri.host.isNullOrBlank()
+        ) {
+            result.error("INVALID_WEB_URL", "URL web inválida.", null)
+            return
+        }
+
+        val headerBundle = Bundle()
+        val rawHeaders = call.argument<Map<*, *>>("headers") ?: emptyMap<Any, Any>()
+        for ((rawKey, rawValue) in rawHeaders) {
+            val key = rawKey?.toString()?.trim().orEmpty()
+            val value = rawValue?.toString()?.trim().orEmpty()
+            if (key.isEmpty() ||
+                value.isEmpty() ||
+                key.contains('\r') ||
+                key.contains('\n') ||
+                value.contains('\r') ||
+                value.contains('\n')
+            ) {
+                continue
+            }
+            headerBundle.putString(key, value)
+        }
+
+        val intent = Intent(this, WebPlaybackActivity::class.java).apply {
+            putExtra(WebPlaybackActivity.EXTRA_URL, rawUrl)
+            putExtra(WebPlaybackActivity.EXTRA_HEADERS, headerBundle)
+        }
+
+        pendingWebPlaybackResult = result
+        try {
+            startActivityForResult(intent, WEB_PLAYBACK_REQUEST_CODE)
+        } catch (error: Throwable) {
+            pendingWebPlaybackResult = null
+            result.error(
+                "WEB_OPEN_FAILED",
+                error.message ?: "No se pudo abrir la señal web.",
+                null,
+            )
+        }
+    }
+
+    @Suppress("DEPRECATION")
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode != WEB_PLAYBACK_REQUEST_CODE) return
+        pendingWebPlaybackResult?.success(null)
+        pendingWebPlaybackResult = null
     }
 
     private fun handlePlayerCall(

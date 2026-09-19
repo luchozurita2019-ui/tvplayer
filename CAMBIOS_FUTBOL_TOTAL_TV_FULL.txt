@@ -935,3 +935,51 @@ AV) Build
    - versionName: 1.4.27.
    - versionCode: 3059.
    - Misma firma histórica TV FULL.
+
+
+ETAPA 16 - V60 NOW FÚTBOL WEB COMPATIBLE
+----------------------------------------
+Fecha: 19/09/2026
+
+Diagnóstico real:
+- La TvList visible como "📺 Now Futbol" proviene de ft-nowfutbol.json.
+- Contiene 160 categorías y 1480 entradas.
+- 1191 entradas son type=DIRECTO y 289 type=WEBVIEW.
+- La gran mayoría de DIRECTO apuntan a páginas HTML/PHP, no a manifiestos
+  multimedia. Sólo una entrada observada era HLS directo.
+- V58/V59 enviaban los DIRECTO HTML a Media3 y éste respondía
+  "Formato de señal no compatible".
+
+Corrección V60:
+AW) lib/services/futbol_total_catalog_service.dart
+   - Sólo ft-nowfutbol.json habilita reproducción web.
+   - El segundo intento no-cache usa exactamente el mismo adaptador.
+   - Ninguna otra TvList cambia su interpretación.
+
+AX) lib/services/futbol_total_flow_catalog_parser.dart
+   - En modo Now Futbol, WEBVIEW/WEB/IFRAME se conservan como text/html.
+   - DIRECTO sin HLS/DASH se conserva como text/html.
+   - DIRECTO que sí sea .m3u8/.mpd sigue usando Media3.
+   - Flow dinámico, ClearKey, headers y MIME existentes no cambian.
+
+AY) lib/screens/player_screen.dart + android_web_playback_screen.dart
+   - text/html se separa antes de la ruta Media3.
+   - El resto de LIVE/VOD mantiene exactamente el reproductor existente.
+
+AZ) Android WebPlaybackActivity
+   - WebView nativo aislado, fullscreen, JavaScript/DOM storage y video HTML5.
+   - Conserva los headers declarados, incluido Referer.
+   - Soporta fullscreen HTML5 y control Back.
+   - No intercepta ni extrae manifiestos multimedia de terceros.
+   - No agrega dependencias Flutter ni modifica Media3.
+
+BA) Caché
+   - V58/V59 Now Futbol con MIME nulo se invalida una sola vez.
+   - Tras reconstruirlo, el catálogo persistido vuelve a usar el esquema
+     estable de V59 y su refresco por sesión.
+
+BB) Build
+   - Identificación: V60.
+   - versionName: 1.4.28.
+   - versionCode: 3060.
+   - Misma firma histórica TV FULL.
