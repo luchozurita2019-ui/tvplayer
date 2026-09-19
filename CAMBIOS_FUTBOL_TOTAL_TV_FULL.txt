@@ -279,3 +279,68 @@ VALIDACION ETAPA 3
 - Run validado: 35449456796.
 - La integración sigue aislada en feature/v50-futboltotal-authorized.
 - Todavía NO se compiló ni publicó una APK de prueba de esta rama.
+
+
+ETAPA 4 - MANIFIESTO DE PRUEBA CONTROLADO
+------------------------------------------
+Rafael autorizó expresamente crear una lista propia de prueba mientras se
+termina de conectar el origen real.
+
+Se creó una rama de datos independiente:
+- futboltotal-test-data
+
+Archivos de prueba:
+- test_data/ft-tv-lists2.test.json
+- test_data/ft-flow2.test.json
+
+El manifiesto conserva el mismo esquema lists[]/kind/url/ttl de Fútbol Total.
+El Flow conserva categories[]/samples[].
+
+Los streams incluidos son únicamente señales HLS públicas de prueba:
+- Apple HLS BipBop
+- Mux HLS Test
+
+No contiene contenido privado de Rafael, tokens, claves ni DRM.
+
+En lib/services/futbol_total_endpoints.dart se agregó:
+- integrationTestManifest
+
+En Agregar servicio -> Fútbol Total se agregó:
+- "Usar manifiesto de prueba"
+
+Objetivo:
+Validar en una APK real el recorrido:
+manifiesto -> lista Flow -> categories/samples -> Channel -> reproductor
+antes de conectar los datos reales.
+
+
+ETAPA 5 - RESOLUCION DE EVENTO DESDE canal_id
+----------------------------------------------
+P) lib/services/futbol_total_agenda_parser.dart
+   - FutbolTotalAgendaReference ahora también puede decodificar una referencia
+     existente base-origen|canal_id.
+   - Se agregó FutbolTotalEventRequest.
+   - Se agregó FutbolTotalEventUrlBuilder.
+   - Construye:
+       base-origen + evento_path + canal_id
+   - Verifica que la URL resultante permanezca en el mismo esquema/host/puerto.
+   - Devuelve el origen como Referer para la etapa siguiente.
+   - No inspecciona ni modifica HTML, iframe ni reproductores en esta etapa.
+
+Q) test/futbol_total_catalog_test.dart
+   - Prueba de decodificación base-origen|canal_id.
+   - Prueba:
+       https://agenda.example.com
+       + /evento.php?id=
+       + abc123
+       =
+       https://agenda.example.com/evento.php?id=abc123
+
+VALIDACION ETAPAS 4 Y 5
+-----------------------
+- Run 35449743146: SUCCESS.
+- Run 35449784389: SUCCESS.
+- Run 35449794602: SUCCESS.
+- Último commit validado: c5954fcedcc5c8037eb927d5d4631751418e30ad.
+- dart analyze: OK.
+- Suite completa flutter test: OK.
