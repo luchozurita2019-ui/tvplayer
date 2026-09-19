@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:provider/provider.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../models/channel.dart';
 import '../models/playlist.dart';
@@ -12,6 +13,7 @@ import '../services/artwork_cache_service.dart';
 import '../services/catalog_index.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
+import '../services/futbol_total_authorized_fetcher.dart';
 import '../services/live_epg_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/remote_access_guard.dart';
@@ -33,7 +35,8 @@ class XtreamLiveScreen extends StatefulWidget {
   State<XtreamLiveScreen> createState() => _XtreamLiveScreenState();
 }
 
-class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
+class _XtreamLiveScreenState extends State<XtreamLiveScreen>
+    with WidgetsBindingObserver {
   static const Duration _cacheFreshFor = Duration(minutes: 3);
 
   late Future<_LiveData> _future;
@@ -47,6 +50,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   String _query = '';
   bool _searchOpen = false;
   bool _openingPlayer = false;
+  bool _waitingForFutbolTotalAd = false;
   Timer? _searchDebounce;
   CatalogIndex<Channel>? _catalogIndex;
   _LiveData? _indexedData;
@@ -56,6 +60,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
     _parental.addListener(_onParentalChanged);
     unawaited(_parental.init());
     unawaited(ArtworkCacheService.instance.switchProvider(widget.playlist.id));
@@ -65,7 +70,23 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
   }
 
   @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state != AppLifecycleState.resumed || !_waitingForFutbolTotalAd) return;
+    _waitingForFutbolTotalAd = false;
+    unawaited(
+      Future<void>.delayed(const Duration(seconds: 2), () {
+        if (!mounted) return;
+        setState(() {
+          _visibleData = null;
+          _future = _loadInitial();
+        });
+      }),
+    );
+  }
+
+  @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _parental.removeListener(_onParentalChanged);
     _searchDebounce?.cancel();
     _searchController.dispose();
@@ -345,6 +366,18 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
                 return _Loading(message: _status);
               }
               if (data == null && snapshot.hasError) {
+                final error = snapshot.error;
+                if (widget.playlist.sourceType ==
+                        PlaylistSourceType.futbolTotal &&
+                    error is FutbolTotalAdRequiredException) {
+                  return _FutbolTotalAdGate(
+                    onOpenAd: () => unawaited(_openFutbolTotalAd(error)),
+                    onRetry: () => setState(() {
+                      _visibleData = null;
+                      _future = _loadInitial();
+                    }),
+                  );
+                }
                 return _ErrorView(
                   message: 'No se pudo cargar la TV en vivo.',
                   onRetry: () => setState(() {
@@ -491,6 +524,40 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         ),
       ],
     );
+  }
+
+  Future<void> _openFutbolTotalAd(
+    FutbolTotalAdRequiredException requirement,
+  ) async {
+    final uri = Uri.tryParse(requirement.adUrl);
+    if (uri == null ||
+        !(uri.scheme == 'http' || uri.scheme == 'https') ||
+        uri.host.isEmpty) {
+      return;
+    }
+
+    _waitingForFutbolTotalAd = true;
+    var opened = false;
+    try {
+      opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
+      if (!opened) opened = await launchUrl(uri);
+    } catch (_) {
+      opened = false;
+    }
+
+    if (!opened) {
+      _waitingForFutbolTotalAd = false;
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text(
+              'No se pudo abrir la publicidad requerida por Fútbol Total.',
+            ),
+          ),
+        );
+    }
   }
 
   Future<void> _openPlayer(List<Channel> channels, int index) async {
@@ -673,6 +740,63 @@ class _Loading extends StatelessWidget {
             const SizedBox(height: 14),
             Text(message, style: const TextStyle(color: Colors.white60)),
           ],
+        ),
+      );
+}
+
+class _FutbolTotalAdGate extends StatelessWidget {
+  final VoidCallback onOpenAd;
+  final VoidCallback onRetry;
+
+  const _FutbolTotalAdGate({
+    required this.onOpenAd,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) => Center(
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 560),
+          padding: const EdgeInsets.all(30),
+          decoration: tvFullGlassDecoration(radius: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(
+                Icons.ondemand_video_rounded,
+                size: 48,
+                color: tvFullCyan,
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                'Fútbol Total requiere una publicidad',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w900,
+                ),
+              ),
+              const SizedBox(height: 10),
+              const Text(
+                'Abrí la publicidad autorizada. Cuando termine, volvé a '
+                'TV FULL y el catálogo se volverá a cargar automáticamente.',
+                textAlign: TextAlign.center,
+                style: TextStyle(color: Colors.white60, height: 1.35),
+              ),
+              const SizedBox(height: 20),
+              FilledButton.icon(
+                autofocus: true,
+                onPressed: onOpenAd,
+                icon: const Icon(Icons.open_in_new_rounded),
+                label: const Text('Ver publicidad'),
+              ),
+              const SizedBox(height: 8),
+              TextButton(
+                onPressed: onRetry,
+                child: const Text('Reintentar catálogo'),
+              ),
+            ],
+          ),
         ),
       );
 }
