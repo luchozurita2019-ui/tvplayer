@@ -17,6 +17,11 @@ class FutbolTotalEndpoints {
   static const String secondaryWorker =
       'https://ft-online.ftsystem.workers.dev';
 
+  // Puente privado TV FULL: firma y descarga los JSON protegidos sin
+  // exponer la compatibilidad criptográfica dentro del APK público.
+  static const String authorizedProxy =
+      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-futboltotal-proxy';
+
   // Manifiesto controlado por TV FULL para validar el adaptador sin depender
   // todavía de autenticación remota de Fútbol Total.
   static const String integrationTestManifest =
