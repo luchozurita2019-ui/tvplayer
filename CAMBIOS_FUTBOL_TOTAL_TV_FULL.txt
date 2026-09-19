@@ -344,3 +344,62 @@ VALIDACION ETAPAS 4 Y 5
 - Último commit validado: c5954fcedcc5c8037eb927d5d4631751418e30ad.
 - dart analyze: OK.
 - Suite completa flutter test: OK.
+
+
+ETAPA 6 - APK DE PRUEBA V52
+----------------------------
+Se creó un workflow de compilación aislado:
+- .github/workflows/build-futboltotal-v52-test.yml
+
+Versión de prueba:
+- TV FULL PRO 1.4.20+3052
+- Identificación interna de esta prueba: V52
+- Paquete verificado: com.tvfull.pro.tv.v10safe
+
+Se preservó explícitamente:
+- Configuración dinámica existente de Lista TV 3.
+- Compatibilidad ClearKey/HLS ya usada por la línea V50/V51.
+- Firma histórica de TV FULL PRO.
+- Provider JSON y sus rutas existentes.
+
+La compilación NO publicó una release y NO modificó ninguna rama V50.
+Sólo generó un artefacto de prueba desde:
+- feature/v50-futboltotal-authorized
+
+GitHub Actions:
+- Run: 35449888470
+- Resultado: SUCCESS
+- Análisis estático: SUCCESS
+- Suite completa de tests: SUCCESS
+- ARM32/ARM64: SUCCESS
+- Verificación de firma: SUCCESS
+- Verificación de package/version: SUCCESS
+- Artifact: TV-FULL-PRO-V52-FUTBOL-TOTAL-TEST
+- Artifact ID: 10585563642
+
+APK ARM32:
+- TV-FULL-PRO-V52-FUTBOL-TOTAL-ARM32.apk
+- SHA-256:
+  656ab92d313a2e12130ebf449c0c315daf717503c52602169b0e0d7438995ef4
+
+APK ARM64:
+- TV-FULL-PRO-V52-FUTBOL-TOTAL-ARM64.apk
+- SHA-256:
+  ce2d24b8520a2367ab555bd0fa13958003461a5cbd3036c49a398f7c5ccdf873
+
+PRUEBA MANUAL PROPUESTA
+-----------------------
+1. Instalar V52 como actualización sobre la instalación compatible existente.
+2. Abrir Agregar servicio.
+3. Elegir "Fútbol Total".
+4. Elegir "Usar manifiesto de prueba".
+5. Guardar/conectar la fuente.
+6. Entrar en TV en vivo.
+7. Debe aparecer la categoría "Prueba Fútbol Total".
+8. Probar Apple HLS Test y Mux HLS Test.
+
+Esta prueba sólo verifica el puente:
+manifiesto -> Flow -> catálogo -> Channel -> reproductor.
+
+La reproducción real de agenda Fútbol mediante canal_id continuará en la
+siguiente etapa cuando se conecte el resolvedor autorizado del evento.
