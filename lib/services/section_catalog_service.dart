@@ -691,7 +691,7 @@ class SectionCatalogService {
 
     final url = channel.url.trim();
     if (url.startsWith('tvfull-dynamic://')) return true;
-    if (!RegExp(r'live/c\\d+eds/', caseSensitive: false).hasMatch(url)) {
+    if (!RegExp(r'live/c\d+eds/', caseSensitive: false).hasMatch(url)) {
       return false;
     }
     final lower = url.toLowerCase();

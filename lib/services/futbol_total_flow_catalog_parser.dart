@@ -245,7 +245,7 @@ class FutbolTotalFlowCatalogParser {
     String originalUrl,
     Map<String, String> headers,
   ) {
-    if (!RegExp(r'live/c\\d+eds/', caseSensitive: false)
+    if (!RegExp(r'live/c\d+eds/', caseSensitive: false)
         .hasMatch(originalUrl)) {
       return false;
     }
