@@ -17,6 +17,11 @@ class FutbolTotalEndpoints {
   static const String secondaryWorker =
       'https://ft-online.ftsystem.workers.dev';
 
+  // Manifiesto controlado por TV FULL para validar el adaptador sin depender
+  // todavía de autenticación remota de Fútbol Total.
+  static const String integrationTestManifest =
+      'https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/futboltotal-test-data/test_data/ft-tv-lists2.test.json';
+
   static const List<(String from, String to)> webMirrors = [
     ('https://deporte-libre.icu', 'https://deporte-libre.st/'),
     ('https://futbol-libres.su', 'https://futbollibres.net/'),
