@@ -253,5 +253,80 @@ void main() {
       expect(parsed.skippedWeb, 1);
       expect(parsed.skippedDrm, 1);
     });
+
+    test('rutea URLs Flow por el resolvedor dinámico sin perder DRM ni headers', () {
+      const json = r'''
+      {
+        "categories": [
+          {
+            "name": "Internacionales",
+            "samples": [
+              {
+                "name": "Flow DASH",
+                "type": "CLEARKEY",
+                "globalIndex": 368,
+                "drm_license_uri": "kid:00112233445566778899aabbccddeeff,k:ffeeddccbbaa99887766554433221100",
+                "original_url": "https://cdn-token.app.flow.com.ar/cdntoken/v2/generator?path=https://cdn-flow-balancer.app.flow.com.ar/live/c6eds/TV5/SA_Live_dash_enc/TV5.mpd",
+                "headers": {
+                  "Origin": "https://portal.app.flow.com.ar",
+                  "Referer": "https://portal.app.flow.com.ar/",
+                  "User-Agent": "Flow-UA"
+                }
+              }
+            ]
+          }
+        ]
+      }
+      ''';
+
+      final parsed = const FutbolTotalFlowCatalogParser().parse(json);
+      final channel = parsed.channels.single;
+
+      expect(channel.url, 'tvfull-dynamic://stream/368');
+      expect(channel.dynamicStreamId, '368');
+      expect(
+        channel.dynamicStreamPath,
+        contains('/live/c6eds/TV5/SA_Live_dash_enc/TV5.mpd'),
+      );
+      expect(channel.providerGlobalIndex, '368');
+      expect(channel.streamMimeType, 'application/dash+xml');
+      expect(channel.drmKeyId, '00112233445566778899aabbccddeeff');
+      expect(channel.drmKey, 'ffeeddccbbaa99887766554433221100');
+      expect(channel.httpUserAgent, 'Flow-UA');
+      expect(channel.httpReferrer, 'https://portal.app.flow.com.ar/');
+      expect(channel.httpHeaders?['Origin'], 'https://portal.app.flow.com.ar');
+    });
+
+    test('detecta HLS dentro de URLs generadoras y conserva ClearKey existente', () {
+      const json = r'''
+      {
+        "categories": [
+          {
+            "name": "TV",
+            "samples": [
+              {
+                "name": "Flow HLS",
+                "type": "CLEARKEY",
+                "drm_license_uri": "kid:00112233445566778899aabbccddeeff,k:ffeeddccbbaa99887766554433221100",
+                "original_url": "https://cdn-token.app.flow.com.ar/generator?path=https://cdn.example.com/live/c7eds/test/playlist.m3u8",
+                "headers": {
+                  "Origin": "https://portal.app.flow.com.ar"
+                }
+              }
+            ]
+          }
+        ]
+      }
+      ''';
+
+      final channel =
+          const FutbolTotalFlowCatalogParser().parse(json).channels.single;
+
+      expect(channel.url, startsWith('tvfull-dynamic://stream/'));
+      expect(channel.dynamicStreamPath, contains('playlist.m3u8'));
+      expect(channel.streamMimeType, 'application/x-mpegURL');
+      expect(channel.drmKeyId, isNotNull);
+      expect(channel.drmKey, isNotNull);
+    });
   });
 }

@@ -854,3 +854,51 @@ AO) Build
    - versionName: 1.4.25.
    - versionCode: 3057.
    - Misma firma histórica TV FULL.
+
+
+ETAPA 14 - V58 REPRODUCCIÓN FLOW Y CACHÉ RESILIENTE
+----------------------------------------------------
+Fecha: 19/09/2026
+
+Problemas observados en V57:
+- La jerarquía TvList -> categoría -> canales quedó correcta.
+- Algunos canales mostraban "formato no compatible" al reproducir.
+- El parser específico de Fútbol Total entregaba URLs Flow generadoras
+  directamente a Media3 y no reutilizaba el resolvedor dinámico que provider.json
+  ya usa para rutas live/cXeds.
+- Si una actualización de las múltiples TvList fallaba parcialmente, la
+  generación parcial podía reemplazar un catálogo completo previamente guardado.
+
+Corrección V58:
+AP) lib/services/futbol_total_flow_catalog_parser.dart
+   - Detecta rutas Flow/cvattv dentro de original_url, incluso en parámetros
+     generator?path=...
+   - Conserva dynamicStreamId/dynamicStreamPath/globalIndex para que
+     DynamicStreamService y ProviderFlowStreamService resuelvan una URL CDN
+     fresca justo antes de abrir Media3.
+   - Conserva headers, User-Agent, Referer, ClearKey y MIME.
+   - Detecta MPD/M3U8 tanto en la ruta como dentro de URLs generadoras.
+   - No modifica el parser provider.json existente.
+
+AQ) lib/services/section_catalog_service.dart
+   - Invalida una sola vez el caché V57 que tenga rutas Flow antiguas sin
+     metadatos de resolución.
+   - Reintenta una vez sin caché HTTP únicamente las TvList que fallen.
+   - Antes de actualizar mantiene la última generación LIVE funcional.
+   - Si una TvList falla, conserva para esa lista sus canales del último caché
+     bueno en lugar de publicar un catálogo recortado.
+   - Si toda la actualización falla y ya existe un catálogo válido, conserva la
+     generación anterior sin borrarla.
+
+AR) lib/screens/xtream_live_screen.dart
+   - El catálogo guardado en disco se muestra inmediatamente.
+   - Fútbol Total reduce la frecuencia de actualización de red a 30 minutos.
+   - Mientras la pantalla permanece abierta no vuelve a descargar el catálogo
+     completo.
+
+AS) Validación
+   - Se agregan pruebas para rutas Flow dinámicas DASH y HLS con DRM/headers.
+   - Identificación de build: V58.
+   - versionName: 1.4.26.
+   - versionCode: 3058.
+   - Misma firma histórica TV FULL.

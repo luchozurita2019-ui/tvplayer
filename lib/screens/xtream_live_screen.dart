@@ -349,6 +349,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
     try {
       final all = await SectionCatalogService.instance.refreshIfStale(
         widget.playlist,
+        freshFor: widget.playlist.sourceType == PlaylistSourceType.futbolTotal
+            ? const Duration(minutes: 30)
+            : const Duration(minutes: 5),
       );
       if (all == null) return;
       final fresh = all[TvSectionKind.live];

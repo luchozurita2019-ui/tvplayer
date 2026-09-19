@@ -72,9 +72,10 @@ class SectionCatalogService {
       final decoded = await _decodeFileSource(fileSource);
       if (decoded != null) {
         if (playlist.sourceType == PlaylistSourceType.futbolTotal &&
-            decoded.channels.any(
-              (channel) => (channel.catalogSource ?? '').trim().isEmpty,
-            )) {
+            (decoded.channels.any(
+                  (channel) => (channel.catalogSource ?? '').trim().isEmpty,
+                ) ||
+                decoded.channels.any(_needsFutbolTotalPlaybackUpgrade))) {
           await _catalogFiles.clearSection(playlist.id, key);
           _forget(memoryKey);
         } else {
@@ -325,11 +326,31 @@ class SectionCatalogService {
   }
 
   Future<void> _downloadFutbolTotalToDisk(Playlist playlist) async {
+    // El último catálogo confirmado queda como red de seguridad. Si una de las
+    // listas remotas falla durante una actualización, conservamos para esa
+    // TvList los canales de la última generación buena en lugar de publicar
+    // un catálogo incompleto.
+    SectionCatalogSnapshot? previous;
+    final previousSource = await _catalogFiles.loadSource(
+      playlist.id,
+      'm3u_${TvSectionKind.live.name}',
+    );
+    if (previousSource != null) {
+      final decoded = await _decodeFileSource(previousSource);
+      if (decoded != null &&
+          decoded.channels.every(
+            (channel) => (channel.catalogSource ?? '').trim().isNotEmpty,
+          ) &&
+          !decoded.channels.any(_needsFutbolTotalPlaybackUpgrade)) {
+        previous = decoded;
+      }
+    }
+
     final service = FutbolTotalCatalogService();
     final catalogs =
         <({String sourceName, FutbolTotalFlowCatalog catalog})>[];
     FutbolTotalManifest? manifest;
-    var failedFlowLists = 0;
+    final failedDefinitions = <FutbolTotalListDefinition>[];
 
     try {
       final raw = await service.fetchRaw(playlist.source);
@@ -344,24 +365,53 @@ class SectionCatalogService {
       }
 
       if (manifest != null) {
-        // El manifiesto real contiene múltiples catálogos independientes.
-        // Una lista secundaria caída o con formato distinto no debe borrar
-        // cientos de canales que sí se descargaron correctamente.
-        for (final definition in manifest.flowLists) {
+        Future<bool> loadDefinition(
+          FutbolTotalListDefinition definition, {
+          bool noCache = false,
+        }) async {
           try {
-            final catalog = await service.loadFlow(definition);
-            if (catalog.channels.isEmpty) {
-              failedFlowLists++;
-              continue;
-            }
+            final catalog = noCache
+                ? const FutbolTotalFlowCatalogParser().parse(
+                    await service.fetchRaw(definition.url, noCache: true),
+                  )
+                : await service.loadFlow(definition);
+            if (catalog.channels.isEmpty) return false;
             catalogs.add((sourceName: definition.name, catalog: catalog));
+            return true;
           } catch (_) {
-            failedFlowLists++;
+            return false;
           }
         }
 
-        // Fallback equivalente al usado por Fútbol Total: si ninguna entrada
-        // del manifiesto fue utilizable, intentamos el Flow principal conocido.
+        // Primera pasada: mantiene el orden oficial del manifiesto.
+        for (final definition in manifest.flowLists) {
+          if (!await loadDefinition(definition)) {
+            failedDefinitions.add(definition);
+          }
+        }
+
+        // Segunda pasada sin caché HTTP sólo para las listas que fallaron.
+        // Evita que un error temporal publique un catálogo recortado.
+        if (failedDefinitions.isNotEmpty) {
+          final retry = List<FutbolTotalListDefinition>.from(failedDefinitions);
+          failedDefinitions.clear();
+          for (final definition in retry) {
+            if (!await loadDefinition(definition, noCache: true)) {
+              failedDefinitions.add(definition);
+            }
+          }
+        }
+
+        // Si toda la red falló pero ya había una generación buena, no la
+        // reemplazamos ni obligamos al usuario a volver a descargar todo.
+        if (catalogs.isEmpty && previous != null) {
+          _lastNetworkRefresh['${playlist.id}|${playlist.source}'] =
+              DateTime.now();
+          return;
+        }
+
+        // Sólo en una instalación sin caché funcional usamos el Flow principal
+        // conocido como último recurso.
         if (catalogs.isEmpty) {
           try {
             final fallbackRaw = await service.fetchRaw(
@@ -402,11 +452,63 @@ class SectionCatalogService {
 
     if (catalogs.isEmpty) {
       throw FormatException(
-        failedFlowLists > 0
+        failedDefinitions.isNotEmpty
             ? 'Fútbol Total no pudo cargar ninguna de sus listas disponibles '
-                '($failedFlowLists fallaron).'
+                '(${failedDefinitions.length} fallaron).'
             : 'Fútbol Total no contiene catálogos Flow reproducibles.',
       );
+    }
+
+    final freshBySource = <String, FutbolTotalFlowCatalog>{};
+    for (final loaded in catalogs) {
+      freshBySource.putIfAbsent(loaded.sourceName, () => loaded.catalog);
+    }
+
+    final orderedSources =
+        <({String sourceName, Iterable<Channel> channels})>[];
+
+    if (manifest != null && manifest.flowLists.isNotEmpty) {
+      for (final definition in manifest.flowLists) {
+        final fresh = freshBySource[definition.name];
+        if (fresh != null) {
+          orderedSources.add((
+            sourceName: definition.name,
+            channels: fresh.channels,
+          ));
+          continue;
+        }
+
+        // Una TvList que falló se completa desde la generación anterior si
+        // existe. Así una actualización parcial nunca hace desaparecer listas
+        // que ya estaban disponibles.
+        final cached = previous?.channels.where(
+          (channel) => channel.catalogSource == definition.name,
+        );
+        if (cached != null && cached.isNotEmpty) {
+          orderedSources.add((
+            sourceName: definition.name,
+            channels: cached,
+          ));
+        }
+      }
+
+      // El fallback principal no tiene por qué compartir el nombre de una
+      // TvList del manifiesto. Se usa sólo si no pudimos construir ninguna.
+      if (orderedSources.isEmpty) {
+        for (final loaded in catalogs) {
+          orderedSources.add((
+            sourceName: loaded.sourceName,
+            channels: loaded.catalog.channels,
+          ));
+        }
+      }
+    } else {
+      for (final loaded in catalogs) {
+        orderedSources.add((
+          sourceName: loaded.sourceName,
+          channels: loaded.catalog.channels,
+        ));
+      }
     }
 
     final liveWriter = await _catalogFiles.beginSnapshot(
@@ -415,19 +517,16 @@ class SectionCatalogService {
     );
     final categorySet = <String>{};
     final categories = <String>[];
-
     final seen = <String>{};
     var count = 0;
+
     try {
-      for (final loaded in catalogs) {
-        for (final channel in loaded.catalog.channels) {
-          // La APK oficial mantiene cada TvList/FlowCat independiente.
-          // El mismo stream puede existir legítimamente en otra lista o
-          // categoría; sólo quitamos duplicados exactos dentro del mismo
-          // origen + categoría.
-          final sourceName = loaded.sourceName.trim().isEmpty
-              ? 'Fútbol Total'
-              : loaded.sourceName.trim();
+      for (final loaded in orderedSources) {
+        final sourceName = loaded.sourceName.trim().isEmpty
+            ? 'Fútbol Total'
+            : loaded.sourceName.trim();
+
+        for (final channel in loaded.channels) {
           final categoryName = channel.group?.trim() ?? '';
           final scopedKey =
               '$sourceName|$categoryName|${channel.uniqueKey}';
@@ -460,9 +559,7 @@ class SectionCatalogService {
         );
       }
 
-      // V54/V55 podían clasificar señales Flow como películas o series usando
-      // heurísticas M3U. Fútbol Total es una fuente LIVE: retiramos solamente
-      // esas secciones antiguas para que no sobrevivan por caché.
+      // Fútbol Total es una fuente exclusivamente LIVE.
       await _catalogFiles.clearSection(
         playlist.id,
         'm3u_${TvSectionKind.movies.name}',
@@ -587,6 +684,19 @@ class SectionCatalogService {
   }
 
   int _stringBytes(String? value) => value == null ? 0 : value.length * 2;
+
+  bool _needsFutbolTotalPlaybackUpgrade(Channel channel) {
+    final dynamicPath = channel.dynamicStreamPath?.trim();
+    if (dynamicPath != null && dynamicPath.isNotEmpty) return false;
+
+    final url = channel.url.trim();
+    if (url.startsWith('tvfull-dynamic://')) return true;
+    if (!RegExp(r'live/c\\d+eds/', caseSensitive: false).hasMatch(url)) {
+      return false;
+    }
+    final lower = url.toLowerCase();
+    return lower.contains('flow.com.ar') || lower.contains('cvattv.com.ar');
+  }
 
   Future<SectionCatalogSnapshot?> _decodeFileSource(
     CatalogFileSource source,

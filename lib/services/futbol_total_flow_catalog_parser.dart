@@ -27,6 +27,8 @@ class FutbolTotalFlowCatalog {
 }
 
 class FutbolTotalFlowCatalogParser {
+  static const String dynamicStreamPrefix = 'tvfull-dynamic://stream/';
+
   const FutbolTotalFlowCatalogParser();
 
   FutbolTotalFlowCatalog parse(String content) {
@@ -106,8 +108,9 @@ class FutbolTotalFlowCatalogParser {
           }
         }
 
-        final url = _text(sample['original_url']) ?? _text(sample['url']);
-        if (url == null || !_isHttpUrl(url)) {
+        final originalUrl =
+            _text(sample['original_url']) ?? _text(sample['url']);
+        if (originalUrl == null || !_isHttpUrl(originalUrl)) {
           warnings.add(
             'categories[$i].samples[$j]: URL directa HTTP/HTTPS ausente; omitida.',
           );
@@ -117,27 +120,38 @@ class FutbolTotalFlowCatalogParser {
         final headers = _headers(sample['headers'], warnings, i, j);
         final logo = _text(sample['icono']) ?? _text(sample['logo']);
         final name = _text(sample['name']) ?? 'Canal';
-        final lowerUrl = url.toLowerCase();
-        final streamMimeType = lowerUrl.contains('.mpd')
-            ? 'application/dash+xml'
-            : lowerUrl.contains('.m3u8')
-            ? 'application/x-mpegURL'
-            : null;
+        final globalIndex = _valueText(sample['globalIndex']);
+        final dynamicId =
+            _firstValueText(sample, const ['resolver_id', 'stream_id', 'id']) ??
+            globalIndex ??
+            originalUrl;
+        final providerFlow = _looksLikeProviderFlow(
+          sample,
+          originalUrl,
+          headers,
+        );
+        final playbackUrl = providerFlow
+            ? '$dynamicStreamPrefix${Uri.encodeComponent(dynamicId)}'
+            : originalUrl;
+        final streamMimeType = _streamMimeType(type, originalUrl);
 
         channels.add(
           Channel(
             name: name,
-            url: url,
+            url: playbackUrl,
             logoUrl: logo != null && _isHttpUrl(logo) ? logo : null,
             group: group,
             drmKeyId: clearKey?.keyId,
             drmKey: clearKey?.key,
             streamMimeType: streamMimeType,
+            dynamicStreamId: providerFlow ? dynamicId : null,
+            dynamicStreamPath: providerFlow ? originalUrl : null,
+            providerGlobalIndex: globalIndex,
             httpUserAgent: _headerValue(headers, 'user-agent'),
             httpReferrer:
                 _headerValue(headers, 'referer') ??
                 _headerValue(headers, 'referrer'),
-            httpHeaders: headers.isEmpty ? null : headers,
+            httpHeaders: headers.isEmpty ? null : Map.unmodifiable(headers),
           ),
         );
 
@@ -209,6 +223,74 @@ class FutbolTotalFlowCatalogParser {
     if (value is! String) return null;
     final trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
+  }
+
+  String? _valueText(dynamic value) {
+    if (value == null) return null;
+    final text = value.toString().trim();
+    if (text.isEmpty || text.toLowerCase() == 'null') return null;
+    return text;
+  }
+
+  String? _firstValueText(Map<String, dynamic> raw, List<String> keys) {
+    for (final key in keys) {
+      final value = _valueText(raw[key]);
+      if (value != null) return value;
+    }
+    return null;
+  }
+
+  bool _looksLikeProviderFlow(
+    Map<String, dynamic> sample,
+    String originalUrl,
+    Map<String, String> headers,
+  ) {
+    if (!RegExp(r'live/c\\d+eds/', caseSensitive: false)
+        .hasMatch(originalUrl)) {
+      return false;
+    }
+
+    final lowerUrl = originalUrl.toLowerCase();
+    if (lowerUrl.contains('flow.com.ar') ||
+        lowerUrl.contains('cvattv.com.ar')) {
+      return true;
+    }
+
+    for (final entry in headers.entries) {
+      final key = entry.key.toLowerCase();
+      if (key != 'referer' && key != 'referrer' && key != 'origin') continue;
+      final value = entry.value.toLowerCase();
+      if (value.contains('flow.com.ar') || value.contains('cvattv.com.ar')) {
+        return true;
+      }
+    }
+
+    final source = _valueText(sample['source'])?.toLowerCase();
+    return source == 'flow';
+  }
+
+  String? _streamMimeType(String type, String originalUrl) {
+    final parsedPath = Uri.tryParse(originalUrl)?.path.toLowerCase() ?? '';
+    String? extensionMime = parsedPath.endsWith('.mpd')
+        ? 'application/dash+xml'
+        : parsedPath.endsWith('.m3u8')
+        ? 'application/x-mpegURL'
+        : null;
+
+    final lowerUrl = originalUrl.toLowerCase();
+    extensionMime ??= lowerUrl.contains('.mpd')
+        ? 'application/dash+xml'
+        : lowerUrl.contains('.m3u8')
+        ? 'application/x-mpegURL'
+        : null;
+
+    return switch (type.trim().toUpperCase()) {
+      'HLS' || 'M3U8' => 'application/x-mpegURL',
+      'DASH' || 'MPD' => 'application/dash+xml',
+      'CLEARKEY' => extensionMime ?? 'application/dash+xml',
+      'DIRECTO' || 'DIRECT' => extensionMime,
+      _ => extensionMime,
+    };
   }
 
   bool _isHttpUrl(String value) {
