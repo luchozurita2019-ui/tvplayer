@@ -530,7 +530,8 @@ class _SourceContentScreenState extends State<SourceContentScreen>
                             style: const TextStyle(fontWeight: FontWeight.w700),
                           ),
                           subtitle: Text(
-                            item.sourceType == PlaylistSourceType.localProviderJson
+                            (item.sourceType == PlaylistSourceType.localProviderJson ||
+                                    item.sourceType == PlaylistSourceType.futbolTotal)
                                 ? item.sourceType.label
                                 : item.sourceType.name.toUpperCase(),
                             style: const TextStyle(color: Colors.white38),
