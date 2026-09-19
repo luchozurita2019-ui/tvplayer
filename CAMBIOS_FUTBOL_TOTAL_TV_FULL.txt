@@ -115,3 +115,19 @@ H) .github/workflows/test-futboltotal-v50.yml
    - Ejecuta dart analyze lib test.
    - Ejecuta toda la suite flutter test.
    - No compila ni publica APK todavía.
+
+
+RESULTADO DE VALIDACION
+-----------------------
+- GitHub Actions ejecutó análisis estático sobre lib y test: OK.
+- Se ejecutó la suite completa de Flutter tests: OK.
+- Workflow validado: Test Fútbol Total V50 integration.
+- Run de validación de código: 35447946686.
+- En esta etapa no se generó APK ni se publicó release.
+
+CONTROL DE IMPACTO SOBRE V50
+----------------------------
+Comparación contra experiment/lista-tv-3-v50-clean:
+- Sólo se agregaron archivos nuevos.
+- No se modificó ningún archivo existente de V50.
+- No se eliminó ningún canal, catálogo, parser, reproductor ni configuración.
