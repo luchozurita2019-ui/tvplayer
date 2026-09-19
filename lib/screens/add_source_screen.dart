@@ -58,6 +58,10 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   void initState() {
     super.initState();
     _type = widget.initialType;
+    if (_type == PlaylistSourceType.futbolTotal) {
+      _nameController.text = 'Fútbol Total';
+      _futbolTotalUrlController.text = FutbolTotalEndpoints.manifestRaw;
+    }
   }
 
   @override
@@ -124,7 +128,20 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               const SizedBox(height: 24),
               _SourceSelector(
                 selected: _type,
-                onChanged: (value) => setState(() => _type = value),
+                onChanged: (value) {
+                  setState(() {
+                    _type = value;
+                    if (value == PlaylistSourceType.futbolTotal) {
+                      if (_nameController.text.trim().isEmpty) {
+                        _nameController.text = 'Fútbol Total';
+                      }
+                      if (_futbolTotalUrlController.text.trim().isEmpty) {
+                        _futbolTotalUrlController.text =
+                            FutbolTotalEndpoints.manifestRaw;
+                      }
+                    }
+                  });
+                },
               ),
               const SizedBox(height: 24),
               Card(
@@ -231,7 +248,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
                 _futbolTotalUrlFocus.requestFocus();
               },
               icon: const Icon(Icons.restore_rounded),
-              label: const Text('Usar URL detectada en APK'),
+              label: const Text('Usar Fútbol Total real'),
             ),
             OutlinedButton.icon(
               onPressed: () {
@@ -247,10 +264,9 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         const SizedBox(height: 14),
         const _InfoBox(
           text:
-              'Acepta ft-tv-lists2.json o un catálogo Flow directo (categories/samples). '
-              'Las listas Flow se cargan como catálogo independiente. La agenda de fútbol '
-              'ya se interpreta, pero canal_id todavía no se envía al reproductor hasta '
-              'terminar su resolvedor autorizado.',
+              'Por defecto usa el manifiesto real autorizado de Fútbol Total. '
+              'También acepta un catálogo Flow directo (categories/samples). '
+              'El manifiesto de prueba queda disponible sólo para diagnóstico.',
         ),
       ],
     );
