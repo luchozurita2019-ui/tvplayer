@@ -11,6 +11,7 @@ class Channel {
   final String? drmKey;
   final String? streamMimeType;
   final String? group; // categoría (ej: "Deportes", "Noticias")
+  final String? catalogSource; // lista superior (ej: Fútbol Total TvList)
   final String? tvgId; // id XMLTV/EPG del proveedor
   final String? xtreamStreamId; // stream_id real para APIs Xtream (EPG, etc.)
   final String? dynamicStreamId; // identidad estable usada por el resolvedor
@@ -37,6 +38,7 @@ class Channel {
     this.drmKey,
     this.streamMimeType,
     this.group,
+    this.catalogSource,
     this.tvgId,
     this.xtreamStreamId,
     this.dynamicStreamId,
@@ -115,6 +117,7 @@ class Channel {
     'url': url,
     'logoUrl': logoUrl,
     'group': group,
+    if (catalogSource != null) 'catalogSource': catalogSource,
     'tvgId': tvgId,
     'xtreamStreamId': xtreamStreamId,
     if (dynamicStreamId != null) 'dynamicStreamId': dynamicStreamId,
@@ -175,6 +178,7 @@ class Channel {
           ? json['streamMimeType'] as String
           : null,
       group: json['group'] as String?,
+      catalogSource: json['catalogSource'] as String?,
       tvgId: json['tvgId'] as String?,
       xtreamStreamId: json['xtreamStreamId'] as String?,
       dynamicStreamId: json['dynamicStreamId'] as String?,
