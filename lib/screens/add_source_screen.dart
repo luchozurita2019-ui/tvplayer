@@ -188,6 +188,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
           PlaylistSourceType.xtream => _xtreamFields(),
           PlaylistSourceType.stalker => _stalkerFields(),
           PlaylistSourceType.localProviderJson => _providerJsonFields(),
+          PlaylistSourceType.futbolTotalBridge => _futbolTotalBridgeFields(),
         },
       ],
     );
@@ -296,6 +297,32 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         await FilePicker.clearTemporaryFiles();
       } catch (_) {}
     }
+  }
+
+  Widget _futbolTotalBridgeFields() {
+    return Column(
+      children: [
+        TextField(
+          controller: _m3uUrlController,
+          focusNode: _m3uUrlFocus,
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) {
+            if (_androidTvBuild) _submitFromKeyboard();
+          },
+          decoration: const InputDecoration(
+            labelText: 'URL del JSON / agenda',
+            hintText: 'https://servidor/agenda.json',
+            prefixIcon: Icon(Icons.sports_soccer_rounded),
+          ),
+        ),
+        const SizedBox(height: 14),
+        const _InfoBox(
+          text:
+              'Fuente separada del provider.json. Acepta catálogos TV categories/samples y agendas events/canales. Sólo envía al reproductor URLs directas declaradas por la fuente.',
+        ),
+      ],
+    );
   }
 
   Widget _m3uFields() {
@@ -450,6 +477,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         _portalFocus.requestFocus();
       case PlaylistSourceType.localProviderJson:
         (_pasteProviderJson ? _providerJsonFocus : _providerFileFocus).requestFocus();
+      case PlaylistSourceType.futbolTotalBridge:
+        _m3uUrlFocus.requestFocus();
     }
   }
 
@@ -523,6 +552,19 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         } else {
           _showMessage('$count canales importados.');
         }
+      case PlaylistSourceType.futbolTotalBridge:
+        final url = _m3uUrlController.text.trim();
+        final uri = Uri.tryParse(url);
+        if (uri == null ||
+            !(uri.scheme == 'http' || uri.scheme == 'https') ||
+            uri.host.isEmpty) {
+          _showMessage('Ingresá una URL JSON http/https válida.');
+          return;
+        }
+        await provider.addFutbolTotalBridgeSource(
+          _nameController.text.trim(),
+          url,
+        );
     }
 
     if (!mounted) return;
@@ -622,6 +664,7 @@ class _TitleRow extends StatelessWidget {
       PlaylistSourceType.xtream => Icons.key_rounded,
       PlaylistSourceType.stalker => Icons.router_rounded,
       PlaylistSourceType.localProviderJson => Icons.description_outlined,
+      PlaylistSourceType.futbolTotalBridge => Icons.sports_soccer_rounded,
     };
 
     return Row(
