@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:iptv_player/services/futbol_total_agenda_parser.dart';
+import 'package:iptv_player/services/futbol_total_authorized_fetcher.dart';
 import 'package:iptv_player/services/futbol_total_embedded_config.dart';
 import 'package:iptv_player/services/futbol_total_flow_catalog_parser.dart';
 import 'package:iptv_player/services/futbol_total_manifest_parser.dart';
@@ -23,6 +24,29 @@ void main() {
       expect(FutbolTotalEmbeddedConfig.linksUrl, contains('links2.json'));
       expect(FutbolTotalEmbeddedConfig.primaryWorker, startsWith('https://'));
       expect(FutbolTotalEmbeddedConfig.secondaryWorker, startsWith('https://'));
+    });
+  });
+
+  group('FutbolTotalAuthorizedFetcher', () {
+    test('envía sólo repos privados conocidos al proxy autorizado', () {
+      expect(
+        FutbolTotalAuthorizedFetcher.requiresAuthorizedProxy(
+          'https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-flow2.json',
+        ),
+        isTrue,
+      );
+      expect(
+        FutbolTotalAuthorizedFetcher.requiresAuthorizedProxy(
+          'https://api.github.com/repos/ByRafaelSystem/futboltotal-data/contents/links2.json',
+        ),
+        isTrue,
+      );
+      expect(
+        FutbolTotalAuthorizedFetcher.requiresAuthorizedProxy(
+          'https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8',
+        ),
+        isFalse,
+      );
     });
   });
 
@@ -181,7 +205,7 @@ void main() {
       expect(parsed.seedUserAgent, 'FT-UA');
     });
 
-    test('omite WEBVIEW y DRM sin afectar canales directos', () {
+    test('omite WEBVIEW, conserva ClearKey válido y rechaza DRM inválido', () {
       const json = r'''
       {
         "categories": [
@@ -194,8 +218,13 @@ void main() {
                 "type": "WEBVIEW"
               },
               {
-                "name": "DRM",
+                "name": "DRM válido",
                 "url": "https://example.com/live.mpd",
+                "drm_license_uri": "kid:00112233445566778899aabbccddeeff,k:ffeeddccbbaa99887766554433221100"
+              },
+              {
+                "name": "DRM inválido",
+                "url": "https://example.com/bad.mpd",
                 "drm_license_uri": "clearkey://example"
               },
               {
@@ -209,7 +238,18 @@ void main() {
       ''';
 
       final parsed = const FutbolTotalFlowCatalogParser().parse(json);
-      expect(parsed.channels.single.name, 'Libre');
+      expect(parsed.channels, hasLength(2));
+      expect(parsed.channels.first.name, 'DRM válido');
+      expect(
+        parsed.channels.first.drmKeyId,
+        '00112233445566778899aabbccddeeff',
+      );
+      expect(
+        parsed.channels.first.drmKey,
+        'ffeeddccbbaa99887766554433221100',
+      );
+      expect(parsed.channels.first.streamMimeType, 'application/dash+xml');
+      expect(parsed.channels.last.name, 'Libre');
       expect(parsed.skippedWeb, 1);
       expect(parsed.skippedDrm, 1);
     });
