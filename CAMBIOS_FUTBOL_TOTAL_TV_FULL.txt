@@ -208,3 +208,74 @@ La APK v3.6 obtiene sig mediante Guard nativo y usa la firma del propio APK
 como parte del mecanismo de acceso al Worker. Para capturar datos reales sin
 introducir diferencias de firma, se usa la APK original y se observa el JSON
 ya recibido por la aplicación.
+
+
+ETAPA 3 - FUENTE INDEPENDIENTE EN TV FULL
+-----------------------------------------
+I) lib/services/futbol_total_endpoints.dart
+   - Se documentaron endpoints observados directamente en Fútbol Total 3.6.
+   - Manifiesto: ft-tv-lists2.json.
+   - Catálogo Flow por defecto: ft-flow2.json.
+   - Configuración adicional: links2.json.
+   - Worker principal y Worker secundario.
+   - Mirrors del Modo Web observados en la APK.
+   - No se guardaron tokens, firmas ni secretos.
+
+J) lib/models/playlist_source_type.dart
+   - Se agregó PlaylistSourceType.futbolTotal.
+   - Etiqueta visible: "Fútbol Total".
+   - Es un tipo distinto a localProviderJson, M3U, Xtream y Stalker.
+
+K) lib/providers/iptv_provider.dart
+   - addFutbolTotalSource().
+   - updateFutbolTotalSource().
+   - ID propio con prefijo futbol-total-.
+   - No reutiliza ni modifica provider.json.
+
+L) lib/services/section_catalog_service.dart
+   - Si la fuente es Fútbol Total:
+     1. Descarga la URL configurada.
+     2. Si contiene lists[], la trata como manifiesto.
+     3. Descarga y combina todas las listas kind=flow.
+     4. Si no contiene lists[], intenta interpretarla como Flow directo.
+     5. Elimina duplicados por uniqueKey.
+     6. Clasifica los canales usando el clasificador existente de TV FULL.
+     7. Escribe LIVE/Películas/Series en snapshots separados.
+   - Un manifiesto que sólo contiene kind=futbol devuelve un mensaje claro:
+     la agenda ya se interpreta pero falta conectar el resolvedor canal_id.
+   - No altera la ruta de descarga M3U existente.
+
+M) lib/screens/add_source_screen.dart
+   - Nueva opción "Fútbol Total" en Agregar servicio.
+   - Campo propio: URL de manifiesto o catálogo Flow.
+   - Botón "Usar URL detectada en APK".
+   - Esa acción coloca la URL de ft-tv-lists2.json observada en v3.6.
+   - Se aclara que la agenda está en preparación y que provider.json queda
+     separado.
+
+N) lib/screens/edit_source_screen.dart
+   - Permite editar nombre y URL de una fuente Fútbol Total existente.
+   - Mantiene validación HTTP/HTTPS.
+
+O) lib/screens/source_content_screen.dart
+   - La interfaz muestra "Fútbol Total" en lugar del nombre interno del enum.
+
+ENDPOINTS OBSERVADOS EN FUTBOL TOTAL 3.6
+----------------------------------------
+Se identificaron en el código descompilado:
+- raw de ft-tv-lists2.json
+- raw de ft-flow2.json
+- raw/API de links2.json
+- Worker primario novax-online
+- Worker secundario ft-online
+
+Los valores exactos se mantienen encapsulados en
+lib/services/futbol_total_endpoints.dart. Este TXT no publica tokens ni firmas.
+
+VALIDACION ETAPA 3
+------------------
+- Tras agregar la fuente Fútbol Total y conectarla al catálogo, dart analyze: OK.
+- Suite completa flutter test: OK.
+- Run validado: 35449456796.
+- La integración sigue aislada en feature/v50-futboltotal-authorized.
+- Todavía NO se compiló ni publicó una APK de prueba de esta rama.
