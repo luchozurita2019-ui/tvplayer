@@ -318,6 +318,25 @@ class IptvProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  Future<void> addFutbolTotalSource(String name, String url) async {
+    final clean = url.trim();
+    if (clean.isEmpty) return;
+    final playlist = Playlist(
+      id: 'futbol-total-${DateTime.now().microsecondsSinceEpoch}',
+      name: name.trim().isEmpty ? 'Fútbol Total' : name.trim(),
+      source: clean,
+      isRemote: true,
+      channels: const [],
+      lastUpdated: DateTime.now(),
+      sourceType: PlaylistSourceType.futbolTotal,
+    );
+    _playlists = [..._playlists, playlist];
+    _selectedPlaylistId ??= playlist.id;
+    await _localStore.saveServices(_playlists);
+    await _localStore.saveSelectedServiceId(_selectedPlaylistId);
+    notifyListeners();
+  }
+
   Future<void> addXtreamSource({
     required String name,
     required String serverUrl,
@@ -438,6 +457,28 @@ class IptvProvider extends ChangeNotifier {
       name: name.trim().isEmpty ? current.name : name.trim(),
       source: url.trim(),
       sourceType: PlaylistSourceType.m3u,
+      channels: const [],
+      lastUpdated: DateTime.now(),
+    );
+    final next = List<Playlist>.from(_playlists)..[index] = updated;
+    _playlists = next;
+    await _localStore.clearServiceCatalogs(playlistId);
+    await _localStore.saveServices(_playlists);
+    notifyListeners();
+  }
+
+  Future<void> updateFutbolTotalSource({
+    required String playlistId,
+    required String name,
+    required String url,
+  }) async {
+    final index = _playlists.indexWhere((item) => item.id == playlistId);
+    if (index < 0) return;
+    final current = _playlists[index];
+    final updated = current.copyWith(
+      name: name.trim().isEmpty ? current.name : name.trim(),
+      source: url.trim(),
+      sourceType: PlaylistSourceType.futbolTotal,
       channels: const [],
       lastUpdated: DateTime.now(),
     );
