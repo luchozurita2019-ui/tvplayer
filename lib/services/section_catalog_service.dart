@@ -473,6 +473,56 @@ class SectionCatalogService {
     }
   }
 
+  Channel _withFutbolTotalGroup(
+    Channel channel, {
+    required String sourceName,
+  }) {
+    final listName =
+        sourceName.trim().isEmpty ? 'Fútbol Total' : sourceName.trim();
+    final originalGroup = channel.group?.trim() ?? '';
+    final group = originalGroup.isEmpty
+        ? listName
+        : _sameFutbolTotalLabel(listName, originalGroup)
+            ? listName
+            : '$listName · $originalGroup';
+
+    return Channel(
+      name: channel.name,
+      url: channel.url,
+      logoUrl: channel.logoUrl,
+      logoBytes: channel.logoBytes,
+      drmKeyId: channel.drmKeyId,
+      drmKey: channel.drmKey,
+      streamMimeType: channel.streamMimeType,
+      group: group,
+      tvgId: channel.tvgId,
+      xtreamStreamId: channel.xtreamStreamId,
+      dynamicStreamId: channel.dynamicStreamId,
+      dynamicStreamPath: channel.dynamicStreamPath,
+      providerGlobalIndex: channel.providerGlobalIndex,
+      httpUserAgent: channel.httpUserAgent,
+      httpReferrer: channel.httpReferrer,
+      httpHeaders: channel.httpHeaders,
+    );
+  }
+
+  bool _sameFutbolTotalLabel(String a, String b) {
+    String normalize(String value) => value
+        .trim()
+        .toLowerCase()
+        .replaceAll('á', 'a')
+        .replaceAll('é', 'e')
+        .replaceAll('í', 'i')
+        .replaceAll('ó', 'o')
+        .replaceAll('ú', 'u')
+        .replaceAll('ü', 'u')
+        .replaceAll('ñ', 'n')
+        .replaceAll(RegExp(r'[^a-z0-9]+'), ' ')
+        .replaceAll(RegExp(r'\s+'), ' ')
+        .trim();
+    return normalize(a) == normalize(b);
+  }
+
   void _remember(String key, SectionCatalogSnapshot snapshot) {
     _forget(key);
     _memory[key] = snapshot;
