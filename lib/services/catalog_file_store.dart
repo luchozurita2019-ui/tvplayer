@@ -242,6 +242,11 @@ class CatalogFileStore {
     }
   }
 
+  Future<void> clearSection(String serviceId, String kind) async {
+    final section = await _sectionDirectory(serviceId, kind);
+    await _deleteDirectoryQuietly(section);
+  }
+
   Future<void> clearService(String serviceId) async {
     final root = await _ensureRoot();
     final directory = Directory('${root.path}/${_serviceKey(serviceId)}');
