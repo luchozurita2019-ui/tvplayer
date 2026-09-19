@@ -1,0 +1,35 @@
+{
+  "events": [
+    {
+      "status": "EN VIVO",
+      "titulo": "Equipo A vs Equipo B",
+      "categoria": "Fútbol",
+      "ts_utc": 0,
+      "canales": [
+        {
+          "canal_id": "senal-1",
+          "canal": "Señal 1",
+          "con_anuncios": false
+        },
+        {
+          "canal_id": "senal-2",
+          "canal": "Señal 2",
+          "con_anuncios": false
+        }
+      ]
+    }
+  ],
+  "streams": {
+    "senal-1": {
+      "url": "https://media.example.com/live/senal-1.m3u8",
+      "logo": "https://media.example.com/logos/senal-1.png",
+      "headers": {
+        "Referer": "https://media.example.com/",
+        "Origin": "https://media.example.com"
+      }
+    },
+    "senal-2": {
+      "url": "https://media.example.com/live/senal-2.m3u8"
+    }
+  }
+}
