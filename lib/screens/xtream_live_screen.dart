@@ -46,6 +46,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
   final ScrollController _catalogScrollController = ScrollController();
   final ScrollController _searchScrollController = ScrollController();
   String? _category;
+  String? _futbolTotalSource;
+  List<String> _futbolTotalSources = const <String>[];
+  String? _indexedFutbolTotalSource;
   String _status = 'Cargando TV en vivo…';
   String _query = '';
   bool _searchOpen = false;
@@ -151,19 +154,63 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
   }
 
   CatalogIndex<Channel> _catalogIndexFor(_LiveData data) {
+    final futbolTotal =
+        widget.playlist.sourceType == PlaylistSourceType.futbolTotal;
+    final source = futbolTotal ? _futbolTotalSource : null;
     final cached = _catalogIndex;
-    if (cached != null && identical(_indexedData, data)) return cached;
+    if (cached != null &&
+        identical(_indexedData, data) &&
+        _indexedFutbolTotalSource == source) {
+      return cached;
+    }
+
+    final items = futbolTotal && source != null
+        ? data.channels
+            .where((channel) => channel.catalogSource == source)
+            .toList(growable: false)
+        : data.channels;
+    final categoryOrder =
+        futbolTotal ? _categoriesFor(items) : data.categories;
+
     final built = CatalogIndex<Channel>.build(
-      items: data.channels,
-      categoryOrder: data.categories,
+      items: items,
+      categoryOrder: categoryOrder,
       nameOf: (item) => item.name,
       categoryOf: (item) => item.group,
       include: (item) => _parental.canShowChannel(item),
     );
-    unawaited(ChannelLogoResolverService.instance.primeChannels(data.channels));
+    unawaited(ChannelLogoResolverService.instance.primeChannels(items));
     _indexedData = data;
+    _indexedFutbolTotalSource = source;
     _catalogIndex = built;
     return built;
+  }
+
+  List<String> _categoriesFor(Iterable<Channel> channels) {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final channel in channels) {
+      final group = channel.group?.trim();
+      if (group == null || group.isEmpty) continue;
+      if (seen.add(group)) values.add(group);
+    }
+    return values;
+  }
+
+  _LiveData _adoptFutbolTotalHierarchy(_LiveData data) {
+    if (widget.playlist.sourceType != PlaylistSourceType.futbolTotal) {
+      return data;
+    }
+    final sources = data.catalogSources;
+    _futbolTotalSources = sources;
+    if (sources.isEmpty) {
+      _futbolTotalSource = null;
+    } else if (_futbolTotalSource == null ||
+        !sources.contains(_futbolTotalSource)) {
+      _futbolTotalSource = sources.first;
+      _category = null;
+    }
+    return data;
   }
 
   Future<_LiveData> _loadInitial() async {
@@ -199,13 +246,13 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
     );
     if (cached != null && cached.channels.isNotEmpty) {
       unawaited(_refreshM3u());
-      return _LiveData(cached.channels);
+      return _adoptFutbolTotalHierarchy(_LiveData(cached.channels));
     }
     final fresh = await service.loadOrRefresh(
       widget.playlist,
       TvSectionKind.live,
     );
-    return _LiveData(fresh.channels);
+    return _adoptFutbolTotalHierarchy(_LiveData(fresh.channels));
   }
 
   Future<void> _refreshXtream() async {
@@ -216,11 +263,14 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
         onProgress: (p) => _setStatus(p.label),
       );
       if (!mounted || fresh.channels.isEmpty) return;
-      final data = _LiveData(fresh.channels, categories: fresh.categories);
+      final data = _adoptFutbolTotalHierarchy(
+        _LiveData(fresh.channels, categories: fresh.categories),
+      );
       setState(() {
         _visibleData = data;
         _catalogIndex = null;
         _indexedData = null;
+        _indexedFutbolTotalSource = null;
       });
     } catch (_) {}
   }
@@ -291,6 +341,134 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
     setState(() => _status = value);
   }
 
+  Widget _buildAppBarTitle() {
+    if (widget.playlist.sourceType == PlaylistSourceType.futbolTotal) {
+      final source = _futbolTotalSource ?? 'Fútbol Total';
+      return InkWell(
+        borderRadius: BorderRadius.circular(10),
+        onTap: _futbolTotalSources.length > 1
+            ? () => unawaited(_chooseFutbolTotalSource())
+            : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 4),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Text('📺 ', style: TextStyle(fontSize: 19)),
+              Flexible(
+                child: Text(
+                  source,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontWeight: FontWeight.w900),
+                ),
+              ),
+              if (_futbolTotalSources.length > 1) ...[
+                const SizedBox(width: 6),
+                const Icon(Icons.arrow_drop_down_rounded, size: 25),
+              ],
+            ],
+          ),
+        ),
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'TV EN VIVO',
+          style: TextStyle(fontWeight: FontWeight.w900),
+        ),
+        Text(
+          widget.playlist.name,
+          style: const TextStyle(
+            color: Colors.white54,
+            fontSize: 12,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Future<void> _chooseFutbolTotalSource() async {
+    if (_futbolTotalSources.length < 2) return;
+    final chosen = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: const Color(0xFF0C141E),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 620, maxHeight: 600),
+          child: Padding(
+            padding: const EdgeInsets.all(22),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                const Text(
+                  'Fútbol Total',
+                  style: TextStyle(fontSize: 22, fontWeight: FontWeight.w900),
+                ),
+                const SizedBox(height: 6),
+                const Text(
+                  'Elegí una lista. Sus categorías se muestran por separado, '
+                  'igual que en Fútbol Total.',
+                  style: TextStyle(color: Colors.white54),
+                ),
+                const SizedBox(height: 14),
+                Flexible(
+                  child: ListView.builder(
+                    shrinkWrap: true,
+                    itemCount: _futbolTotalSources.length,
+                    itemBuilder: (context, index) {
+                      final item = _futbolTotalSources[index];
+                      final selected = item == _futbolTotalSource;
+                      return Padding(
+                        padding: const EdgeInsets.symmetric(vertical: 3),
+                        child: ListTile(
+                          autofocus: selected ||
+                              (_futbolTotalSource == null && index == 0),
+                          selected: selected,
+                          selectedTileColor:
+                              tvFullBlue.withValues(alpha: .16),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                          leading: const Icon(Icons.live_tv_rounded),
+                          title: Text(
+                            item,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: const TextStyle(fontWeight: FontWeight.w800),
+                          ),
+                          trailing:
+                              selected ? const Icon(Icons.check_rounded) : null,
+                          onTap: () =>
+                              Navigator.of(dialogContext).pop(item),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+
+    if (chosen == null || chosen == _futbolTotalSource || !mounted) return;
+    if (_searchOpen) _closeSearch();
+    setState(() {
+      _futbolTotalSource = chosen;
+      _category = null;
+      _catalogIndex = null;
+      _indexedData = null;
+      _indexedFutbolTotalSource = null;
+    });
+    _resetCatalogScroll();
+  }
+
   @override
   Widget build(BuildContext context) {
     final provider = context.watch<IptvProvider>();
@@ -321,29 +499,17 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
                   focusNode: _searchFocus,
                   autofocus: true,
                   textInputAction: TextInputAction.search,
-                  decoration: const InputDecoration(
-                    hintText: 'Buscar en todos los canales…',
+                  decoration: InputDecoration(
+                    hintText: widget.playlist.sourceType ==
+                            PlaylistSourceType.futbolTotal
+                        ? 'Buscar en esta lista…'
+                        : 'Buscar en todos los canales…',
                     border: InputBorder.none,
-                    prefixIcon: Icon(Icons.search_rounded),
+                    prefixIcon: const Icon(Icons.search_rounded),
                   ),
                   onChanged: _scheduleSearch,
                 )
-              : Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'TV EN VIVO',
-                      style: TextStyle(fontWeight: FontWeight.w900),
-                    ),
-                    Text(
-                      widget.playlist.name,
-                      style: const TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12,
-                      ),
-                    ),
-                  ],
-                ),
+              : _buildAppBarTitle(),
           actions: [
             IconButton(
               tooltip: _searchOpen ? 'Cerrar búsqueda' : 'Buscar canales',
@@ -477,8 +643,14 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
                 padding: const EdgeInsets.fromLTRB(20, 12, 20, 8),
                 child: Text(
                   _searchOpen
-                      ? 'Búsqueda global  ·  ${visible.length} canales'
-                      : '${_category ?? 'Todos'}  ·  ${visible.length} canales',
+                      ? 'Búsqueda  ·  ${visible.length} canales'
+                      : widget.playlist.sourceType ==
+                              PlaylistSourceType.futbolTotal
+                          ? '${_futbolTotalSource ?? 'Fútbol Total'}  ·  '
+                              '${_category ?? 'Todos'}  ·  '
+                              '${visible.length} canales'
+                          : '${_category ?? 'Todos'}  ·  '
+                              '${visible.length} canales',
                   style: const TextStyle(
                     color: Colors.white60,
                     fontSize: 13,
@@ -710,6 +882,17 @@ class _LiveData {
     this.channels, {
     List<String> categories = const <String>[],
   }) : _storedCategories = categories;
+
+  List<String> get catalogSources {
+    final seen = <String>{};
+    final values = <String>[];
+    for (final channel in channels) {
+      final source = channel.catalogSource?.trim();
+      if (source == null || source.isEmpty) continue;
+      if (seen.add(source)) values.add(source);
+    }
+    return values;
+  }
 
   List<String> get categories {
     if (_storedCategories.isNotEmpty) return _storedCategories;
