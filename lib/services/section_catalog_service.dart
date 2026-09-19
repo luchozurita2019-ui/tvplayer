@@ -8,6 +8,7 @@ import 'catalog_file_store.dart';
 import 'content_classifier.dart';
 import 'device_performance_service.dart';
 import 'futbol_total_catalog_service.dart';
+import 'futbol_total_endpoints.dart';
 import 'futbol_total_flow_catalog_parser.dart';
 import 'futbol_total_manifest_parser.dart';
 import 'm3u_fetcher.dart';
@@ -317,36 +318,73 @@ class SectionCatalogService {
 
   Future<void> _downloadFutbolTotalToDisk(Playlist playlist) async {
     final service = FutbolTotalCatalogService();
-    final raw = await service.fetchRaw(playlist.source);
     final catalogs = <FutbolTotalFlowCatalog>[];
     FutbolTotalManifest? manifest;
+    var failedFlowLists = 0;
 
     try {
-      final parsedManifest = const FutbolTotalManifestParser().parse(raw);
-      if (parsedManifest.lists.isNotEmpty) {
-        manifest = parsedManifest;
-      }
-    } on FormatException {
-      // Puede ser un catálogo Flow directo; se prueba debajo.
-    }
+      final raw = await service.fetchRaw(playlist.source);
 
-    if (manifest != null) {
-      for (final definition in manifest.flowLists) {
-        catalogs.add(await service.loadFlow(definition));
+      try {
+        final parsedManifest = const FutbolTotalManifestParser().parse(raw);
+        if (parsedManifest.lists.isNotEmpty) {
+          manifest = parsedManifest;
+        }
+      } on FormatException {
+        // Puede ser un catálogo Flow directo; se prueba debajo.
       }
-      if (catalogs.isEmpty && manifest.futbolLists.isNotEmpty) {
-        throw const FormatException(
-          'El manifiesto sólo contiene agenda de fútbol. '
-          'El resolvedor de canal_id todavía no está conectado al reproductor.',
-        );
+
+      if (manifest != null) {
+        // El manifiesto real contiene múltiples catálogos independientes.
+        // Una lista secundaria caída o con formato distinto no debe borrar
+        // cientos de canales que sí se descargaron correctamente.
+        for (final definition in manifest.flowLists) {
+          try {
+            final catalog = await service.loadFlow(definition);
+            if (catalog.channels.isEmpty) {
+              failedFlowLists++;
+              continue;
+            }
+            catalogs.add(catalog);
+          } catch (_) {
+            failedFlowLists++;
+          }
+        }
+
+        // Fallback equivalente al usado por Fútbol Total: si ninguna entrada
+        // del manifiesto fue utilizable, intentamos el Flow principal conocido.
+        if (catalogs.isEmpty) {
+          try {
+            final fallbackRaw = await service.fetchRaw(
+              FutbolTotalEndpoints.defaultFlowRaw,
+              noCache: true,
+            );
+            final fallback =
+                const FutbolTotalFlowCatalogParser().parse(fallbackRaw);
+            if (fallback.channels.isNotEmpty) catalogs.add(fallback);
+          } catch (_) {}
+        }
+
+        if (catalogs.isEmpty && manifest.futbolLists.isNotEmpty) {
+          throw const FormatException(
+            'El manifiesto sólo contiene agenda de fútbol. '
+            'El resolvedor de canal_id todavía no está conectado al reproductor.',
+          );
+        }
+      } else {
+        final direct = const FutbolTotalFlowCatalogParser().parse(raw);
+        if (direct.channels.isNotEmpty) catalogs.add(direct);
       }
-    } else {
-      catalogs.add(const FutbolTotalFlowCatalogParser().parse(raw));
+    } finally {
+      service.close();
     }
 
     if (catalogs.isEmpty) {
-      throw const FormatException(
-        'Fútbol Total no contiene catálogos Flow reproducibles.',
+      throw FormatException(
+        failedFlowLists > 0
+            ? 'Fútbol Total no pudo cargar ninguna de sus listas disponibles '
+                '($failedFlowLists fallaron).'
+            : 'Fútbol Total no contiene catálogos Flow reproducibles.',
       );
     }
 
