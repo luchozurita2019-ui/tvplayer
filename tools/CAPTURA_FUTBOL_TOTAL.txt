@@ -1,0 +1,39 @@
+CAPTURA AUTORIZADA DE JSON - FUTBOL TOTAL v3.6
+
+OBJETIVO
+--------
+Observar los JSON que la APK original ya descarga y entrega a su parser.
+No se modifica la respuesta, la firma, el token ni el tráfico.
+
+REQUISITO IMPORTANTE
+--------------------
+Usar la APK ORIGINAL instalada y firmada por Rafael. Esto permite que la propia
+aplicación realice su flujo normal de Worker/firma antes de que el capturador
+observe el texto ya recibido.
+
+SCRIPT
+------
+tools/capturar_futboltotal_json.js
+
+EJECUCION DE REFERENCIA
+-----------------------
+1. Conectar el Android/TV por ADB.
+2. Ejecutar Frida Server compatible con la arquitectura/versión de Android.
+3. Desde la computadora:
+   frida -U -f com.byrafael.streamapp -l tools/capturar_futboltotal_json.js
+4. Abrir Modo TV y luego Fútbol.
+5. El script imprime y envía al host sólo respuestas asociadas a:
+   ft-tv-lists2.json
+   ft-flow2.json
+   links2.json
+   ft-mundotv.json
+   ft-key-sources.json
+   ft-logos.json
+
+Los JSON obtenidos deben guardarse como archivos de prueba y luego alimentar
+el adaptador Fútbol Total de TV FULL.
+
+NOTA
+----
+Esta herramienta se creó con autorización expresa del propietario de la APK.
+No debe publicarse ningún token, clave o secreto capturado.
