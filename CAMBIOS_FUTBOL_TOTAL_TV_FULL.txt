@@ -582,3 +582,43 @@ Z) Nueva compilación
    - ARM32 y ARM64.
    - La receta sigue validando ClearKey/HLS existente, dart analyze y toda
      la suite Flutter antes de construir.
+
+
+ETAPA 8 - V54 TOLERANCIA A LISTAS FALLIDAS
+------------------------------------------
+Fecha: 19/09/2026
+
+Diagnóstico real:
+- El Worker oficial respondió correctamente.
+- ft-tv-lists2.json real contiene 13 listas.
+- Las 13 entradas actuales son kind=flow y apuntan a repositorios autorizados
+  ByRafaelSystem/futboltotal-data o ByRafaelSystem/futboltotal-links.
+- ft-flow2.json fue verificado directamente contra el Worker:
+  31 categorías, 544 samples.
+  Tipos observados: HLS, DIRECTO y CLEARKEY.
+
+Problema detectado en V53:
+- SectionCatalogService cargaba las listas Flow de forma secuencial.
+- Si una sola lista secundaria devolvía error o formato no esperado, la
+  excepción abortaba el proceso completo antes de guardar los catálogos buenos.
+- Resultado visible: Fútbol Total podía quedar sin canales aun cuando
+  ft-flow2.json y otras listas sí respondían correctamente.
+
+Corrección V54:
+AA) lib/services/section_catalog_service.dart
+   - Cada lista Flow se intenta de forma independiente.
+   - Un fallo individual incrementa contador y se omite sin abortar las demás.
+   - Los catálogos válidos se conservan y se deduplican como antes.
+   - Si ninguna entrada del manifiesto resulta utilizable, se intenta
+     explícitamente FutbolTotalEndpoints.defaultFlowRaw (ft-flow2.json).
+   - Si tampoco funciona el fallback, se devuelve un error con cantidad de
+     listas fallidas.
+   - Se cierra correctamente FutbolTotalCatalogService al terminar.
+   - M3U, Xtream, provider.json y Lista clásica no se modifican.
+
+AB) Build
+   - Identificación: V54.
+   - versionName: 1.4.22.
+   - versionCode: 3054.
+   - Misma firma histórica TV FULL.
+   - ARM32 y ARM64.
