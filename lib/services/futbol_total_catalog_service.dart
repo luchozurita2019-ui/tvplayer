@@ -1,0 +1,28 @@
+import 'futbol_total_flow_catalog_parser.dart';
+import 'futbol_total_manifest_parser.dart';
+import 'm3u_fetcher.dart';
+
+/// Fachada de red del puente Fútbol Total.
+///
+/// La URL del manifiesto se recibe desde configuración autorizada. Este archivo
+/// no contiene tokens, firmas ni secretos del proyecto original.
+class FutbolTotalCatalogService {
+  const FutbolTotalCatalogService();
+
+  Future<FutbolTotalManifest> loadManifest(String manifestUrl) async {
+    final content = await M3uFetcher.fetch(manifestUrl);
+    return const FutbolTotalManifestParser().parse(content);
+  }
+
+  Future<FutbolTotalFlowCatalog> loadFlow(
+    FutbolTotalListDefinition definition,
+  ) async {
+    if (definition.kind != 'flow') {
+      throw const FormatException(
+        'La lista seleccionada no es un catálogo Flow.',
+      );
+    }
+    final content = await M3uFetcher.fetch(definition.url);
+    return const FutbolTotalFlowCatalogParser().parse(content);
+  }
+}
