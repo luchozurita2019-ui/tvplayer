@@ -421,11 +421,21 @@ class SectionCatalogService {
     try {
       for (final loaded in catalogs) {
         for (final channel in loaded.catalog.channels) {
-          if (!seen.add(channel.uniqueKey)) continue;
+          // La APK oficial mantiene cada TvList/FlowCat independiente.
+          // El mismo stream puede existir legítimamente en otra lista o
+          // categoría; sólo quitamos duplicados exactos dentro del mismo
+          // origen + categoría.
+          final sourceName = loaded.sourceName.trim().isEmpty
+              ? 'Fútbol Total'
+              : loaded.sourceName.trim();
+          final categoryName = channel.group?.trim() ?? '';
+          final scopedKey =
+              '$sourceName|$categoryName|${channel.uniqueKey}';
+          if (!seen.add(scopedKey)) continue;
 
           final grouped = _withFutbolTotalSource(
             channel,
-            sourceName: loaded.sourceName,
+            sourceName: sourceName,
           );
           count++;
           liveWriter.add(grouped.toJson());
