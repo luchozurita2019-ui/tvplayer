@@ -622,3 +622,32 @@ AB) Build
    - versionCode: 3054.
    - Misma firma histórica TV FULL.
    - ARM32 y ARM64.
+
+
+ETAPA 9 - CORRECCIÓN BACKEND SIN NUEVA APK
+------------------------------------------
+Fecha: 19/09/2026
+
+Diagnóstico observado desde V54 en dispositivo real:
+- La APK sí llamó al proxy con ft-tv-lists2.json.
+- El proxy registró repetidamente error de sesión y el fallback terminó
+  mostrando Cloudflare 1042.
+- La ruta directa Edge Function -> Worker fue probada por separado:
+  /ping = 200, /sesion = 200 y /data = 200.
+- /data devolvió el manifiesto real con 13 listas.
+
+Causa:
+- El Worker principal puede responder sesión ok=true sin entregar token ni
+  marcar libre=1, pero aun así acepta /data sin parámetro t.
+- El proxy interpretaba la ausencia de token como falta de acceso, descartaba
+  el Worker principal y terminaba intentando el secundario; el error visible
+  del secundario (Cloudflare 1042) ocultaba el rechazo local previo.
+
+Corrección backend:
+- tvf-futboltotal-proxy actualizado sin modificar la APK.
+- Si /sesion responde ok=true, ya no se exige token/libre antes de probar /data.
+- El acceso real se valida intentando /data.
+- Se mantiene la ruta HTTP directa desde la Edge Function.
+- La telemetría privada registra sólo archivo/estado/hora/error resumido; no
+  guarda tokens, claves ni contenido del catálogo.
+- V54 puede volver a probarse sin reinstalar.
