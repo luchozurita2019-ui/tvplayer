@@ -7,6 +7,7 @@ import 'package:provider/provider.dart';
 
 import '../models/playlist_source_type.dart';
 import '../providers/iptv_provider.dart';
+import '../services/futbol_total_endpoints.dart';
 import '../services/provider_json_catalog_parser.dart';
 
 const bool _androidTvBuild = bool.fromEnvironment('TV_FULL_ANDROID_TV');
@@ -28,6 +29,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
 
   final _nameController = TextEditingController();
   final _m3uUrlController = TextEditingController();
+  final _futbolTotalUrlController = TextEditingController();
   final _serverController = TextEditingController();
   final _usernameController = TextEditingController();
   final _passwordController = TextEditingController();
@@ -42,6 +44,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
 
   final _nameFocus = FocusNode();
   final _m3uUrlFocus = FocusNode();
+  final _futbolTotalUrlFocus = FocusNode();
   final _serverFocus = FocusNode();
   final _usernameFocus = FocusNode();
   final _passwordFocus = FocusNode();
@@ -61,6 +64,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
   void dispose() {
     _nameController.dispose();
     _m3uUrlController.dispose();
+    _futbolTotalUrlController.dispose();
     _serverController.dispose();
     _usernameController.dispose();
     _passwordController.dispose();
@@ -71,6 +75,7 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
     _providerFileFocus.dispose();
     _nameFocus.dispose();
     _m3uUrlFocus.dispose();
+    _futbolTotalUrlFocus.dispose();
     _serverFocus.dispose();
     _usernameFocus.dispose();
     _passwordFocus.dispose();
@@ -108,6 +113,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               Text(
                 _type == PlaylistSourceType.localProviderJson
                     ? 'Seleccioná el archivo de tu proveedor o pegá su JSON completo. El catálogo quedará guardado en este dispositivo.'
+                    : _type == PlaylistSourceType.futbolTotal
+                    ? 'Conectá el manifiesto o catálogo Flow de Fútbol Total. Esta fuente queda totalmente separada del provider.json.'
                     : 'Pegá el enlace que te dio tu proveedor. En M3U/M3U8, TV FULL detecta automáticamente si el enlace pertenece a Xtream. También podés elegir el tipo manualmente.',
                 style: Theme.of(context)
                     .textTheme
@@ -188,7 +195,54 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
           PlaylistSourceType.xtream => _xtreamFields(),
           PlaylistSourceType.stalker => _stalkerFields(),
           PlaylistSourceType.localProviderJson => _providerJsonFields(),
+          PlaylistSourceType.futbolTotal => _futbolTotalFields(),
         },
+      ],
+    );
+  }
+
+  Widget _futbolTotalFields() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        TextField(
+          controller: _futbolTotalUrlController,
+          focusNode: _futbolTotalUrlFocus,
+          keyboardType: TextInputType.url,
+          textInputAction: TextInputAction.done,
+          onSubmitted: (_) {
+            if (_androidTvBuild) _submitFromKeyboard();
+          },
+          decoration: const InputDecoration(
+            labelText: 'URL de manifiesto o catálogo Flow',
+            hintText: FutbolTotalEndpoints.manifestRaw,
+            prefixIcon: Icon(Icons.sports_soccer_rounded),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 10,
+          runSpacing: 10,
+          children: [
+            OutlinedButton.icon(
+              onPressed: () {
+                _futbolTotalUrlController.text =
+                    FutbolTotalEndpoints.manifestRaw;
+                _futbolTotalUrlFocus.requestFocus();
+              },
+              icon: const Icon(Icons.restore_rounded),
+              label: const Text('Usar URL detectada en APK'),
+            ),
+          ],
+        ),
+        const SizedBox(height: 14),
+        const _InfoBox(
+          text:
+              'Acepta ft-tv-lists2.json o un catálogo Flow directo (categories/samples). '
+              'Las listas Flow se cargan como catálogo independiente. La agenda de fútbol '
+              'ya se interpreta, pero canal_id todavía no se envía al reproductor hasta '
+              'terminar su resolvedor autorizado.',
+        ),
       ],
     );
   }
@@ -450,6 +504,8 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
         _portalFocus.requestFocus();
       case PlaylistSourceType.localProviderJson:
         (_pasteProviderJson ? _providerJsonFocus : _providerFileFocus).requestFocus();
+      case PlaylistSourceType.futbolTotal:
+        _futbolTotalUrlFocus.requestFocus();
     }
   }
 
@@ -486,6 +542,21 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
           'Portal Stalker está preparado en la interfaz, pero todavía no activamos la conexión real en esta primera entrega.',
         );
         return;
+      case PlaylistSourceType.futbolTotal:
+        final url = _futbolTotalUrlController.text.trim();
+        final uri = Uri.tryParse(url);
+        if (uri == null ||
+            !(uri.scheme == 'http' || uri.scheme == 'https') ||
+            uri.host.isEmpty) {
+          _showMessage(
+            'Ingresá una URL http/https válida de Fútbol Total.',
+          );
+          return;
+        }
+        await provider.addFutbolTotalSource(
+          _nameController.text.trim(),
+          url,
+        );
       case PlaylistSourceType.localProviderJson:
         if (_providerJsonController.text.trim().isEmpty) {
           _showMessage('Seleccioná provider.json o pegá el JSON de tu proveedor.');
@@ -622,6 +693,7 @@ class _TitleRow extends StatelessWidget {
       PlaylistSourceType.xtream => Icons.key_rounded,
       PlaylistSourceType.stalker => Icons.router_rounded,
       PlaylistSourceType.localProviderJson => Icons.description_outlined,
+      PlaylistSourceType.futbolTotal => Icons.sports_soccer_rounded,
     };
 
     return Row(
