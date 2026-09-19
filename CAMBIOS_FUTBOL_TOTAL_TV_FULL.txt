@@ -403,3 +403,53 @@ manifiesto -> Flow -> catálogo -> Channel -> reproductor.
 
 La reproducción real de agenda Fútbol mediante canal_id continuará en la
 siguiente etapa cuando se conecte el resolvedor autorizado del evento.
+
+
+ETAPA 3 - FUENTE VISIBLE Y DATOS DE PRUEBA
+------------------------------------------
+I) PlaylistSourceType
+   - Se agregó el tipo independiente futbolTotal.
+   - Etiqueta visible: "Fútbol Total".
+   - No reutiliza localProviderJson ni cambia el comportamiento del provider.json.
+
+J) IptvProvider
+   - Se agregaron addFutbolTotalSource y updateFutbolTotalSource.
+   - La fuente se persiste como servicio propio.
+   - Actualizar/eliminar esta fuente no modifica provider.json.
+
+K) AddSourceScreen / EditSourceScreen
+   - Se agregó formulario independiente para Fútbol Total.
+   - Acepta URL de ft-tv-lists2.json o un catálogo Flow directo.
+   - Incluye botón "Usar URL detectada en APK".
+   - Incluye botón "Usar manifiesto de prueba".
+   - La UI informa que canal_id todavía espera su resolvedor autorizado.
+
+L) SectionCatalogService
+   - Si la fuente es futbolTotal, usa un camino separado de M3U/provider.json.
+   - Reconoce manifiesto maestro o catálogo Flow directo.
+   - Descarga todas las listas kind=flow declaradas por el manifiesto.
+   - Deduplica canales por uniqueKey.
+   - Clasifica en vivo/películas/series con el clasificador ya existente.
+   - Si sólo existe kind=futbol, devuelve un error claro hasta conectar canal_id.
+
+M) lib/services/futbol_total_endpoints.dart
+   - Registra endpoints observados en Fútbol Total 3.6 sin tokens secretos.
+   - Registra Workers primario/secundario sólo como metadatos de integración.
+   - Define la URL del manifiesto sintético de prueba.
+
+DATOS DE PRUEBA AISLADOS
+------------------------
+Rama: futboltotal-test-data
+
+- test_data/ft-tv-lists2.test.json
+  Manifiesto sintético con una lista kind=flow y una lista kind=futbol.
+
+- test_data/ft-flow2.test.json
+  Catálogo sintético con dos streams HLS públicos de demostración.
+  No contiene contenido de Rafael ni de terceros privados.
+
+- test_data/agenda.test.json
+  Agenda sintética con canal_id y con_anuncios para probar el parser.
+
+Estos archivos permiten validar todo el adaptador sin depender todavía del
+endpoint autenticado real de Fútbol Total.
