@@ -698,3 +698,39 @@ AF) Build
    - versionName: 1.4.23.
    - versionCode: 3055.
    - Misma firma histórica TV FULL.
+
+
+ETAPA 11 - AUTORIZACIÓN SIN PUBLICIDAD
+--------------------------------------
+Fecha: 19/09/2026
+
+Autorización adicional del propietario:
+- Rafael autorizó expresamente quitar la publicidad para usar Fútbol Total
+  dentro de TV FULL.
+- Mensaje aportado por el usuario:
+  "si no hay problema sacale la publicidad para usarlo en tv full no hay problema"
+
+Diagnóstico previo:
+- El token emitido por /sesion era válido (token=1).
+- /data respondía HTTP 402 con {"ok":false,"msg":"ad"}.
+- Por tanto el bloqueo era el gate publicitario, no autenticación inválida.
+
+Corrección backend v19:
+- Se mantiene la validación de dispositivo TV FULL.
+- Si la identidad normal del televisor queda bloqueada por msg=ad, el backend
+  usa una identidad efímera de integración autorizada exclusivamente del lado
+  servidor.
+- Esa identidad solicita /sesion y /data sin mostrar ni completar publicidad.
+- Se verificó el mecanismo antes de activarlo:
+  /ping=200, /sesion=200, /data=200 y manifiesto con 13 listas.
+- Los documentos se cachean brevemente en memoria del backend para evitar
+  solicitudes innecesarias.
+- No se exponen firma, token ni identidad de integración al APK.
+- No se modifica provider.json, M3U ni Xtream.
+- La misma APK V54 puede probar este cambio sin reinstalar, porque el cambio
+  es completamente del lado servidor.
+
+Nota:
+- Se descartó la descarga GitHub directa desde el APK porque los repositorios
+  del propietario pueden no ser accesibles públicamente. La ruta final sigue
+  siendo el backend autorizado de TV FULL.
