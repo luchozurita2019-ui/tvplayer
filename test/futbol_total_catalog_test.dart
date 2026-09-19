@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:iptv_player/services/futbol_total_agenda_parser.dart';
 import 'package:iptv_player/services/futbol_total_flow_catalog_parser.dart';
 import 'package:iptv_player/services/futbol_total_manifest_parser.dart';
 
@@ -52,6 +53,48 @@ void main() {
       final parsed = const FutbolTotalManifestParser().parse(json);
       expect(parsed.lists.single.kind, 'flow');
       expect(parsed.lists.single.ttlSeconds, 0);
+    });
+  });
+
+  group('FutbolTotalAgendaParser', () {
+    test('omite finales y canales con anuncios', () {
+      const json = r'''
+      [
+        {
+          "status": "FINAL",
+          "titulo": "Terminado",
+          "ts_utc": 1,
+          "canales": [
+            {"canal_id": "fin", "canal": "Canal final", "con_anuncios": false}
+          ]
+        },
+        {
+          "status": "EN VIVO",
+          "titulo": "Equipo A vs Equipo B",
+          "ts_utc": 123456,
+          "canales": [
+            {"canal_id": "ads", "canal": "Con anuncios", "con_anuncios": true},
+            {"canal_id": "senal-1", "canal": "Señal 1", "con_anuncios": false}
+          ]
+        }
+      ]
+      ''';
+
+      final parsed = const FutbolTotalAgendaParser().parse(json);
+      expect(parsed.events, hasLength(1));
+      expect(parsed.events.single.title, 'Equipo A vs Equipo B');
+      expect(parsed.events.single.channels.single.canalId, 'senal-1');
+      expect(parsed.channelCount, 1);
+      expect(parsed.events.single.isLive, isTrue);
+    });
+
+    test('crea la referencia base-origen|canal_id observada en la APK', () {
+      final ref = FutbolTotalAgendaReference.fromAgendaUrl(
+        'https://agenda.example.com:8443/agenda/lista.json',
+        'canal-25',
+      );
+      expect(ref.baseOrigin, 'https://agenda.example.com:8443');
+      expect(ref.encoded, 'https://agenda.example.com:8443|canal-25');
     });
   });
 
