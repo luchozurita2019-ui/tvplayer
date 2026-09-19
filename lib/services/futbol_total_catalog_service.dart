@@ -1,3 +1,4 @@
+import 'futbol_total_agenda_parser.dart';
 import 'futbol_total_flow_catalog_parser.dart';
 import 'futbol_total_manifest_parser.dart';
 import 'm3u_fetcher.dart';
@@ -12,6 +13,18 @@ class FutbolTotalCatalogService {
   Future<FutbolTotalManifest> loadManifest(String manifestUrl) async {
     final content = await M3uFetcher.fetch(manifestUrl);
     return const FutbolTotalManifestParser().parse(content);
+  }
+
+  Future<FutbolTotalAgenda> loadAgenda(
+    FutbolTotalListDefinition definition,
+  ) async {
+    if (definition.kind != 'futbol') {
+      throw const FormatException(
+        'La lista seleccionada no es una agenda de fútbol.',
+      );
+    }
+    final content = await M3uFetcher.fetch(definition.url);
+    return const FutbolTotalAgendaParser().parse(content);
   }
 
   Future<FutbolTotalFlowCatalog> loadFlow(
