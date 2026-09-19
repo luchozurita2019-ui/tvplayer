@@ -7,6 +7,7 @@ import '../models/playlist_source_type.dart';
 import 'catalog_file_store.dart';
 import 'content_classifier.dart';
 import 'device_performance_service.dart';
+import 'json_bridge_parser.dart';
 import 'm3u_fetcher.dart';
 import 'm3u_parser.dart';
 import 'local_provider_json_store.dart';
@@ -237,6 +238,11 @@ class SectionCatalogService {
   /// en generaciones temporales independientes. No se crean tres listas de
   /// Channel en RAM: sólo viven el parser incremental y las categorías únicas.
   Future<void> _downloadAndPartitionToDisk(Playlist playlist) async {
+    if (playlist.sourceType == PlaylistSourceType.futbolTotalBridge) {
+      await _downloadFutbolTotalBridgeToDisk(playlist);
+      return;
+    }
+
     final parser = M3uLineParser();
     final writers = <TvSectionKind, CatalogFileWriter>{};
     final categorySets = <TvSectionKind, Set<String>>{
@@ -297,6 +303,40 @@ class SectionCatalogService {
       for (final writer in writers.values) {
         await writer.abort();
       }
+      rethrow;
+    }
+  }
+
+  Future<void> _downloadFutbolTotalBridgeToDisk(Playlist playlist) async {
+    final content = await M3uFetcher.fetch(playlist.source);
+    final parsed = JsonBridgeParser.parse(content);
+
+    if (parsed.channels.isEmpty) {
+      final detail = <String>[
+        if (parsed.unresolved > 0) '${parsed.unresolved} IDs/entradas sin URL directa',
+        if (parsed.skippedWeb > 0) '${parsed.skippedWeb} entradas WEB/IFRAME',
+        if (parsed.skippedDrm > 0) '${parsed.skippedDrm} entradas DRM',
+      ].join(', ');
+      throw FormatException(
+        detail.isEmpty
+            ? 'El JSON de Fútbol Total no contiene canales reproducibles.'
+            : 'El JSON se leyó, pero no contiene URLs reproducibles ($detail).',
+      );
+    }
+
+    final writer = await _catalogFiles.beginSnapshot(
+      serviceId: playlist.id,
+      kind: 'm3u_live',
+    );
+    try {
+      for (final channel in parsed.channels) {
+        writer.add(channel.toJson());
+      }
+      final committed = await writer.commit(categories: parsed.categories);
+      if (committed) _forget('${playlist.id}|m3u_live');
+      _lastNetworkRefresh['${playlist.id}|${playlist.source}'] = DateTime.now();
+    } catch (_) {
+      await writer.abort();
       rethrow;
     }
   }
