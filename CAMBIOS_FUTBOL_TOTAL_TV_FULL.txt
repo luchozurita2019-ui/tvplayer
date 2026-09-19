@@ -530,3 +530,15 @@ U) test/futbol_total_catalog_test.dart
    - Prueba que URLs públicas siguen directas.
    - Prueba ClearKey válido.
    - Prueba rechazo controlado de DRM inválido.
+
+
+MIGRACION AUTOMATICA DESDE V52
+------------------------------
+V) lib/providers/iptv_provider.dart
+   - Si una instalación existente tiene una fuente Fútbol Total apuntando
+     exactamente al manifiesto sintético de prueba, al iniciar se migra
+     automáticamente al manifiesto real detectado en Fútbol Total v3.6.
+   - Se limpia sólo el caché de esa fuente para evitar seguir mostrando los
+     dos canales Test.
+   - No se modifica ninguna fuente M3U/Xtream/provider.json ni otras fuentes
+     Fútbol Total con URL personalizada.
