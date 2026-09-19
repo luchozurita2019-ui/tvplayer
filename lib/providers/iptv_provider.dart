@@ -8,6 +8,7 @@ import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import '../services/m3u_parser.dart';
 import '../services/local_provider_json_store.dart';
+import '../services/futbol_total_endpoints.dart';
 import '../services/provider_json_catalog_parser.dart';
 import '../services/section_catalog_service.dart';
 import '../services/playback_settings_service.dart';
@@ -96,6 +97,7 @@ class IptvProvider extends ChangeNotifier {
     }
 
     await _ensureClassicPlaylist();
+    await _upgradeFutbolTotalTestSources();
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
@@ -135,6 +137,32 @@ class IptvProvider extends ChangeNotifier {
     next[index] = classic.copyWith(lastUpdated: current.lastUpdated);
     _playlists = next;
     await _localStore.clearServiceCatalogs(_classicPlaylistId);
+    await _localStore.saveServices(_playlists);
+  }
+
+  Future<void> _upgradeFutbolTotalTestSources() async {
+    var changed = false;
+    final next = <Playlist>[];
+
+    for (final item in _playlists) {
+      if (item.sourceType == PlaylistSourceType.futbolTotal &&
+          item.source == FutbolTotalEndpoints.integrationTestManifest) {
+        changed = true;
+        next.add(
+          item.copyWith(
+            source: FutbolTotalEndpoints.manifestRaw,
+            channels: const <Channel>[],
+            lastUpdated: DateTime.now(),
+          ),
+        );
+        await _localStore.clearServiceCatalogs(item.id);
+      } else {
+        next.add(item);
+      }
+    }
+
+    if (!changed) return;
+    _playlists = next;
     await _localStore.saveServices(_playlists);
   }
 
