@@ -244,15 +244,41 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
       widget.playlist,
       TvSectionKind.live,
     );
+
+    if (widget.playlist.sourceType == PlaylistSourceType.futbolTotal) {
+      final hierarchyReady = cached != null &&
+          cached.channels.isNotEmpty &&
+          cached.channels.every(
+            (channel) => (channel.catalogSource ?? '').trim().isNotEmpty,
+          );
+
+      if (hierarchyReady) {
+        unawaited(_refreshM3u());
+        return _adoptFutbolTotalHierarchy(_LiveData(cached.channels));
+      }
+
+      // Versiones anteriores guardaron todas las listas de Fútbol Total
+      // fusionadas y sin identidad de TvList. No mostramos ese snapshot:
+      // obligamos a reconstruirlo con la jerarquía oficial
+      // TvList -> categories[] -> samples[].
+      final fresh = await service.loadOrRefresh(
+        widget.playlist,
+        TvSectionKind.live,
+        forceNetwork: true,
+      );
+      return _adoptFutbolTotalHierarchy(_LiveData(fresh.channels));
+    }
+
     if (cached != null && cached.channels.isNotEmpty) {
       unawaited(_refreshM3u());
-      return _adoptFutbolTotalHierarchy(_LiveData(cached.channels));
+      return _LiveData(cached.channels);
     }
+
     final fresh = await service.loadOrRefresh(
       widget.playlist,
       TvSectionKind.live,
     );
-    return _adoptFutbolTotalHierarchy(_LiveData(fresh.channels));
+    return _LiveData(fresh.channels);
   }
 
   Future<void> _refreshXtream() async {
