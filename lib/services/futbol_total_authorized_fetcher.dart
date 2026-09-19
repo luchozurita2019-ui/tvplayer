@@ -22,11 +22,10 @@ class FutbolTotalAdRequiredException implements Exception {
 /// Descarga documentos de Fútbol Total sin exponer el mecanismo de firma
 /// original dentro del APK de TV FULL.
 ///
-/// - URLs públicas: descarga directa.
-/// - Catálogos allowlisted de ByRafaelSystem: descarga directa autorizada,
-///   sin publicidad.
-/// - El proxy privado queda disponible sólo para rutas que realmente lo
-///   necesiten y mantiene la autenticación de dispositivo TV FULL.
+/// - URLs públicas ajenas al puente: descarga directa.
+/// - Catálogos allowlisted de ByRafaelSystem: proxy privado TV FULL.
+/// - El backend aplica la autorización del propietario y mantiene los
+///   mecanismos de acceso fuera del APK.
 class FutbolTotalAuthorizedFetcher {
   FutbolTotalAuthorizedFetcher({
     RemoteProvisioningService? provisioning,
@@ -36,25 +35,6 @@ class FutbolTotalAuthorizedFetcher {
 
   final RemoteProvisioningService _provisioning;
   final http.Client _client;
-
-  static bool isOwnerAuthorizedDirectUrl(String rawUrl) {
-    final uri = Uri.tryParse(rawUrl.trim());
-    if (uri == null || uri.scheme != 'https') return false;
-
-    if (uri.host == 'raw.githubusercontent.com') {
-      final path = uri.path.toLowerCase();
-      return path.contains('/byrafaelsystem/futboltotal-data/') ||
-          path.contains('/byrafaelsystem/futboltotal-links/');
-    }
-
-    if (uri.host == 'api.github.com') {
-      final path = uri.path.toLowerCase();
-      return path.contains('/repos/byrafaelsystem/futboltotal-data/contents/') ||
-          path.contains('/repos/byrafaelsystem/futboltotal-links/contents/');
-    }
-
-    return false;
-  }
 
   static bool requiresAuthorizedProxy(String rawUrl) {
     final uri = Uri.tryParse(rawUrl.trim());
@@ -79,13 +59,6 @@ class FutbolTotalAuthorizedFetcher {
     String url, {
     bool noCache = false,
   }) async {
-    // Rafael autorizó expresamente a TV FULL a usar su contenido sin la
-    // publicidad. Sus catálogos GitHub allowlisted se descargan de forma
-    // directa, sin sesión del Worker ni gate publicitario.
-    if (isOwnerAuthorizedDirectUrl(url)) {
-      return M3uFetcher.fetch(url);
-    }
-
     if (!requiresAuthorizedProxy(url)) {
       return M3uFetcher.fetch(url);
     }
