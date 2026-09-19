@@ -327,11 +327,14 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
       if (all == null) return;
       final fresh = all[TvSectionKind.live];
       if (!mounted || fresh == null || fresh.channels.isEmpty) return;
-      final data = _LiveData(fresh.channels, categories: fresh.categories);
+      final data = _adoptFutbolTotalHierarchy(
+        _LiveData(fresh.channels, categories: fresh.categories),
+      );
       setState(() {
         _visibleData = data;
         _catalogIndex = null;
         _indexedData = null;
+        _indexedFutbolTotalSource = null;
       });
     } catch (_) {}
   }
