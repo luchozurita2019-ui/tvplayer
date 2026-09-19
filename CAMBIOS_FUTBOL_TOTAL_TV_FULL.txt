@@ -453,3 +453,80 @@ Rama: futboltotal-test-data
 
 Estos archivos permiten validar todo el adaptador sin depender todavía del
 endpoint autenticado real de Fútbol Total.
+
+
+ETAPA 5 - PUENTE PRIVADO REAL HACIA FUTBOL TOTAL
+------------------------------------------------
+Objetivo:
+Reemplazar el catálogo sintético de 2 canales por la ruta real autorizada de
+Fútbol Total v3.6, sin publicar su mecanismo de firma en el repositorio público
+de TV FULL.
+
+Hallazgo técnico confirmado en Fútbol Total v3.6:
+- versión usada por el Worker: vc=26.
+- id de instalación: UUID persistente.
+- sesión: POST /sesion.
+- datos: GET /data?f=...&vc=...&id=...&sig=...&t=...
+- firma de sesión: sesion:ft:vc:id
+- firma de datos: data:ft:archivo:vc:id
+- Worker primario: novax-online.iptvnovax.workers.dev
+- Worker secundario: ft-online.ftsystem.workers.dev
+- el algoritmo de firma se reconstruyó desde libguard.so de la APK autorizada.
+
+IMPORTANTE:
+Los valores criptográficos internos NO se escriben en este TXT ni se agregan
+al repositorio público. Se mantienen exclusivamente en el backend privado de
+TV FULL.
+
+BACKEND
+-------
+Se desplegó una nueva Edge Function privada:
+- tvf-futboltotal-proxy
+
+Características:
+- exige x-tvfull-device-code y x-tvfull-device-secret.
+- valida el dispositivo contra tvf_devices.
+- rechaza dispositivos inactivos/suspendidos.
+- sólo acepta URLs de los repositorios autorizados ByRafaelSystem:
+  futboltotal-data y futboltotal-links.
+- crea sesión compatible con Fútbol Total v3.6.
+- firma las peticiones al Worker del lado servidor.
+- intenta Worker primario y secundario.
+- nunca devuelve la clave/firma interna al APK.
+- devuelve únicamente el JSON solicitado.
+
+CAMBIOS EN TV FULL
+------------------
+P) lib/services/futbol_total_authorized_fetcher.dart
+   - Nuevo descargador específico.
+   - URLs públicas siguen descargándose directamente.
+   - URLs privadas de ByRafaelSystem se envían al proxy privado.
+   - reutiliza las credenciales de dispositivo de TV FULL.
+   - si las credenciales vencen, vuelve a registrar el dispositivo y reintenta.
+   - no escribe secretos ni tokens de Fútbol Total en logs.
+
+Q) lib/services/futbol_total_endpoints.dart
+   - Se agregó el endpoint privado tvf-futboltotal-proxy.
+
+R) lib/services/futbol_total_catalog_service.dart
+   - Manifiestos, Flow y agenda usan FutbolTotalAuthorizedFetcher.
+   - Ya no dependen de acceso público directo al repositorio privado.
+
+S) lib/services/section_catalog_service.dart
+   - La fuente Fútbol Total carga el manifiesto real por la ruta autorizada.
+   - El resto de M3U/provider.json permanece sin cambios.
+
+T) lib/services/futbol_total_flow_catalog_parser.dart
+   - Los canales ClearKey válidos ya NO se descartan.
+   - Se reutiliza ClearKeyDrmConfig existente de TV FULL.
+   - Se conservan kid/key normalizados sólo dentro del objeto Channel.
+   - DASH se marca como application/dash+xml.
+   - HLS se marca como application/x-mpegURL.
+   - WEBVIEW/IFRAME sigue separado.
+   - DRM inválido se omite con warning sin romper todo el catálogo.
+
+U) test/futbol_total_catalog_test.dart
+   - Prueba que sólo repos privados conocidos usan proxy.
+   - Prueba que URLs públicas siguen directas.
+   - Prueba ClearKey válido.
+   - Prueba rechazo controlado de DRM inválido.
