@@ -318,7 +318,8 @@ class SectionCatalogService {
 
   Future<void> _downloadFutbolTotalToDisk(Playlist playlist) async {
     final service = FutbolTotalCatalogService();
-    final catalogs = <FutbolTotalFlowCatalog>[];
+    final catalogs =
+        <({String sourceName, FutbolTotalFlowCatalog catalog})>[];
     FutbolTotalManifest? manifest;
     var failedFlowLists = 0;
 
@@ -345,7 +346,7 @@ class SectionCatalogService {
               failedFlowLists++;
               continue;
             }
-            catalogs.add(catalog);
+            catalogs.add((sourceName: definition.name, catalog: catalog));
           } catch (_) {
             failedFlowLists++;
           }
@@ -361,7 +362,12 @@ class SectionCatalogService {
             );
             final fallback =
                 const FutbolTotalFlowCatalogParser().parse(fallbackRaw);
-            if (fallback.channels.isNotEmpty) catalogs.add(fallback);
+            if (fallback.channels.isNotEmpty) {
+              catalogs.add((
+                sourceName: 'Fútbol Total',
+                catalog: fallback,
+              ));
+            }
           } catch (_) {}
         }
 
@@ -373,7 +379,14 @@ class SectionCatalogService {
         }
       } else {
         final direct = const FutbolTotalFlowCatalogParser().parse(raw);
-        if (direct.channels.isNotEmpty) catalogs.add(direct);
+        if (direct.channels.isNotEmpty) {
+          catalogs.add((
+            sourceName: playlist.name.trim().isEmpty
+                ? 'Fútbol Total'
+                : playlist.name.trim(),
+            catalog: direct,
+          ));
+        }
       }
     } finally {
       service.close();
@@ -388,34 +401,30 @@ class SectionCatalogService {
       );
     }
 
-    final writers = <TvSectionKind, CatalogFileWriter>{};
-    final categorySets = <TvSectionKind, Set<String>>{
-      for (final kind in TvSectionKind.values) kind: <String>{},
-    };
-    final categories = <TvSectionKind, List<String>>{
-      for (final kind in TvSectionKind.values) kind: <String>[],
-    };
-    for (final kind in TvSectionKind.values) {
-      writers[kind] = await _catalogFiles.beginSnapshot(
-        serviceId: playlist.id,
-        kind: 'm3u_${kind.name}',
-      );
-    }
+    final liveWriter = await _catalogFiles.beginSnapshot(
+      serviceId: playlist.id,
+      kind: 'm3u_${TvSectionKind.live.name}',
+    );
+    final categorySet = <String>{};
+    final categories = <String>[];
 
     final seen = <String>{};
     var count = 0;
     try {
-      for (final catalog in catalogs) {
-        for (final channel in catalog.channels) {
+      for (final loaded in catalogs) {
+        for (final channel in loaded.catalog.channels) {
           if (!seen.add(channel.uniqueKey)) continue;
+
+          final grouped = _withFutbolTotalGroup(
+            channel,
+            sourceName: loaded.sourceName,
+          );
           count++;
-          final kind = _classify(channel);
-          writers[kind]!.add(channel.toJson());
-          final group = channel.group?.trim();
-          if (group != null &&
-              group.isNotEmpty &&
-              categorySets[kind]!.add(group)) {
-            categories[kind]!.add(group);
+          liveWriter.add(grouped.toJson());
+
+          final group = grouped.group?.trim();
+          if (group != null && group.isNotEmpty && categorySet.add(group)) {
+            categories.add(group);
           }
         }
       }
@@ -426,21 +435,40 @@ class SectionCatalogService {
         );
       }
 
+      final committed = await liveWriter.commit(categories: categories);
+      if (!committed) {
+        throw const FormatException(
+          'Fútbol Total no pudo guardar el catálogo LIVE.',
+        );
+      }
+
+      // V54/V55 podían clasificar señales Flow como películas o series usando
+      // heurísticas M3U. Fútbol Total es una fuente LIVE: retiramos solamente
+      // esas secciones antiguas para que no sobrevivan por caché.
+      await _catalogFiles.clearSection(
+        playlist.id,
+        'm3u_${TvSectionKind.movies.name}',
+      );
+      await _catalogFiles.clearSection(
+        playlist.id,
+        'm3u_${TvSectionKind.series.name}',
+      );
+      await _store.deleteLegacySnapshot(
+        playlist.id,
+        'm3u_${TvSectionKind.movies.name}',
+      );
+      await _store.deleteLegacySnapshot(
+        playlist.id,
+        'm3u_${TvSectionKind.series.name}',
+      );
+
       for (final kind in TvSectionKind.values) {
-        final writer = writers[kind]!;
-        if (writer.count == 0) {
-          await writer.abort();
-          continue;
-        }
-        final committed = await writer.commit(categories: categories[kind]!);
-        if (committed) _forget('${playlist.id}|m3u_${kind.name}');
+        _forget('${playlist.id}|m3u_${kind.name}');
       }
       _lastNetworkRefresh['${playlist.id}|${playlist.source}'] =
           DateTime.now();
     } catch (_) {
-      for (final writer in writers.values) {
-        await writer.abort();
-      }
+      await liveWriter.abort();
       rethrow;
     }
   }
