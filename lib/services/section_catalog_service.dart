@@ -316,7 +316,8 @@ class SectionCatalogService {
   }
 
   Future<void> _downloadFutbolTotalToDisk(Playlist playlist) async {
-    final raw = await M3uFetcher.fetch(playlist.source);
+    final service = FutbolTotalCatalogService();
+    final raw = await service.fetchRaw(playlist.source);
     final catalogs = <FutbolTotalFlowCatalog>[];
     FutbolTotalManifest? manifest;
 
@@ -330,7 +331,6 @@ class SectionCatalogService {
     }
 
     if (manifest != null) {
-      final service = const FutbolTotalCatalogService();
       for (final definition in manifest.flowLists) {
         catalogs.add(await service.loadFlow(definition));
       }
