@@ -34,7 +34,7 @@ jobs:
           echo "libguard_x86_64_sha256=$(sha256sum /tmp/ft/lib/x86_64/libguard.so | cut -d' ' -f1)"
 
           python3 - <<'PY'
-          import hashlib, hmac, json, urllib.request, urllib.error, uuid
+          import hashlib, hmac, json, urllib.request, urllib.error, urllib.parse, uuid
 
           cert = open('/tmp/ft/cert.der','rb').read()
           lib = open('/tmp/ft/lib/x86_64/libguard.so','rb').read()
@@ -88,7 +88,7 @@ jobs:
               'sig':sign(message),'quiero':1,
           })
           print('session_with_hw_status=', ss)
-          print('session_with_hw_body=', sb[:240])
+          print('session_with_hw_ok=', ss == 200)
 
           if ss == 401:
               message=f'sesion:ft:26:{install_id}'
@@ -97,7 +97,7 @@ jobs:
                   'sig':sign(message),'quiero':1,
               })
               print('session_legacy_status=', ss)
-              print('session_legacy_body=', sb[:240])
+              print('session_legacy_ok=', ss == 200)
 
           if ss != 200:
               raise SystemExit('official auth derivation did not authenticate')
@@ -106,4 +106,67 @@ jobs:
           print('session_ok=', bool(parsed.get('ok')))
           print('has_token=', bool(parsed.get('t')))
           print('libre=', parsed.get('libre',0))
+
+          token = (parsed.get('t') or '').strip()
+
+          def get(path):
+              req=urllib.request.Request(
+                  base+path,
+                  headers={
+                      'Accept':'application/json',
+                      'User-Agent':'Dalvik/2.1.0 (Linux; U; Android 12; TV Build/STT1.220616.001)',
+                  },
+                  method='GET',
+              )
+              try:
+                  with urllib.request.urlopen(req, timeout=20) as r:
+                      return r.status, r.read().decode('utf-8','replace')
+              except urllib.error.HTTPError as e:
+                  return e.code, e.read().decode('utf-8','replace')
+
+          def fetch_data(filename):
+              params={
+                  'f':filename,
+                  'vc':'26',
+                  'id':install_id,
+                  'sig':sign(f'data:ft:{filename}:26:{install_id}'),
+                  'nc':'1',
+              }
+              if token:
+                  params['t']=token
+              status, body = get('/data?' + urllib.parse.urlencode(params))
+              print(filename + '_status=', status)
+              if status != 200:
+                  print(filename + '_error_prefix=', body[:120].replace('\\n',' '))
+                  raise SystemExit(filename + ' fetch failed')
+              return json.loads(body)
+
+          manifest = fetch_data('ft-tv-lists2.json')
+          if not isinstance(manifest, dict):
+              raise SystemExit('manifest is not object')
+          lists = manifest.get('lists') if isinstance(manifest.get('lists'), list) else []
+          print('manifest_list_count=', len(lists))
+          print('manifest_kinds=', sorted({str(x.get('kind') or 'flow') for x in lists if isinstance(x,dict)}))
+
+          flow = fetch_data('ft-flow2.json')
+          if not isinstance(flow, dict):
+              raise SystemExit('flow is not object')
+          categories = flow.get('categories') if isinstance(flow.get('categories'), list) else []
+          sample_count = 0
+          type_counts = {}
+          for category in categories:
+              if not isinstance(category, dict):
+                  continue
+              samples = category.get('samples') if isinstance(category.get('samples'), list) else []
+              sample_count += len(samples)
+              for item in samples:
+                  if not isinstance(item, dict):
+                      continue
+                  typ = str(item.get('type') or 'CLEARKEY').upper()
+                  type_counts[typ] = type_counts.get(typ, 0) + 1
+          print('flow_category_count=', len(categories))
+          print('flow_sample_count=', sample_count)
+          print('flow_type_counts=', json.dumps(type_counts, sort_keys=True))
+          if sample_count == 0:
+              raise SystemExit('flow contains no samples')
           PY
