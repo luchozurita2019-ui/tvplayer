@@ -250,15 +250,6 @@ class _AddSourceScreenState extends State<AddSourceScreen> {
               icon: const Icon(Icons.restore_rounded),
               label: const Text('Usar Fútbol Total real'),
             ),
-            OutlinedButton.icon(
-              onPressed: () {
-                _futbolTotalUrlController.text =
-                    FutbolTotalEndpoints.integrationTestManifest;
-                _futbolTotalUrlFocus.requestFocus();
-              },
-              icon: const Icon(Icons.science_outlined),
-              label: const Text('Usar manifiesto de prueba'),
-            ),
           ],
         ),
         const SizedBox(height: 14),
