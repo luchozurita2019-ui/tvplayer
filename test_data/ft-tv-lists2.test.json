@@ -1,0 +1,16 @@
+{
+  "futbol": {
+    "evento_path": "/evento.php?id=",
+    "iframe": "",
+    "descartar": ["/chat/"],
+    "saltos": []
+  },
+  "lists": [
+    {
+      "name": "Flow de prueba TV FULL",
+      "url": "https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/futboltotal-test-data/test_data/ft-flow2.test.json",
+      "kind": "flow",
+      "ttl": 60
+    }
+  ]
+}
