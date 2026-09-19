@@ -1,0 +1,28 @@
+{
+  "summary": {
+    "categories": 1,
+    "streams": 2,
+    "purpose": "Prueba de integración autorizada Fútbol Total -> TV FULL"
+  },
+  "seeds": [],
+  "seed_ua": "Mozilla/5.0",
+  "categories": [
+    {
+      "name": "Prueba Fútbol Total",
+      "samples": [
+        {
+          "name": "Apple HLS Test",
+          "type": "HLS",
+          "original_url": "https://devstreaming-cdn.apple.com/videos/streaming/examples/bipbop_4x3/bipbop_4x3_variant.m3u8",
+          "headers": {}
+        },
+        {
+          "name": "Mux HLS Test",
+          "type": "HLS",
+          "original_url": "https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8",
+          "headers": {}
+        }
+      ]
+    }
+  ]
+}
