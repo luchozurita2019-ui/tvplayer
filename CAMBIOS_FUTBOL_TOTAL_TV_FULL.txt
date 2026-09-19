@@ -131,3 +131,53 @@ Comparación contra experiment/lista-tv-3-v50-clean:
 - Sólo se agregaron archivos nuevos.
 - No se modificó ningún archivo existente de V50.
 - No se eliminó ningún canal, catálogo, parser, reproductor ni configuración.
+
+
+ETAPA 3 - CONFIGURACION EXTRAIDA DE FUTBOL TOTAL 3.6
+----------------------------------------------------
+Instrucción del propietario:
+- Extraer las URLs/configuración directamente de la APK.
+- Si hace falta, generar una configuración propia de prueba.
+- Más adelante Rafael enviará una configuración creada por él.
+
+Hallazgos confirmados en MainActivity y clases auxiliares:
+1. URL de manifiesto:
+   https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-tv-lists2.json
+2. URL fallback Flow:
+   https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-flow2.json
+3. URL links2:
+   https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/links2.json
+4. Endpoint API alternativo de links2:
+   https://api.github.com/repos/ByRafaelSystem/futboltotal-data/contents/links2.json
+5. Worker primario:
+   https://novax-online.iptvnovax.workers.dev
+6. Worker secundario:
+   https://ft-online.ftsystem.workers.dev
+
+Fallback original confirmado:
+- Si ft-tv-lists2.json no entrega listas válidas, Fútbol Total crea:
+  nombre = "Flow completo"
+  url = ft-flow2.json
+  kind = "flow"
+  ttl = 0
+
+CAMBIOS DE CODIGO - ETAPA 3
+----------------------------
+I) lib/services/futbol_total_embedded_config.dart
+   - Centraliza sólo URLs públicas/no secretas observadas en la APK v3.6.
+   - Replica el fallback original "Flow completo".
+   - No contiene tokens, firmas, claves o credenciales.
+
+J) test/fixtures/futbol_total_manifest_v36_fallback.json
+   - Manifiesto de prueba autorizado equivalente al fallback de v3.6.
+
+K) test/futbol_total_catalog_test.dart
+   - Pruebas del fallback extraído.
+   - Verifica endpoints embebidos y que no dependan del provider.json de TV FULL.
+
+NOTA SOBRE AUTENTICACION
+------------------------
+La APK original convierte URLs del repositorio privado a peticiones del Worker
+con parámetros f, vc, id y sig. La firma se obtiene mediante Guard nativo.
+Esta etapa documenta el flujo y mantiene el adaptador preparado, pero no expone
+ni escribe secretos en este archivo.
