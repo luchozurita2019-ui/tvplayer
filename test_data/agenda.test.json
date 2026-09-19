@@ -1,0 +1,20 @@
+[
+  {
+    "status": "EN VIVO",
+    "titulo": "Partido de prueba A vs B",
+    "categoria": "Fútbol",
+    "ts_utc": 0,
+    "canales": [
+      {
+        "canal_id": "demo-1",
+        "canal": "Señal Demo 1",
+        "con_anuncios": false
+      },
+      {
+        "canal_id": "demo-ads",
+        "canal": "Señal con anuncios",
+        "con_anuncios": true
+      }
+    ]
+  }
+]
