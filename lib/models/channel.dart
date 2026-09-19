@@ -18,6 +18,7 @@ class Channel {
   final String? dynamicStreamPath; // ruta original de provider.json
   final String?
   providerGlobalIndex; // índice del catálogo si el proveedor lo usa
+  final String? catalogSourceName; // lista/origen superior (ej. Fútbol Total)
 
   // Compatibilidad histórica: seguimos exponiendo User-Agent y Referer de
   // forma explícita porque ya existen listas guardadas con estos campos.
@@ -44,6 +45,7 @@ class Channel {
     this.dynamicStreamId,
     this.dynamicStreamPath,
     this.providerGlobalIndex,
+    this.catalogSourceName,
     this.httpUserAgent,
     this.httpReferrer,
     this.httpHeaders,
@@ -123,6 +125,7 @@ class Channel {
     if (dynamicStreamId != null) 'dynamicStreamId': dynamicStreamId,
     if (dynamicStreamPath != null) 'dynamicStreamPath': dynamicStreamPath,
     if (providerGlobalIndex != null) 'providerGlobalIndex': providerGlobalIndex,
+    if (catalogSourceName != null) 'catalogSourceName': catalogSourceName,
     'httpUserAgent': httpUserAgent,
     'httpReferrer': httpReferrer,
     if (httpHeaders != null) 'httpHeaders': httpHeaders,
@@ -184,6 +187,7 @@ class Channel {
       dynamicStreamId: json['dynamicStreamId'] as String?,
       dynamicStreamPath: json['dynamicStreamPath'] as String?,
       providerGlobalIndex: json['providerGlobalIndex'] as String?,
+      catalogSourceName: json['catalogSourceName'] as String?,
       httpUserAgent: json['httpUserAgent'] as String?,
       httpReferrer: json['httpReferrer'] as String?,
       httpHeaders: headers,
