@@ -11,6 +11,12 @@
       "url": "https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/futboltotal-test-data/test_data/ft-flow2.test.json",
       "kind": "flow",
       "ttl": 60
+    },
+    {
+      "name": "Agenda de prueba TV FULL",
+      "url": "https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/futboltotal-test-data/test_data/agenda.test.json",
+      "kind": "futbol",
+      "ttl": 30
     }
   ]
 }
