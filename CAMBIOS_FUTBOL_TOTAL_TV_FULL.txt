@@ -1,0 +1,84 @@
+TV FULL PRO - INTEGRACION AUTORIZADA FUTBOL TOTAL
+Registro de cambios para Rafael / propietario de Fútbol Total
+Fecha de inicio: 19/09/2026
+
+AUTORIZACION RECIBIDA
+---------------------
+El propietario de Fútbol Total autorizó expresamente utilizar y adaptar su
+contenido, URLs, tokens, TV en vivo, películas y series, y solicitó recibir un
+archivo con las mejoras y cambios realizados.
+
+Este documento cumple esa condición y se actualizará junto con cada etapa.
+No se escribirán valores secretos, tokens activos ni claves privadas en este
+archivo ni en el repositorio.
+
+BASE DE TRABAJO
+---------------
+Repositorio: luchozurita2019-ui/tvplayer
+Base exacta: experiment/lista-tv-3-v50-clean
+Rama nueva y aislada: feature/v50-futboltotal-authorized
+
+Las ramas V50 existentes NO se modifican:
+- experiment/lista-tv-3-v50-clean
+- experiment/lista-tv-3-v50
+- experiment/v50-futboltotal-catalog-bridge
+
+ETAPA 1 - RECONSTRUCCION DE FORMATOS
+------------------------------------
+Fuente analizada: FútbolTotal_v3.6.apk descompilada.
+
+Se confirmó en el código original:
+1. El manifiesto maestro utiliza el formato ft-tv-lists2.json.
+2. El manifiesto contiene lists[] con name, url, kind (flow/futbol) y ttl.
+3. El bloque futbol admite evento_path, iframe, descartar[] y saltos[].
+4. Los catálogos Flow usan seeds[], seed_ua, categories[] y samples[].
+5. Cada sample Flow puede contener name, original_url, url, headers, type,
+   drm_license_uri/drm e icono/logo.
+
+CAMBIOS DE CODIGO - ETAPA 1
+----------------------------
+A) lib/services/futbol_total_manifest_parser.dart
+   - Parser nuevo e independiente del manifiesto de Fútbol Total.
+   - Lee lists[] y reglas remotas de futbol.
+   - Normaliza kind vacío a flow.
+   - Normaliza TTL negativo a cero.
+   - No implementa autenticación ni contiene secretos.
+
+B) lib/services/futbol_total_flow_catalog_parser.dart
+   - Parser nuevo para categories/samples.
+   - Respeta prioridad original_url -> url.
+   - Conserva headers declarados por la fuente.
+   - Conserva nombre, categoría y logo HTTP/HTTPS.
+   - Lee seeds y seed_ua.
+   - En esta etapa WEB/IFRAME y DRM quedan identificados pero no se envían al
+     reproductor hasta conectar el resolvedor autorizado.
+
+C) lib/services/futbol_total_catalog_service.dart
+   - Fachada de red para cargar un manifiesto autorizado y catálogos Flow.
+   - Reutiliza el descargador estable de TV FULL.
+   - No altera provider.json, M3U, Xtream, Stalker ni Lista clásica.
+
+D) test/futbol_total_catalog_test.dart
+   - Pruebas del manifiesto.
+   - Prueba de prioridad original_url.
+   - Prueba de fallback url.
+   - Prueba de headers.
+   - Prueba de omisión controlada de WEB/IFRAME y DRM.
+
+SEGURIDAD / COMPATIBILIDAD
+--------------------------
+- No se modificó provider.json.
+- No se modificó el resolvedor del proveedor existente.
+- No se modificó el reproductor.
+- No se incorporaron tokens activos ni secretos al repositorio.
+- Los cambios viven únicamente en la rama aislada indicada arriba.
+
+PENDIENTE - PROXIMAS ETAPAS
+---------------------------
+1. Conectar la obtención autorizada del manifiesto actual.
+2. Implementar el parser de agenda futbol:
+   status, titulo/categoria, ts_utc, canales, canal_id, con_anuncios.
+3. Integrar la lista como catálogo independiente en TV FULL.
+4. Validar actualización/cache/TTL.
+5. Probar reproducción de streams directos autorizados.
+6. Documentar cualquier adaptación adicional solicitada por Rafael.
