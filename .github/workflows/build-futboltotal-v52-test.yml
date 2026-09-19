@@ -11,7 +11,7 @@ on:
       - 'pubspec.yaml'
       - 'pubspec.lock'
       - 'CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt'
-      - '.github/workflows/build-futboltotal-v53-test.yml'
+      - '.github/workflows/build-futboltotal-v52-test.yml'
   workflow_dispatch:
 
 permissions:
