@@ -1,0 +1,10 @@
+{
+  "lists": [
+    {
+      "name": "Flow completo",
+      "url": "https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-flow2.json",
+      "kind": "flow",
+      "ttl": 0
+    }
+  ]
+}
