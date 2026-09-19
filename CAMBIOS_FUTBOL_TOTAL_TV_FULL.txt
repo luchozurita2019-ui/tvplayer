@@ -82,3 +82,36 @@ PENDIENTE - PROXIMAS ETAPAS
 4. Validar actualización/cache/TTL.
 5. Probar reproducción de streams directos autorizados.
 6. Documentar cualquier adaptación adicional solicitada por Rafael.
+
+
+ETAPA 2 - AGENDA DE FUTBOL
+---------------------------
+E) lib/services/futbol_total_agenda_parser.dart
+   - Parser nuevo para la agenda JSON del modo Fútbol.
+   - La raíz se interpreta como array JSON, igual que en Fútbol Total 3.6.
+   - Lee status, titulo, categoria, ts_utc y canales[].
+   - Omite eventos cuyo status contiene "final".
+   - Omite canales con con_anuncios=true.
+   - Requiere canal_id y usa "Canal" si falta el nombre visible.
+   - El título usa titulo -> categoria -> "Partido".
+   - canal_id se conserva como identificador y NO se trata como URL multimedia.
+   - Se agregó FutbolTotalAgendaReference para reproducir la referencia interna
+     observada en la APK: base-origen|canal_id.
+   - La base conserva esquema, host y puerto de la URL de agenda.
+
+F) lib/services/futbol_total_catalog_service.dart
+   - Ahora también puede descargar y parsear listas kind=futbol.
+   - Las listas kind=flow y kind=futbol siguen rutas de parser separadas.
+
+G) test/futbol_total_catalog_test.dart
+   - Se agregaron pruebas de eventos finalizados.
+   - Se agregaron pruebas de con_anuncios.
+   - Se agregó prueba de la referencia base-origen|canal_id con puerto.
+
+VALIDACION AUTOMATICA
+---------------------
+H) .github/workflows/test-futboltotal-v50.yml
+   - Workflow aislado para esta rama.
+   - Ejecuta dart analyze lib test.
+   - Ejecuta toda la suite flutter test.
+   - No compila ni publica APK todavía.
