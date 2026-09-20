@@ -48,6 +48,7 @@ class StreamingPremiumCookie {
 
 class StreamingPremiumSession {
   final String platform;
+  final String mode;
   final String url;
   final List<StreamingPremiumCookie> cookies;
   final bool shared;
@@ -55,11 +56,14 @@ class StreamingPremiumSession {
 
   const StreamingPremiumSession({
     required this.platform,
+    required this.mode,
     required this.url,
     required this.cookies,
     required this.shared,
     required this.ref,
   });
+
+  bool get isExternal => mode == 'external';
 }
 
 enum StreamingPremiumStage {
@@ -69,6 +73,7 @@ enum StreamingPremiumStage {
   validatingSession,
   installingCookies,
   openingPreparedSession,
+  openingExternalSession,
   openingOfficialFallback,
 }
 
@@ -118,9 +123,13 @@ class StreamingPremiumService {
         _client = client ?? http.Client();
 
   static const _endpoint =
-      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium-v67-test';
+      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium-v67-platform-test';
   static const MethodChannel _webPlayback =
       MethodChannel('tvfull/web_playback');
+  static const MethodChannel _deviceIdentity =
+      MethodChannel('tvfull/device_identity');
+  static const bool _androidTv =
+      bool.fromEnvironment('TV_FULL_ANDROID_TV', defaultValue: false);
 
   static const Duration _rapidRetryWindow = Duration(minutes: 3);
   static const Duration _sessionMapCacheTtl = Duration(minutes: 15);
@@ -236,10 +245,25 @@ class StreamingPremiumService {
       );
     }
 
-    final url = data['url']?.toString().trim() ?? '';
+    final mode = data['mode']?.toString().trim().toLowerCase() ?? 'webview';
+    var url = data['url']?.toString().trim() ?? '';
+    if (mode == 'external' && platform == 'netflix') {
+      final preferred = _androidTv
+          ? data['tv_url']?.toString().trim()
+          : data['phone_url']?.toString().trim();
+      if (preferred != null && preferred.isNotEmpty) {
+        url = preferred;
+      }
+    }
+
     final uri = Uri.tryParse(url);
     if (uri == null || uri.scheme != 'https' || uri.host.trim().isEmpty) {
       throw const FormatException('URL Streaming Premium inválida.');
+    }
+    if (mode == 'external' &&
+        platform == 'netflix' &&
+        !(uri.host == 'netflix.com' || uri.host.endsWith('.netflix.com'))) {
+      throw const FormatException('Destino externo de Netflix inválido.');
     }
 
     final cookies = <StreamingPremiumCookie>[];
@@ -259,7 +283,7 @@ class StreamingPremiumService {
       }
     }
 
-    if (cookies.isEmpty) {
+    if (mode != 'external' && cookies.isEmpty) {
       throw const FormatException(
         'La sesión compartida no contiene cookies válidas.',
       );
@@ -267,6 +291,7 @@ class StreamingPremiumService {
 
     final session = StreamingPremiumSession(
       platform: data['platform']?.toString() ?? platform,
+      mode: mode,
       url: url,
       cookies: List.unmodifiable(cookies),
       shared: data['shared'] == true,
@@ -293,6 +318,18 @@ class StreamingPremiumService {
         intento: intento,
         onStage: onStage,
       );
+
+      if (session.isExternal) {
+        onStage?.call(StreamingPremiumStage.openingExternalSession);
+        debugPrint(
+          '[StreamingPremium] $platform: abriendo handoff externo preparado',
+        );
+        await _webPlayback.invokeMethod<dynamic>('openExternal', {
+          'url': session.url,
+          'platform': platform,
+        });
+        return;
+      }
 
       onStage?.call(StreamingPremiumStage.installingCookies);
       debugPrint(
@@ -353,6 +390,13 @@ class StreamingPremiumService {
     final url = _officialUrlFor(platform);
     onStage?.call(StreamingPremiumStage.openingOfficialFallback);
     debugPrint('[StreamingPremium] $platform: abriendo acceso oficial');
+    if (platform == 'netflix') {
+      await _webPlayback.invokeMethod<dynamic>('openExternal', {
+        'url': url,
+        'platform': platform,
+      });
+      return;
+    }
     await _webPlayback.invokeMethod<dynamic>('open', {
       'url': url,
       'headers': const <String, String>{
@@ -389,7 +433,9 @@ class StreamingPremiumService {
     String platform,
     RemoteDeviceCredentials credentials,
     int intento,
-  ) {
+  ) async {
+    final compatId =
+        await _deviceIdentity.invokeMethod<String>('getPremiumCompatId') ?? '';
     return _client
         .post(
           Uri.parse(_endpoint),
@@ -402,6 +448,7 @@ class StreamingPremiumService {
           body: jsonEncode({
             'platform': platform,
             'intento': intento,
+            'compatId': compatId,
           }),
         )
         .timeout(const Duration(seconds: 18));
