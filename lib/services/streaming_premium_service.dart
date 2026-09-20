@@ -110,11 +110,11 @@ class _CachedPremiumSession {
   const _CachedPremiumSession(this.session, this.fetchedAt);
 }
 
-/// V66 test:
-/// - conserva V65 intacta;
-/// - replica el ciclo de entrada/reintento observado en FT 3.6;
-/// - no registra valores de cookies ni tokens;
-/// - la sesión siempre llega de forma opaca desde el backend.
+/// V68 test aislado:
+/// - MAX / Prime / Crunchyroll siguen el ciclo observado en FT 3.6;
+/// - no abre fallback oficial si la sesión preparada falla;
+/// - replica UA/cookies/dominios legacy sin registrar valores sensibles;
+/// - Netflix queda fuera de esta fase de prueba.
 class StreamingPremiumService {
   StreamingPremiumService({
     RemoteProvisioningService? provisioning,
@@ -130,6 +130,24 @@ class StreamingPremiumService {
       MethodChannel('tvfull/device_identity');
   static const bool _androidTv =
       bool.fromEnvironment('TV_FULL_ANDROID_TV', defaultValue: false);
+
+  static const String ftDesktopUserAgent =
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+      'AppleWebKit/537.36 (KHTML, like Gecko) '
+      'Chrome/150.0.0.0 Safari/537.36';
+
+  static const Map<String, String> _defaultDomains = <String, String>{
+    'hbomax': '.max.com',
+    'prime': '.primevideo.com',
+    'crunchyroll': '.crunchyroll.com',
+  };
+
+  static const Map<String, List<String>> _legacyExtraDomains =
+      <String, List<String>>{
+    'hbomax': <String>['.hbomax.com', '.max.com'],
+    'prime': <String>['.amazon.com'],
+    'crunchyroll': <String>[],
+  };
 
   static const Duration _rapidRetryWindow = Duration(minutes: 3);
   static const Duration _sessionMapCacheTtl = Duration(minutes: 15);
@@ -289,11 +307,14 @@ class StreamingPremiumService {
       );
     }
 
+    final normalizedCookies =
+        mode == 'external' ? cookies : _normalizeFtCookies(platform, cookies);
+
     final session = StreamingPremiumSession(
       platform: data['platform']?.toString() ?? platform,
       mode: mode,
       url: url,
-      cookies: List.unmodifiable(cookies),
+      cookies: List.unmodifiable(normalizedCookies),
       shared: data['shared'] == true,
       ref: data['ref']?.toString().trim() ?? '',
     );
@@ -346,7 +367,7 @@ class StreamingPremiumService {
       final result = await _webPlayback.invokeMethod<dynamic>('open', {
         'url': session.url,
         'headers': const <String, String>{
-          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
+          'User-Agent': ftDesktopUserAgent,
         },
         'cookies': session.cookies
             .map((cookie) => cookie.toJson())
@@ -400,7 +421,7 @@ class StreamingPremiumService {
     await _webPlayback.invokeMethod<dynamic>('open', {
       'url': url,
       'headers': const <String, String>{
-        'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
+        'User-Agent': ftDesktopUserAgent,
       },
       'cookies': const <Map<String, dynamic>>[],
       'platform': platform,
@@ -429,6 +450,57 @@ class StreamingPremiumService {
     }
   }
 
+  List<StreamingPremiumCookie> _normalizeFtCookies(
+    String platform,
+    List<StreamingPremiumCookie> incoming,
+  ) {
+    if (incoming.isEmpty) return incoming;
+
+    final defaultDomain = _defaultDomains[platform];
+    final extras = _legacyExtraDomains[platform] ?? const <String>[];
+    if (defaultDomain == null || extras.isEmpty) {
+      return List<StreamingPremiumCookie>.from(incoming);
+    }
+
+    String canonical(String value) =>
+        value.trim().toLowerCase().replaceFirst(RegExp(r'^\\.'), '');
+
+    final defaultCanonical = canonical(defaultDomain);
+    final hasOtherDomain = incoming.any(
+      (cookie) => canonical(cookie.domain) != defaultCanonical,
+    );
+    final hasHostOnly = incoming.any((cookie) => cookie.hostOnly);
+
+    // FT 3.6 replica el formato legacy en el dominio base y extras.
+    // Si ya llegan dominios específicos, respetamos cookiesFull sin tocarlo.
+    if (hasOtherDomain || hasHostOnly) {
+      return List<StreamingPremiumCookie>.from(incoming);
+    }
+
+    final domains = <String>[defaultDomain, ...extras];
+    final seen = <String>{};
+    final out = <StreamingPremiumCookie>[];
+
+    for (final cookie in incoming) {
+      for (final domain in domains) {
+        final key =
+            '${cookie.name}|${canonical(domain)}|${cookie.path}|${cookie.value}';
+        if (!seen.add(key)) continue;
+        out.add(
+          StreamingPremiumCookie(
+            name: cookie.name,
+            value: cookie.value,
+            domain: domain,
+            path: cookie.path,
+            hostOnly: false,
+            secure: true,
+          ),
+        );
+      }
+    }
+
+    return out;
+  }
   Future<http.Response> _request(
     String platform,
     RemoteDeviceCredentials credentials,
