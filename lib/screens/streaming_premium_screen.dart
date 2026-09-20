@@ -239,8 +239,7 @@ class _PlatformCardState extends State<_PlatformCard> {
           borderRadius: BorderRadius.circular(20),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-            autofocus: widget.autofocus,
-            borderRadius: BorderRadius.circular(20),
+              borderRadius: BorderRadius.circular(20),
             onFocusChange: (value) {
               if (_focused != value) setState(() => _focused = value);
             },
