@@ -494,6 +494,7 @@ class StreamingPremiumService {
       final sessionLibre = data['session_libre'];
       final sessionPro = data['session_pro'];
       final sessionToken = data['session_token'];
+      final activationRounds = data['activation_rounds'];
       final rawDetail = data['detail']?.toString().trim() ?? '';
       final parts = <String>[];
       if (stage.isNotEmpty) parts.add('etapa=$stage');
@@ -507,6 +508,9 @@ class StreamingPremiumService {
       if (sessionPro is bool) parts.add('pro=${sessionPro ? 'sí' : 'no'}');
       if (sessionToken is bool) {
         parts.add('token=${sessionToken ? 'sí' : 'no'}');
+      }
+      if (activationRounds is num && activationRounds.toInt() > 0) {
+        parts.add('activación_rondas=${activationRounds.toInt()}');
       }
       if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
       if (rawDetail.isNotEmpty) parts.add(rawDetail);
