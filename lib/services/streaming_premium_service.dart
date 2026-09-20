@@ -488,10 +488,22 @@ class StreamingPremiumService {
       final stage = data['stage']?.toString() ?? '';
       final pingOk = data['ping_ok'];
       final hasRef = data['has_ref'];
+      final sessionOk = data['session_ok'];
+      final sessionHttp = data['session_http'];
+      final sessionQueda = data['session_queda'];
+      final sessionLibre = data['session_libre'];
+      final sessionPro = data['session_pro'];
       final rawDetail = data['detail']?.toString().trim() ?? '';
       final parts = <String>[];
       if (stage.isNotEmpty) parts.add('etapa=$stage');
       if (pingOk is bool) parts.add('ping=${pingOk ? 'ok' : 'falló'}');
+      if (sessionOk is bool) {
+        parts.add('sesión=${sessionOk ? 'ok' : 'falló'}');
+      }
+      if (sessionHttp is num) parts.add('sesión_http=${sessionHttp.toInt()}');
+      if (sessionQueda is num) parts.add('queda=${sessionQueda.toInt()}s');
+      if (sessionLibre is bool) parts.add('libre=${sessionLibre ? 'sí' : 'no'}');
+      if (sessionPro is bool) parts.add('pro=${sessionPro ? 'sí' : 'no'}');
       if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
       if (rawDetail.isNotEmpty) parts.add(rawDetail);
       throw StreamingPremiumUnavailableException(status, parts.join(' · '));
