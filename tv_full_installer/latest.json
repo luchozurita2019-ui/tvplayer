@@ -1,16 +1,16 @@
 {
-  "versionName": "1.4.32",
-  "versionCode": 3064,
+  "versionName": "1.4.33",
+  "versionCode": 3065,
   "packageName": "com.tvfull.pro.tv.v10safe",
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v64-streaming-premium-test/TV-FULL-PRO-V64-FUTBOL-TOTAL-ARM32.apk",
-    "sha256": "efdd03721af39d6c5fe192598346f449819d3a4cbc59226ada473b1a3c902939",
-    "size": 35262414
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v65-streaming-premium-functional-test/TV-FULL-PRO-V65-FUTBOL-TOTAL-ARM32.apk",
+    "sha256": "348969eb1068ecbd1fc47b63dd14f3f37926008ea19aaf71a3a68389fe8726e7",
+    "size": 35278798
   },
   "arm64": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v64-streaming-premium-test/TV-FULL-PRO-V64-FUTBOL-TOTAL-ARM64.apk",
-    "sha256": "b8ab7f5f42cb73a42c7fbd64e626675e1784d83fe8453894ce6494c286c5a982",
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v65-streaming-premium-functional-test/TV-FULL-PRO-V65-FUTBOL-TOTAL-ARM64.apk",
+    "sha256": "d18882a409395e33d45354c1467b539c031de00ccc1941e7d4a726e5338e5f94",
     "size": 38920184
   }
 }
