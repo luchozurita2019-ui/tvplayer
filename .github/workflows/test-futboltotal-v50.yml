@@ -1,9 +1,9 @@
-name: Test Fútbol Total V64 integration
+name: Test Fútbol Total V65 integration
 
 on:
   push:
     branches:
-      - feature/v64-streaming-premium-clean-ui
+      - feature/v65-streaming-premium-functional
   workflow_dispatch:
 
 permissions:
