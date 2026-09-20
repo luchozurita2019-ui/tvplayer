@@ -98,7 +98,8 @@ class StreamingPremiumUnavailableException implements Exception {
             ? 'No hay una sesión disponible en este momento.'
             : 'No hay una sesión disponible en este momento. $detail';
       default:
-        return 'La plataforma no está disponible en este momento.';
+        final suffix = detail.isEmpty ? '' : ' · $detail';
+        return 'FT no entregó la sesión ($status)$suffix';
     }
   }
 }
@@ -487,10 +488,12 @@ class StreamingPremiumService {
       final stage = data['stage']?.toString() ?? '';
       final pingOk = data['ping_ok'];
       final hasRef = data['has_ref'];
+      final rawDetail = data['detail']?.toString().trim() ?? '';
       final parts = <String>[];
       if (stage.isNotEmpty) parts.add('etapa=$stage');
       if (pingOk is bool) parts.add('ping=${pingOk ? 'ok' : 'falló'}');
       if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
+      if (rawDetail.isNotEmpty) parts.add(rawDetail);
       throw StreamingPremiumUnavailableException(status, parts.join(' · '));
     }
 
