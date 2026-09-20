@@ -97,8 +97,23 @@ class StreamingPremiumUnavailableException implements Exception {
         return detail.isEmpty
             ? 'No hay una sesión disponible en este momento.'
             : 'No hay una sesión disponible en este momento. $detail';
+      case 'session_gate_failed':
+      case 'session_gate_rejected':
+        return detail.isEmpty
+            ? 'Fútbol Total no aceptó la sincronización de sesión.'
+            : 'Fútbol Total no aceptó la sincronización de sesión. $detail';
+      case 'guard_failed':
+        return detail.isEmpty
+            ? 'No se pudo generar la firma compatible con Fútbol Total.'
+            : 'No se pudo generar la firma compatible con Fútbol Total. $detail';
+      case 'map_failed':
+        return detail.isEmpty
+            ? 'Fútbol Total no respondió al catálogo Premium.'
+            : 'Fútbol Total no respondió al catálogo Premium. $detail';
       default:
-        return 'La plataforma no está disponible en este momento.';
+        return detail.isEmpty
+            ? 'La plataforma no está disponible en este momento.'
+            : 'La plataforma no está disponible en este momento. $detail';
     }
   }
 }
