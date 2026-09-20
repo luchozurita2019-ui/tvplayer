@@ -5,12 +5,12 @@
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
     "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v65-streaming-premium-functional-test/TV-FULL-PRO-V65-FUTBOL-TOTAL-ARM32.apk",
-    "sha256": "348969eb1068ecbd1fc47b63dd14f3f37926008ea19aaf71a3a68389fe8726e7",
-    "size": 35278798
+    "sha256": "ee5f997978ddcc52fea2be5fa5163c88ca05ab8d748c52b2ade5c6febe2ff931",
+    "size": 35295182
   },
   "arm64": {
     "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v65-streaming-premium-functional-test/TV-FULL-PRO-V65-FUTBOL-TOTAL-ARM64.apk",
-    "sha256": "d18882a409395e33d45354c1467b539c031de00ccc1941e7d4a726e5338e5f94",
-    "size": 38920184
+    "sha256": "a275d667c21c81109416fc5fe2657756eaa6a1746fbb97c4bf91723c30819b9a",
+    "size": 38936568
   }
 }
