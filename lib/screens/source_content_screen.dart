@@ -11,6 +11,7 @@ import '../services/app_update_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/manual_playlist_refresh_service.dart';
 import '../services/parental_control_service.dart';
+import '../services/section_catalog_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
 import '../widgets/app_version_badge.dart';
 import '../widgets/parental_lock_button.dart';
@@ -553,7 +554,18 @@ class _SourceContentScreenState extends State<SourceContentScreen>
         ),
       ),
     );
-    if (chosen != null) await provider.selectPlaylist(chosen);
+    if (chosen != null) {
+      await provider.selectPlaylist(chosen);
+      final selected = provider.playlistById(chosen);
+      if (selected?.sourceType == PlaylistSourceType.futbolTotal) {
+        unawaited(
+          SectionCatalogService.instance.loadOrRefresh(
+            selected!,
+            TvSectionKind.live,
+          ),
+        );
+      }
+    }
   }
 }
 
