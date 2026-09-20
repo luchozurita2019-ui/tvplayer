@@ -259,12 +259,13 @@ internal class FtPremiumCompat(private val context: Context) {
                 context.contentResolver,
                 Settings.Secure.ANDROID_ID,
             ).orEmpty()
-            val raw = "\${Build.MANUFACTURER}|\${Build.MODEL}|\${Build.DEVICE}|\$androidId"
+            val raw = "${Build.MANUFACTURER}|${Build.MODEL}|${Build.DEVICE}|$androidId"
             val digest = MessageDigest.getInstance("SHA-256")
                 .digest(raw.toByteArray(StandardCharsets.UTF_8))
             digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
         }.getOrDefault("")
     }
+
     private fun getAnonId(): String {
         val prefs = context.getSharedPreferences("ft_state", Context.MODE_PRIVATE)
         val existing = prefs.getString("anon_id", null)
