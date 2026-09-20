@@ -23,11 +23,13 @@ const String _media3DefaultUserAgent =
 class AndroidMedia3TexturePlayerScreen extends StatefulWidget {
   final List<Channel> playlist;
   final int initialIndex;
+  final bool futbolTotalPlayback;
 
   const AndroidMedia3TexturePlayerScreen({
     super.key,
     required this.playlist,
     required this.initialIndex,
+    this.futbolTotalPlayback = false,
   });
 
   @override
@@ -72,6 +74,19 @@ class _AndroidMedia3TexturePlayerScreenState
   Map<String, String> get _headers =>
       _channel.resolvedHttpHeaders(_media3DefaultUserAgent);
 
+  String get _adaptiveProfileKey {
+    if (!widget.futbolTotalPlayback) return _channel.url;
+    final dynamicId = _channel.dynamicStreamId?.trim();
+    if (dynamicId != null && dynamicId.isNotEmpty) {
+      return 'futbol-total|${_channel.catalogSource ?? ''}|dynamic|$dynamicId';
+    }
+    final path = _channel.dynamicStreamPath?.trim();
+    if (path != null && path.isNotEmpty) {
+      return 'futbol-total|${_channel.catalogSource ?? ''}|path|$path';
+    }
+    return 'futbol-total|${_channel.catalogSource ?? ''}|url|${_channel.url}';
+  }
+
   List<_LiveAudioTrack> get _selectableAudioTracks =>
       _audioTracks.where((track) => track.supported).toList(growable: false);
 
@@ -107,6 +122,7 @@ class _AndroidMedia3TexturePlayerScreenState
           adaptiveLevel =
               await _player.invokeMethod<int>('getLiveAdaptiveLevel', {
                 'url': _channel.url,
+                'profileKey': _adaptiveProfileKey,
               }) ??
               0;
         } on PlatformException {
@@ -114,19 +130,31 @@ class _AndroidMedia3TexturePlayerScreenState
         }
       }
       final level = adaptiveLevel.clamp(0, 3).toInt();
-      final normalMin = <int>[5000, 6000, 7000, 8000][level];
-      final normalMax = <int>[15000, 19000, 23000, 28000][level];
-      final normalRebuffer = <int>[2500, 3000, 3500, 4000][level];
-      final lowRamMin = <int>[4000, 4500, 5000, 5500][level];
-      final lowRamMax = <int>[12000, 14000, 16000, 18000][level];
-      final lowRamRebuffer = <int>[2200, 2500, 2800, 3000][level];
+      final futbolTotal = widget.futbolTotalPlayback;
+      final normalMin = futbolTotal
+          ? <int>[12000, 15000, 18000, 22000][level]
+          : <int>[5000, 6000, 7000, 8000][level];
+      final normalMax = futbolTotal
+          ? <int>[30000, 36000, 40000, 45000][level]
+          : <int>[15000, 19000, 23000, 28000][level];
+      final normalRebuffer = futbolTotal
+          ? <int>[4000, 4500, 5000, 5500][level]
+          : <int>[2500, 3000, 3500, 4000][level];
+      final lowRamMin = futbolTotal
+          ? <int>[8000, 10000, 12000, 14000][level]
+          : <int>[4000, 4500, 5000, 5500][level];
+      final lowRamMax = futbolTotal
+          ? <int>[20000, 24000, 28000, 32000][level]
+          : <int>[12000, 14000, 16000, 18000][level];
+      final lowRamRebuffer = futbolTotal
+          ? <int>[3500, 4000, 4500, 5000][level]
+          : <int>[2200, 2500, 2800, 3000][level];
       final id = await _player.invokeMethod<int>('initialize', {
-        // Perfil aprendido por canal: la primera imagen sigue arrancando con
-        // 1 s, pero canales problemáticos reciben más reserva de forma local.
-        // LOW_RAM mantiene límites estrictos para no castigar hardware modesto.
+        // V62: sólo Fútbol Total usa una reserva más profunda.
+        // El resto de fuentes conserva exactamente el perfil V61.
         'minBuffer': lowRam ? lowRamMin : normalMin,
         'maxBuffer': lowRam ? lowRamMax : normalMax,
-        'bufferForPlayback': 1000,
+        'bufferForPlayback': futbolTotal ? 1800 : 1000,
         'bufferForPlaybackAfterRebuffer': lowRam
             ? lowRamRebuffer
             : normalRebuffer,
@@ -193,6 +221,7 @@ class _AndroidMedia3TexturePlayerScreenState
         'headers': headers,
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
+        'adaptiveProfileKey': _adaptiveProfileKey,
         if (_channel.streamMimeType != null)
           'mimeType': _channel.streamMimeType,
         if (_channel.hasDrmConfiguration)
