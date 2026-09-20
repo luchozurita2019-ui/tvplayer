@@ -41,7 +41,7 @@ import java.util.concurrent.Executors;
 
 public final class MainActivity extends Activity {
     private static final String MANIFEST_URL =
-            "https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/android-tv-full-pro-clean-source/tv_full_installer/latest.json";
+            "https://raw.githubusercontent.com/luchozurita2019-ui/tvplayer/installer/v67-isolated-lab/tv_full_installer/latest.json";
     private static final String TARGET_PACKAGE = "com.tvfull.pro.tv.v10safe";
     private static final String EXPECTED_CERT_SHA256 =
             "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a";
@@ -116,7 +116,7 @@ public final class MainActivity extends Activity {
         ImageView logo = new ImageView(this);
         logo.setImageResource(com.tvfull.pro.installer.R.drawable.ic_launcher);
         logo.setScaleType(ImageView.ScaleType.FIT_CENTER);
-        logo.setContentDescription("TV FULL Installer");
+        logo.setContentDescription("TV FULL Installer LAB");
         LinearLayout.LayoutParams logoParams = new LinearLayout.LayoutParams(dp(118), dp(118));
         logoParams.bottomMargin = dp(10);
         root.addView(logo, logoParams);
@@ -124,7 +124,7 @@ public final class MainActivity extends Activity {
         TextView brand = text("TV FULL", 34, Color.WHITE, true);
         root.addView(brand, matchWrap());
 
-        TextView subtitle = text("ACTUALIZADOR OFICIAL", 16, Color.rgb(38, 217, 255), true);
+        TextView subtitle = text("INSTALADOR LAB · V67", 16, Color.rgb(38, 217, 255), true);
         LinearLayout.LayoutParams subParams = matchWrap();
         subParams.topMargin = dp(2);
         root.addView(subtitle, subParams);
