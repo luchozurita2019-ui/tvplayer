@@ -22,6 +22,7 @@ import 'add_source_screen.dart';
 import 'xtream_live_screen.dart';
 import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
+import 'streaming_premium_screen.dart';
 
 class SourceContentScreen extends StatefulWidget {
   final Playlist playlist;
@@ -252,6 +253,23 @@ class _SourceContentScreenState extends State<SourceContentScreen>
                             ),
                           ),
                         ],
+                        const SizedBox(width: 26),
+                        Expanded(
+                          child: _SectionButton(
+                            eyebrow: 'EXCLUSIVO',
+                            title: 'STREAMING PREMIUM',
+                            subtitle:
+                                'Netflix, Max, Prime Video y Crunchyroll',
+                            icon: Icons.workspace_premium_rounded,
+                            accent: streamingPremiumGold,
+                            onTap: () => Navigator.of(context).push(
+                              MaterialPageRoute<void>(
+                                builder: (_) =>
+                                    const StreamingPremiumScreen(),
+                              ),
+                            ),
+                          ),
+                        ),
                       ],
                     ),
                   ),
