@@ -3,7 +3,7 @@ name: Build Fútbol Total V61 test
 on:
   push:
     branches:
-      - feature/v50-futboltotal-authorized
+      - feature/v61-futboltotal-authorized
     paths:
       - 'lib/**'
       - 'android/**'
