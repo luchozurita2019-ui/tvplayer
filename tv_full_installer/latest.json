@@ -1,16 +1,16 @@
 {
-  "versionName": "1.4.3",
-  "versionCode": 35,
+  "versionName": "1.4.44",
+  "versionCode": 3076,
   "packageName": "com.tvfull.pro.tv.v10safe",
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk",
-    "sha256": "bc80d03bdcb4745c48ae172ea41dbad30396724640958e40727f33cd85d8a03a",
-    "size": 34925837
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v76-protected-media-permission/TV-FULL-PRO-V76-FUTBOL-TOTAL-ARM32.apk",
+    "sha256": "f06ff4fe1e9df5b785976d82ed34402c567d220292a5b38dbfa5b4f765fefaeb",
+    "size": 35344435
   },
   "arm64": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk",
-    "sha256": "26e4c223ff804b54c77f9ff2bf4472f5143bb0dc20d192765b42e51f54ed4e00",
-    "size": 38649143
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v76-protected-media-permission/TV-FULL-PRO-V76-FUTBOL-TOTAL-ARM64.apk",
+    "sha256": "bc234eb2258423a400033d054efd7fac82576cf2d5d3428b130d22d32b4e9f4f",
+    "size": 39018587
   }
 }
