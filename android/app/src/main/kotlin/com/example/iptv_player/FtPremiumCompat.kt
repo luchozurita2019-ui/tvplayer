@@ -69,7 +69,7 @@ internal class FtPremiumCompat(private val context: Context) {
         val id = getAnonId()
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
         val session = runCatching { ensureFtSession(id) }
-            .getOrElse { FtSessionState(false, -1, 0, false, false, it.message.orEmpty()) }
+            .getOrElse { FtSessionState(false, -1, 0, false, false, false, it.message.orEmpty()) }
         val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
         if (sig.isBlank()) {
             return mapOf(
@@ -80,6 +80,7 @@ internal class FtPremiumCompat(private val context: Context) {
                 "session_ok" to session.ok,
                 "session_http" to session.httpStatus,
                 "session_queda" to session.queda,
+                "session_token" to session.hasToken,
             )
         }
 
@@ -94,6 +95,7 @@ internal class FtPremiumCompat(private val context: Context) {
                 "session_queda" to session.queda,
                 "session_libre" to session.libre,
                 "session_pro" to session.pro,
+                "session_token" to session.hasToken,
                 "detail" to listOfNotNull(
                     error.message ?: error.javaClass.simpleName,
                     session.detail.takeIf { it.isNotBlank() },
@@ -185,6 +187,7 @@ internal class FtPremiumCompat(private val context: Context) {
         val queda: Int,
         val libre: Boolean,
         val pro: Boolean,
+        val hasToken: Boolean,
         val detail: String = "",
     )
 
@@ -216,6 +219,7 @@ internal class FtPremiumCompat(private val context: Context) {
                 queda = 0,
                 libre = false,
                 pro = false,
+                hasToken = false,
                 detail = "sesion sin firma",
             )
         }
@@ -246,19 +250,27 @@ internal class FtPremiumCompat(private val context: Context) {
                     queda = 0,
                     libre = false,
                     pro = false,
+                    hasToken = false,
                     detail = readSafeError(connection).ifBlank { "sesion HTTP $status" },
                 )
             }
 
             val raw = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(raw)
+            val libre = json.optInt("libre", 0) == 1
+            val hasToken = json.optString("t", "").isNotBlank()
             FtSessionState(
-                ok = json.optBoolean("ok", false),
+                ok = json.optBoolean("ok", false) && (hasToken || libre),
                 httpStatus = status,
                 queda = json.optInt("queda", 0),
-                libre = json.optInt("libre", 0) == 1,
+                libre = libre,
                 pro = json.optInt("pro", 0) == 1,
-                detail = if (json.optBoolean("ok", false)) "" else "sesion ok=false",
+                hasToken = hasToken,
+                detail = when {
+                    !json.optBoolean("ok", false) -> "sesion ok=false"
+                    !hasToken && !libre -> "sesion sin token activo"
+                    else -> ""
+                },
             )
         } finally {
             connection.disconnect()
