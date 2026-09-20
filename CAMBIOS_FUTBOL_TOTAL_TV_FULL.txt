@@ -983,3 +983,38 @@ BB) Build
    - versionName: 1.4.28.
    - versionCode: 3060.
    - Misma firma histórica TV FULL.
+
+
+ETAPA 17 - V61 FÚTBOL TOTAL INTEGRADO + CONTROL TV
+---------------------------------------------------
+Fecha: 19/09/2026
+
+Objetivo:
+- Fútbol Total aparece automáticamente entre las listas de TV FULL PRO.
+- Ya no es necesario entrar a Cargar JSON / Agregar servicio para habilitarlo.
+- Mejorar el manejo con control remoto en el catálogo grande.
+
+BC) Fuente integrada
+   - IptvProvider garantiza una fuente Fútbol Total integrada apuntando al
+     manifiesto real autorizado.
+   - Si ya existe la misma fuente no la duplica y conserva su caché/identidad.
+   - M3U, Xtream, provider.json y Lista clásica no cambian.
+
+BD) Navegación TV
+   - Fútbol Total usa vista dedicada de categorías a la izquierda y canales en
+     lista vertical a la derecha, en lugar de la grilla premium.
+   - El foco de categorías sigue la categoría seleccionada.
+   - El foco de canal no compite con el autofocus de la barra lateral.
+   - Al navegar con DPAD, categoría y canal enfocados se desplazan
+     automáticamente a una zona visible de la pantalla.
+   - Volver desde el reproductor mantiene la pantalla/catálogo actual.
+
+BE) Reproducción
+   - Se conserva íntegra V60: Now Futbol text/html sigue por WebView aislado.
+   - HLS/DASH/Flow/ClearKey y Media3 no se modifican.
+
+BF) Build
+   - Identificación: V61.
+   - versionName: 1.4.29.
+   - versionCode: 3061.
+   - Misma firma histórica TV FULL.

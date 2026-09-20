@@ -617,7 +617,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
     final visible =
         _searchOpen ? index.search(_query) : index.forCategory(_category);
 
-    if (!_searchOpen) {
+    if (!_searchOpen &&
+        widget.playlist.sourceType != PlaylistSourceType.futbolTotal) {
       final provider = context.read<IptvProvider>();
       return TvLivePremiumCatalog(
         channels: visible,
@@ -667,7 +668,9 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
                   label: category ?? 'Todos',
                   selected: selected,
                   primary: index == 0,
-                  autofocus: !_searchOpen && index == 0,
+                  autofocus: !_searchOpen &&
+                      (category == _category ||
+                          (_category == null && index == 0)),
                   onTap: () {
                     if (_searchOpen) _closeSearch();
                     setState(() => _category = category);
@@ -729,7 +732,7 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
                           final channel = visible[index];
                           return _ChannelRow(
                             channel: channel,
-                            autofocus: !_searchOpen && index == 0,
+                            autofocus: false,
                             onTap: () => _openPlayer(visible, index),
                           );
                         },
@@ -839,7 +842,20 @@ class _ChannelRowState extends State<_ChannelRow> {
             child: InkWell(
               autofocus: widget.autofocus,
               borderRadius: BorderRadius.circular(12),
-              onFocusChange: (value) => setState(() => _focused = value),
+              onFocusChange: (value) {
+                if (_focused != value) setState(() => _focused = value);
+                if (value) {
+                  WidgetsBinding.instance.addPostFrameCallback((_) {
+                    if (!mounted) return;
+                    Scrollable.ensureVisible(
+                      context,
+                      alignment: .48,
+                      duration: const Duration(milliseconds: 110),
+                      curve: Curves.easeOutCubic,
+                    );
+                  });
+                }
+              },
               onTap: widget.onTap,
               child: SizedBox(
                 height: 60,

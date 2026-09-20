@@ -69,7 +69,20 @@ class _TvCatalogCategoryRowState extends State<TvCatalogCategoryRow> {
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             autofocus: widget.autofocus,
-            onFocusChange: (value) => setState(() => _focused = value),
+            onFocusChange: (value) {
+              if (_focused != value) setState(() => _focused = value);
+              if (value) {
+                WidgetsBinding.instance.addPostFrameCallback((_) {
+                  if (!mounted) return;
+                  Scrollable.ensureVisible(
+                    context,
+                    alignment: .45,
+                    duration: const Duration(milliseconds: 110),
+                    curve: Curves.easeOutCubic,
+                  );
+                });
+              }
+            },
             onTap: widget.onTap,
             child: SizedBox(
               height: 44,

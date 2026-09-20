@@ -30,6 +30,9 @@ class IptvProvider extends ChangeNotifier {
   static const _classicPlaylistSource =
       'asset://assets/playlists/lista_clasica.m3u';
 
+  static const _futbolTotalPlaylistId = 'tvf_builtin_futbol_total';
+  static const _futbolTotalPlaylistName = 'Fútbol Total';
+
   List<Playlist> _playlists = const [];
   List<Channel> _favorites = const [];
   PlaybackSettings _playbackSettings = PlaybackSettings.balanced;
@@ -98,6 +101,7 @@ class IptvProvider extends ChangeNotifier {
 
     await _ensureClassicPlaylist();
     await _upgradeFutbolTotalTestSources();
+    await _ensureFutbolTotalPlaylist();
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
@@ -137,6 +141,48 @@ class IptvProvider extends ChangeNotifier {
     next[index] = classic.copyWith(lastUpdated: current.lastUpdated);
     _playlists = next;
     await _localStore.clearServiceCatalogs(_classicPlaylistId);
+    await _localStore.saveServices(_playlists);
+  }
+
+  Future<void> _ensureFutbolTotalPlaylist() async {
+    final existingIndex = _playlists.indexWhere(
+      (item) =>
+          item.sourceType == PlaylistSourceType.futbolTotal &&
+          (item.id == _futbolTotalPlaylistId ||
+              item.source == FutbolTotalEndpoints.manifestRaw),
+    );
+
+    if (existingIndex >= 0) {
+      final current = _playlists[existingIndex];
+      if (current.source == FutbolTotalEndpoints.manifestRaw &&
+          current.name.trim().isNotEmpty) {
+        return;
+      }
+
+      final next = List<Playlist>.from(_playlists);
+      next[existingIndex] = current.copyWith(
+        name: current.name.trim().isEmpty
+            ? _futbolTotalPlaylistName
+            : current.name,
+        source: FutbolTotalEndpoints.manifestRaw,
+        sourceType: PlaylistSourceType.futbolTotal,
+        channels: const <Channel>[],
+      );
+      _playlists = next;
+      await _localStore.saveServices(_playlists);
+      return;
+    }
+
+    final futbolTotal = Playlist(
+      id: _futbolTotalPlaylistId,
+      name: _futbolTotalPlaylistName,
+      source: FutbolTotalEndpoints.manifestRaw,
+      isRemote: true,
+      channels: const <Channel>[],
+      lastUpdated: DateTime.now(),
+      sourceType: PlaylistSourceType.futbolTotal,
+    );
+    _playlists = [..._playlists, futbolTotal];
     await _localStore.saveServices(_playlists);
   }
 
