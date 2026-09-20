@@ -80,6 +80,7 @@ class MainActivity : FlutterActivity() {
     private var eventSink: EventChannel.EventSink? = null
     private var pendingWebPlaybackResult: MethodChannel.Result? = null
     private var currentUrl: String? = null
+    private var currentAdaptiveProfileKey: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
     private var currentUserAgent: String = DEFAULT_UA
     private var currentClearKeyJwk: String? = null
@@ -292,7 +293,11 @@ class MainActivity : FlutterActivity() {
             when (call.method) {
                 "getLiveAdaptiveLevel" -> {
                     val url = call.argument<String>("url") ?: ""
-                    result.success(if (url.isBlank()) 0 else adaptiveProfiles.loadLevel(url))
+                    val profileKey =
+                        call.argument<String>("profileKey")?.takeIf { it.isNotBlank() } ?: url
+                    result.success(
+                        if (profileKey.isBlank()) 0 else adaptiveProfiles.loadLevel(profileKey)
+                    )
                 }
 
                 "initialize" -> result.success(
@@ -324,6 +329,7 @@ class MainActivity : FlutterActivity() {
                         url, headers, userAgent, position, requestGeneration,
                         call.argument<String>("clearKeyJwk"),
                         call.argument<String>("mimeType"),
+                        call.argument<String>("adaptiveProfileKey"),
                     )
                     result.success(null)
                 }
@@ -602,6 +608,7 @@ class MainActivity : FlutterActivity() {
         requestGeneration: Long,
         clearKeyJwk: String? = null,
         streamMimeType: String? = null,
+        adaptiveProfileKey: String? = null,
     ) {
         // Cada fuente recibe listeners que capturan su propia generación. Si
         // queda un callback antiguo en cola, conserva la generación vieja y
@@ -614,6 +621,8 @@ class MainActivity : FlutterActivity() {
         cancelLiveBufferHealthCheck()
         cancelLiveStabilityReset()
         currentUrl = url
+        currentAdaptiveProfileKey =
+            adaptiveProfileKey?.takeIf { it.isNotBlank() } ?: url
         currentHeaders = headers.toMap()
         currentUserAgent = userAgent
         // Las transiciones con DRM liberan la fuente anterior. Las listas sin
@@ -626,7 +635,11 @@ class MainActivity : FlutterActivity() {
         currentStreamMimeType = streamMimeType?.takeIf {
             it == MimeTypes.APPLICATION_M3U8 || it == MimeTypes.APPLICATION_MPD
         }
-        currentAdaptiveLevel = if (isLive) adaptiveProfiles.loadLevel(url) else 0
+        currentAdaptiveLevel = if (isLive) {
+            adaptiveProfiles.loadLevel(currentAdaptiveProfileKey ?: url)
+        } else {
+            0
+        }
         liveLoadErrorPolicy.protectionLevel = currentAdaptiveLevel
         endedRecoveries = 0
         liveStallRecoveries = 0
@@ -905,7 +918,7 @@ class MainActivity : FlutterActivity() {
             liveStableWindows++
             if (liveStableWindows >= 6 && currentAdaptiveLevel > 0) {
                 currentAdaptiveLevel--
-                adaptiveProfiles.saveLevel(currentUrl.orEmpty(), currentAdaptiveLevel)
+                adaptiveProfiles.saveLevel(currentAdaptiveProfileKey.orEmpty(), currentAdaptiveLevel)
                 liveLoadErrorPolicy.protectionLevel = currentAdaptiveLevel
                 liveStableWindows = 0
                 liveSessionRebuffers = 0
@@ -1069,7 +1082,7 @@ class MainActivity : FlutterActivity() {
         desired = desired.coerceIn(0, 3)
         if (desired <= currentAdaptiveLevel) return
         currentAdaptiveLevel = desired
-        adaptiveProfiles.saveLevel(url, desired)
+        adaptiveProfiles.saveLevel(currentAdaptiveProfileKey ?: url, desired)
         liveLoadErrorPolicy.protectionLevel = desired
         liveStableWindows = 0
         emitAdaptiveProfile(reason)
