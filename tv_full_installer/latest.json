@@ -4,13 +4,13 @@
   "packageName": "com.tvfull.pro.tv.v10safe",
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v67-streaming-premium-ft36-server-parity-test/TV-FULL-PRO-V67-FUTBOL-TOTAL-ARM32.apk",
-    "sha256": "f42e1a5d416551ef4c7f6d449a5a7484c20fff7837bb87edd00b5d7e40ad476f",
-    "size": 35311570
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v67-netflix-handoff-r2/TV-FULL-PRO-V67-FUTBOL-TOTAL-ARM32.apk",
+    "sha256": "9796ebfe9b705b7212f5bddcc9b7f063cb774ef4bdba953180bbfe9bb8bca619",
+    "size": 35327954
   },
   "arm64": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v67-streaming-premium-ft36-server-parity-test/TV-FULL-PRO-V67-FUTBOL-TOTAL-ARM64.apk",
-    "sha256": "e19920e96efbc387753693151de7f9b23a169a7b4fe4b409e35ba3bb0255dd56",
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v67-netflix-handoff-r2/TV-FULL-PRO-V67-FUTBOL-TOTAL-ARM64.apk",
+    "sha256": "4cbf8706079fdb0ce03d25cf5947a4923f433b79527ccc07206eb26e39ee328a",
     "size": 38936572
   }
 }
