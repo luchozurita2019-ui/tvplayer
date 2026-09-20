@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../services/device_performance_service.dart';
 import '../services/streaming_premium_service.dart';
@@ -23,8 +24,8 @@ enum StreamingPremiumPlatform {
   );
 }
 
-/// V63: prueba visual aislada de Streaming Premium.
-/// No crea WebViews ni toca el motor IPTV.
+/// V65: Streaming Premium funcional y aislado del motor IPTV.
+/// Las sesiones se solicitan sólo al abrir una plataforma.
 class StreamingPremiumScreen extends StatelessWidget {
   const StreamingPremiumScreen({super.key});
 
@@ -358,7 +359,7 @@ class _PlatformCardState extends State<_PlatformCard> {
                             _StatusDot(),
                             SizedBox(width: 8),
                             Text(
-                              'PRUEBA DE INTERFAZ',
+                              'SESIÓN COMPARTIDA',
                               style: TextStyle(
                                 color: streamingPremiumGold,
                                 fontSize: 10,
