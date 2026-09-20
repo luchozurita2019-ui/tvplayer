@@ -405,9 +405,9 @@ class WebPlaybackActivity : Activity() {
         runCatching {
             webView.evaluateJavascript(script) { raw ->
                 val clean = raw
-                    ?.removeSurrounding(""")
-                    ?.replace("\\"", """)
-                    ?.replace("\\\\", "\\")
+                    ?.trim()
+                    ?.removePrefix("\"")
+                    ?.removeSuffix("\"")
                     .orEmpty()
                 callback?.invoke(clean)
             }
