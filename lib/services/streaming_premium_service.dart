@@ -463,7 +463,7 @@ class StreamingPremiumService {
     }
 
     String canonical(String value) =>
-        value.trim().toLowerCase().replaceFirst(RegExp(r'^\\.'), '');
+        value.trim().toLowerCase().replaceFirst(RegExp(r'^\.'), '');
 
     final defaultCanonical = canonical(defaultDomain);
     final hasOtherDomain = incoming.any(
@@ -501,6 +501,7 @@ class StreamingPremiumService {
 
     return out;
   }
+
   Future<http.Response> _request(
     String platform,
     RemoteDeviceCredentials credentials,
