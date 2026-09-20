@@ -303,7 +303,7 @@ internal class FtPremiumCompat(private val context: Context) {
         }
 
         var rounds = 0
-        repeat(6) {
+        for (attempt in 0 until 6) {
             val round = fetchAdRound(activation.vastUrl)
                 ?: return FtActivationResult(
                     ok = false,
@@ -345,10 +345,8 @@ internal class FtPremiumCompat(private val context: Context) {
                 )
             }
 
-            // El original vuelve a consultar el mismo VAST para la ronda siguiente.
-            if (round.totalRounds > 0 && rounds >= maxOf(6, round.totalRounds + 2)) {
-                break
-            }
+            // Si el Worker indica más rondas, volvemos a consultar el mismo VAST.
+            // El límite de seis iteraciones evita dejar la UI bloqueada indefinidamente.
         }
 
         return FtActivationResult(
