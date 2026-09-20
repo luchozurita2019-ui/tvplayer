@@ -48,18 +48,28 @@ class StreamingPremiumCookie {
 
 class StreamingPremiumSession {
   final String platform;
+  final String mode;
   final String url;
+  final String phoneUrl;
+  final String tvUrl;
+  final int expires;
   final List<StreamingPremiumCookie> cookies;
   final bool shared;
   final String ref;
 
   const StreamingPremiumSession({
     required this.platform,
+    required this.mode,
     required this.url,
+    required this.phoneUrl,
+    required this.tvUrl,
+    required this.expires,
     required this.cookies,
     required this.shared,
     required this.ref,
   });
+
+  bool get opensExternally => mode == 'external';
 }
 
 enum StreamingPremiumStage {
@@ -69,7 +79,7 @@ enum StreamingPremiumStage {
   validatingSession,
   installingCookies,
   openingPreparedSession,
-  openingOfficialFallback,
+  openingExternalAccess,
 }
 
 typedef StreamingPremiumStageCallback = void Function(
@@ -105,11 +115,11 @@ class _CachedPremiumSession {
   const _CachedPremiumSession(this.session, this.fetchedAt);
 }
 
-/// V66 test:
-/// - conserva V65 intacta;
-/// - replica el ciclo de entrada/reintento observado en FT 3.6;
+/// V68 exact-routing test:
+/// - conserva V65/V66/V67 intactas;
+/// - separa Netflix (navegador/app oficial) del WebView premium;
 /// - no registra valores de cookies ni tokens;
-/// - la sesión siempre llega de forma opaca desde el backend.
+/// - no usa fallback oficial: sólo abre cuando FT/Rafael entrega sesión.
 class StreamingPremiumService {
   StreamingPremiumService({
     RemoteProvisioningService? provisioning,
@@ -118,7 +128,7 @@ class StreamingPremiumService {
         _client = client ?? http.Client();
 
   static const _endpoint =
-      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium-v67-test';
+      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium-v68-test';
   static const MethodChannel _webPlayback =
       MethodChannel('tvfull/web_playback');
 
@@ -236,38 +246,65 @@ class StreamingPremiumService {
       );
     }
 
+    final mode = data['mode']?.toString().trim().toLowerCase() ?? 'webview';
     final url = data['url']?.toString().trim() ?? '';
-    final uri = Uri.tryParse(url);
-    if (uri == null || uri.scheme != 'https' || uri.host.trim().isEmpty) {
-      throw const FormatException('URL Streaming Premium inválida.');
+    final phoneUrl = data['phone_url']?.toString().trim() ?? '';
+    final tvUrl = data['tv_url']?.toString().trim() ?? '';
+
+    bool validHttps(String value) {
+      final uri = Uri.tryParse(value);
+      return uri != null &&
+          uri.scheme == 'https' &&
+          uri.host.trim().isNotEmpty;
     }
 
     final cookies = <StreamingPremiumCookie>[];
-    final rawCookies = data['cookies'];
-    if (rawCookies is List) {
-      for (final raw in rawCookies) {
-        if (raw is! Map) continue;
-        final cookie = StreamingPremiumCookie.fromJson(
-          Map<String, dynamic>.from(raw),
-        );
-        if (cookie.name.isEmpty ||
-            cookie.value.isEmpty ||
-            cookie.domain.isEmpty) {
-          continue;
-        }
-        cookies.add(cookie);
+    if (mode == 'webview') {
+      if (!validHttps(url)) {
+        throw const FormatException('URL Streaming Premium inválida.');
       }
+      final rawCookies = data['cookies'];
+      if (rawCookies is List) {
+        for (final raw in rawCookies) {
+          if (raw is! Map) continue;
+          final cookie = StreamingPremiumCookie.fromJson(
+            Map<String, dynamic>.from(raw),
+          );
+          if (cookie.name.isEmpty ||
+              cookie.value.isEmpty ||
+              cookie.domain.isEmpty) {
+            continue;
+          }
+          cookies.add(cookie);
+        }
+      }
+      if (cookies.isEmpty) {
+        throw const FormatException(
+          'La sesión compartida no contiene cookies válidas.',
+        );
+      }
+    } else if (mode == 'external') {
+      if (!validHttps(phoneUrl) || !validHttps(tvUrl)) {
+        throw const FormatException(
+          'El acceso externo generado no contiene URLs válidas.',
+        );
+      }
+    } else {
+      throw FormatException('Modo Streaming Premium no soportado: $mode');
     }
 
-    if (cookies.isEmpty) {
-      throw const FormatException(
-        'La sesión compartida no contiene cookies válidas.',
-      );
-    }
+    final rawExpires = data['expires'];
+    final expires = rawExpires is num
+        ? rawExpires.toInt()
+        : int.tryParse(rawExpires?.toString() ?? '') ?? 0;
 
     final session = StreamingPremiumSession(
       platform: data['platform']?.toString() ?? platform,
+      mode: mode,
       url: url,
+      phoneUrl: phoneUrl,
+      tvUrl: tvUrl,
+      expires: expires,
       cookies: List.unmodifiable(cookies),
       shared: data['shared'] == true,
       ref: data['ref']?.toString().trim() ?? '',
@@ -280,109 +317,74 @@ class StreamingPremiumService {
     return session;
   }
 
+  Future<StreamingPremiumSession> generate(
+    String platform, {
+    StreamingPremiumStageCallback? onStage,
+  }) async {
+    final intento = _nextAttempt(platform);
+    return prepare(
+      platform,
+      intento: intento,
+      onStage: onStage,
+    );
+  }
+
   Future<void> open(
     String platform, {
     StreamingPremiumStageCallback? onStage,
-    bool allowOfficialFallback = true,
   }) async {
-    final intento = _nextAttempt(platform);
+    final session = await generate(platform, onStage: onStage);
 
-    try {
-      final session = await prepare(
-        platform,
-        intento: intento,
-        onStage: onStage,
-      );
-
-      onStage?.call(StreamingPremiumStage.installingCookies);
-      debugPrint(
-        '[StreamingPremium] $platform: preparando '
-        '${session.cookies.length} cookies',
-      );
-
-      onStage?.call(StreamingPremiumStage.openingPreparedSession);
-      debugPrint(
-        '[StreamingPremium] $platform: abriendo sesión preparada '
-        'intento=$intento',
-      );
-
-      final result = await _webPlayback.invokeMethod<dynamic>('open', {
-        'url': session.url,
-        'headers': const <String, String>{
-          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
-        },
-        'cookies': session.cookies
-            .map((cookie) => cookie.toJson())
-            .toList(growable: false),
-        'platform': platform,
-        'replacePlatformCookies': true,
-        // FT 3.6 conserva la sesión al salir y sólo limpia antes de
-        // instalar una sesión nueva.
-        'clearCookiesOnExit': false,
-        'streamingPremium': true,
-        if (session.ref.isNotEmpty) 'sessionRef': session.ref,
-      });
-
-      if (result is Map && result['deadDetected'] == true) {
-        _sessionCache.remove(platform);
-        debugPrint(
-          '[StreamingPremium] $platform: login detectado; '
-          'reportando sesión caída',
-        );
-        if (session.ref.isNotEmpty) {
-          await _reportDead(platform, session.ref);
-        }
-      }
+    if (session.opensExternally) {
+      onStage?.call(StreamingPremiumStage.openingExternalAccess);
+      await openExternalUrl(session.phoneUrl);
       return;
-    } catch (error) {
-      _sessionCache.remove(platform);
-      if (!allowOfficialFallback) rethrow;
-      debugPrint(
-        '[StreamingPremium] $platform: sesión preparada no disponible; '
-        'abriendo acceso oficial (${error.runtimeType})',
-      );
     }
 
-    await openOfficial(platform, onStage: onStage);
-  }
+    onStage?.call(StreamingPremiumStage.installingCookies);
+    debugPrint(
+      '[StreamingPremium] $platform: preparando '
+      '${session.cookies.length} cookies',
+    );
 
-  Future<void> openOfficial(
-    String platform, {
-    StreamingPremiumStageCallback? onStage,
-  }) async {
-    final url = _officialUrlFor(platform);
-    onStage?.call(StreamingPremiumStage.openingOfficialFallback);
-    debugPrint('[StreamingPremium] $platform: abriendo acceso oficial');
-    await _webPlayback.invokeMethod<dynamic>('open', {
-      'url': url,
+    onStage?.call(StreamingPremiumStage.openingPreparedSession);
+    debugPrint('[StreamingPremium] $platform: abriendo sesión preparada');
+
+    final result = await _webPlayback.invokeMethod<dynamic>('open', {
+      'url': session.url,
       'headers': const <String, String>{
         'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
       },
-      'cookies': const <Map<String, dynamic>>[],
+      'cookies': session.cookies
+          .map((cookie) => cookie.toJson())
+          .toList(growable: false),
       'platform': platform,
-      'replacePlatformCookies': false,
+      'replacePlatformCookies': true,
       'clearCookiesOnExit': false,
       'streamingPremium': true,
+      if (session.ref.isNotEmpty) 'sessionRef': session.ref,
     });
+
+    if (result is Map && result['deadDetected'] == true) {
+      _sessionCache.remove(platform);
+      debugPrint(
+        '[StreamingPremium] $platform: login detectado; '
+        'reportando sesión caída',
+      );
+      if (session.ref.isNotEmpty) {
+        await _reportDead(platform, session.ref);
+      }
+    }
   }
 
-  String _officialUrlFor(String platform) {
-    switch (platform) {
-      case 'netflix':
-        return 'https://www.netflix.com/browse';
-      case 'hbomax':
-        return 'https://play.max.com/';
-      case 'prime':
-        return 'https://www.primevideo.com/';
-      case 'crunchyroll':
-        return 'https://www.crunchyroll.com/';
-      default:
-        throw ArgumentError.value(
-          platform,
-          'platform',
-          'Plataforma Streaming Premium no soportada',
-        );
+  Future<void> openExternalUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https' || uri.host.trim().isEmpty) {
+      throw const FormatException('URL externa inválida.');
     }
+    await _webPlayback.invokeMethod<dynamic>('openExternal', {
+      'url': url,
+    });
   }
 
   Future<http.Response> _request(
