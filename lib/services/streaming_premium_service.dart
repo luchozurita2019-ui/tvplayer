@@ -487,8 +487,16 @@ class StreamingPremiumService {
       final stage = data['stage']?.toString() ?? '';
       final pingOk = data['ping_ok'];
       final hasRef = data['has_ref'];
+      final gateHttp = data['gate_http'];
+      final gatePro = data['gate_pro'];
+      final gateLibre = data['gate_libre'];
+      final gateTicket = data['gate_ticket'];
       final parts = <String>[];
       if (stage.isNotEmpty) parts.add('etapa=$stage');
+      if (gateHttp is num) parts.add('sesión HTTP=${gateHttp.toInt()}');
+      if (gatePro is bool) parts.add('pro=${gatePro ? 'sí' : 'no'}');
+      if (gateLibre is bool) parts.add('libre=${gateLibre ? 'sí' : 'no'}');
+      if (gateTicket is bool) parts.add('ticket=${gateTicket ? 'sí' : 'no'}');
       if (pingOk is bool) parts.add('ping=${pingOk ? 'ok' : 'falló'}');
       if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
       throw StreamingPremiumUnavailableException(status, parts.join(' · '));
