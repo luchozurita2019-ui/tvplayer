@@ -51,24 +51,30 @@ class StreamingPremiumSession {
   final String url;
   final List<StreamingPremiumCookie> cookies;
   final bool shared;
+  final String ref;
 
   const StreamingPremiumSession({
     required this.platform,
     required this.url,
     required this.cookies,
     required this.shared,
+    required this.ref,
   });
 }
 
 enum StreamingPremiumStage {
   authenticating,
+  usingCachedSession,
   requestingSession,
   validatingSession,
+  installingCookies,
   openingPreparedSession,
   openingOfficialFallback,
 }
 
-typedef StreamingPremiumStageCallback = void Function(StreamingPremiumStage stage);
+typedef StreamingPremiumStageCallback = void Function(
+  StreamingPremiumStage stage,
+);
 
 class StreamingPremiumUnavailableException implements Exception {
   final String status;
@@ -89,6 +95,18 @@ class StreamingPremiumUnavailableException implements Exception {
   }
 }
 
+class _CachedPremiumSession {
+  final StreamingPremiumSession session;
+  final DateTime fetchedAt;
+
+  const _CachedPremiumSession(this.session, this.fetchedAt);
+}
+
+/// V66 test:
+/// - conserva V65 intacta;
+/// - replica el ciclo de entrada/reintento observado en FT 3.6;
+/// - no registra valores de cookies ni tokens;
+/// - la sesión siempre llega de forma opaca desde el backend.
 class StreamingPremiumService {
   StreamingPremiumService({
     RemoteProvisioningService? provisioning,
@@ -101,13 +119,49 @@ class StreamingPremiumService {
   static const MethodChannel _webPlayback =
       MethodChannel('tvfull/web_playback');
 
+  static const Duration _rapidRetryWindow = Duration(minutes: 3);
+  static const Duration _sessionMapCacheTtl = Duration(minutes: 15);
+
   final RemoteProvisioningService _provisioning;
   final http.Client _client;
 
+  final Map<String, DateTime> _lastOpenAt = <String, DateTime>{};
+  final Map<String, int> _attemptByPlatform = <String, int>{};
+  final Map<String, _CachedPremiumSession> _sessionCache =
+      <String, _CachedPremiumSession>{};
+
+  int _nextAttempt(String platform) {
+    final now = DateTime.now();
+    final previous = _lastOpenAt[platform];
+    final previousAttempt = _attemptByPlatform[platform] ?? 0;
+
+    final attempt = previous != null &&
+            now.difference(previous) < _rapidRetryWindow
+        ? previousAttempt + 1
+        : 0;
+
+    _lastOpenAt[platform] = now;
+    _attemptByPlatform[platform] = attempt;
+    return attempt;
+  }
+
   Future<StreamingPremiumSession> prepare(
     String platform, {
+    required int intento,
     StreamingPremiumStageCallback? onStage,
   }) async {
+    if (intento == 0) {
+      final cached = _sessionCache[platform];
+      if (cached != null &&
+          DateTime.now().difference(cached.fetchedAt) < _sessionMapCacheTtl) {
+        onStage?.call(StreamingPremiumStage.usingCachedSession);
+        debugPrint(
+          '[StreamingPremium] $platform: mapa reciente, reutilizando sesión',
+        );
+        return cached.session;
+      }
+    }
+
     onStage?.call(StreamingPremiumStage.authenticating);
     debugPrint('[StreamingPremium] $platform: autenticando dispositivo');
     var credentials =
@@ -115,21 +169,21 @@ class StreamingPremiumService {
         await _provisioning.ensureRegistered();
 
     onStage?.call(StreamingPremiumStage.requestingSession);
-    debugPrint('[StreamingPremium] $platform: solicitando sesión preparada');
-    var response = await _request(platform, credentials);
+    debugPrint(
+      '[StreamingPremium] $platform: solicitando sesión intento=$intento',
+    );
+    var response = await _request(platform, credentials, intento);
     if (response.statusCode == 401) {
       await _provisioning.clearCredentials();
       credentials = await _provisioning.ensureRegistered();
       onStage?.call(StreamingPremiumStage.requestingSession);
-      response = await _request(platform, credentials);
+      response = await _request(platform, credentials, intento);
     }
 
     if (response.statusCode == 404) {
       var status = 'no_session';
       try {
-        onStage?.call(StreamingPremiumStage.validatingSession);
-    debugPrint('[StreamingPremium] $platform: validando respuesta');
-    final decoded = jsonDecode(response.body);
+        final decoded = jsonDecode(response.body);
         if (decoded is Map && decoded['status'] != null) {
           status = decoded['status'].toString();
         }
@@ -147,10 +201,13 @@ class StreamingPremiumService {
       );
     }
 
+    onStage?.call(StreamingPremiumStage.validatingSession);
+    debugPrint('[StreamingPremium] $platform: validando respuesta');
     final decoded = jsonDecode(response.body);
     if (decoded is! Map) {
       throw const FormatException('Sesión Streaming Premium inválida.');
     }
+
     final data = Map<String, dynamic>.from(decoded);
     if (data['available'] != true) {
       throw StreamingPremiumUnavailableException(
@@ -160,9 +217,7 @@ class StreamingPremiumService {
 
     final url = data['url']?.toString().trim() ?? '';
     final uri = Uri.tryParse(url);
-    if (uri == null ||
-        uri.scheme != 'https' ||
-        uri.host.trim().isEmpty) {
+    if (uri == null || uri.scheme != 'https' || uri.host.trim().isEmpty) {
       throw const FormatException('URL Streaming Premium inválida.');
     }
 
@@ -182,18 +237,26 @@ class StreamingPremiumService {
         cookies.add(cookie);
       }
     }
+
     if (cookies.isEmpty) {
       throw const FormatException(
         'La sesión compartida no contiene cookies válidas.',
       );
     }
 
-    return StreamingPremiumSession(
+    final session = StreamingPremiumSession(
       platform: data['platform']?.toString() ?? platform,
       url: url,
       cookies: List.unmodifiable(cookies),
       shared: data['shared'] == true,
+      ref: data['ref']?.toString().trim() ?? '',
     );
+
+    _sessionCache[platform] = _CachedPremiumSession(
+      session,
+      DateTime.now(),
+    );
+    return session;
   }
 
   Future<void> open(
@@ -201,33 +264,58 @@ class StreamingPremiumService {
     StreamingPremiumStageCallback? onStage,
     bool allowOfficialFallback = true,
   }) async {
+    final intento = _nextAttempt(platform);
+
     try {
-      final session = await prepare(platform, onStage: onStage);
+      final session = await prepare(
+        platform,
+        intento: intento,
+        onStage: onStage,
+      );
+
+      onStage?.call(StreamingPremiumStage.installingCookies);
+      debugPrint(
+        '[StreamingPremium] $platform: preparando '
+        '${session.cookies.length} cookies',
+      );
+
       onStage?.call(StreamingPremiumStage.openingPreparedSession);
-      debugPrint('[StreamingPremium] $platform: abriendo sesión preparada');
-      await _webPlayback.invokeMethod<void>('open', {
+      debugPrint(
+        '[StreamingPremium] $platform: abriendo sesión preparada '
+        'intento=$intento',
+      );
+
+      final result = await _webPlayback.invokeMethod<dynamic>('open', {
         'url': session.url,
         'headers': const <String, String>{
           'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
-          'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-              'AppleWebKit/537.36 (KHTML, like Gecko) '
-              'Chrome/126.0.0.0 Safari/537.36',
         },
         'cookies': session.cookies
             .map((cookie) => cookie.toJson())
             .toList(growable: false),
-        // Conservamos exactamente el comportamiento actual para las
-        // sesiones preparadas durante esta fase de pruebas.
-        'clearCookiesOnExit': true,
+        'platform': platform,
+        'replacePlatformCookies': true,
+        // FT 3.6 conserva la sesión al salir y sólo limpia antes de
+        // instalar una sesión nueva.
+        'clearCookiesOnExit': false,
         'streamingPremium': true,
+        if (session.ref.isNotEmpty) 'sessionRef': session.ref,
       });
+
+      if (result is Map && result['deadDetected'] == true) {
+        _sessionCache.remove(platform);
+        debugPrint(
+          '[StreamingPremium] $platform: login detectado; '
+          'la próxima entrada forzará sesión nueva',
+        );
+      }
       return;
     } catch (error) {
+      _sessionCache.remove(platform);
       if (!allowOfficialFallback) rethrow;
       debugPrint(
-        '[StreamingPremium] $platform: preparación no disponible; '
-        'abriendo acceso oficial (' + error.runtimeType.toString() + ')',
+        '[StreamingPremium] $platform: sesión preparada no disponible; '
+        'abriendo acceso oficial (${error.runtimeType})',
       );
     }
 
@@ -241,14 +329,14 @@ class StreamingPremiumService {
     final url = _officialUrlFor(platform);
     onStage?.call(StreamingPremiumStage.openingOfficialFallback);
     debugPrint('[StreamingPremium] $platform: abriendo acceso oficial');
-    await _webPlayback.invokeMethod<void>('open', {
+    await _webPlayback.invokeMethod<dynamic>('open', {
       'url': url,
-      // Sin User-Agent forzado: el acceso oficial usa el WebView real
-      // del dispositivo y permite que el usuario inicie su propia sesión.
       'headers': const <String, String>{
         'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
       },
       'cookies': const <Map<String, dynamic>>[],
+      'platform': platform,
+      'replacePlatformCookies': false,
       'clearCookiesOnExit': false,
       'streamingPremium': true,
     });
@@ -276,6 +364,7 @@ class StreamingPremiumService {
   Future<http.Response> _request(
     String platform,
     RemoteDeviceCredentials credentials,
+    int intento,
   ) {
     return _client
         .post(
@@ -286,7 +375,10 @@ class StreamingPremiumService {
             'x-tvfull-device-code': credentials.code,
             'x-tvfull-device-secret': credentials.secret,
           },
-          body: jsonEncode({'platform': platform}),
+          body: jsonEncode({
+            'platform': platform,
+            'intento': intento,
+          }),
         )
         .timeout(const Duration(seconds: 18));
   }
