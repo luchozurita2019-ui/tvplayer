@@ -76,7 +76,6 @@ class _PremiumHeader extends StatelessWidget {
     return Row(
       children: [
         _GoldIconButton(
-          autofocus: true,
           icon: Icons.arrow_back_rounded,
           tooltip: 'Volver',
           onPressed: onBack,
@@ -151,6 +150,7 @@ class _PlatformGrid extends StatelessWidget {
             return RepaintBoundary(
               child: _PlatformCard(
                 platform: platform,
+                autofocus: index == 0,
                 onTap: () => _showInterfacePreview(context, platform),
               ),
             );
@@ -181,10 +181,12 @@ class _PlatformGrid extends StatelessWidget {
 class _PlatformCard extends StatefulWidget {
   final StreamingPremiumPlatform platform;
   final VoidCallback onTap;
+  final bool autofocus;
 
   const _PlatformCard({
     required this.platform,
     required this.onTap,
+    this.autofocus = false,
   });
 
   @override
@@ -237,6 +239,7 @@ class _PlatformCardState extends State<_PlatformCard> {
           borderRadius: BorderRadius.circular(20),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
+            autofocus: widget.autofocus,
             borderRadius: BorderRadius.circular(20),
             onFocusChange: (value) {
               if (_focused != value) setState(() => _focused = value);
