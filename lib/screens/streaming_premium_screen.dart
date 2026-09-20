@@ -446,7 +446,6 @@ class _GoldIconButtonState extends State<_GoldIconButton> {
         color: Colors.transparent,
         borderRadius: BorderRadius.circular(14),
         child: InkWell(
-          autofocus: widget.autofocus,
           borderRadius: BorderRadius.circular(14),
           onFocusChange: (value) {
             if (_focused != value) setState(() => _focused = value);
