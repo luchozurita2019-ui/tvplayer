@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 
@@ -59,6 +60,16 @@ class StreamingPremiumSession {
   });
 }
 
+enum StreamingPremiumStage {
+  authenticating,
+  requestingSession,
+  validatingSession,
+  openingPreparedSession,
+  openingOfficialFallback,
+}
+
+typedef StreamingPremiumStageCallback = void Function(StreamingPremiumStage stage);
+
 class StreamingPremiumUnavailableException implements Exception {
   final String status;
 
@@ -93,22 +104,32 @@ class StreamingPremiumService {
   final RemoteProvisioningService _provisioning;
   final http.Client _client;
 
-  Future<StreamingPremiumSession> prepare(String platform) async {
+  Future<StreamingPremiumSession> prepare(
+    String platform, {
+    StreamingPremiumStageCallback? onStage,
+  }) async {
+    onStage?.call(StreamingPremiumStage.authenticating);
+    debugPrint('[StreamingPremium] $platform: autenticando dispositivo');
     var credentials =
         await _provisioning.loadCredentials() ??
         await _provisioning.ensureRegistered();
 
+    onStage?.call(StreamingPremiumStage.requestingSession);
+    debugPrint('[StreamingPremium] $platform: solicitando sesión preparada');
     var response = await _request(platform, credentials);
     if (response.statusCode == 401) {
       await _provisioning.clearCredentials();
       credentials = await _provisioning.ensureRegistered();
+      onStage?.call(StreamingPremiumStage.requestingSession);
       response = await _request(platform, credentials);
     }
 
     if (response.statusCode == 404) {
       var status = 'no_session';
       try {
-        final decoded = jsonDecode(response.body);
+        onStage?.call(StreamingPremiumStage.validatingSession);
+    debugPrint('[StreamingPremium] $platform: validando respuesta');
+    final decoded = jsonDecode(response.body);
         if (decoded is Map && decoded['status'] != null) {
           status = decoded['status'].toString();
         }
@@ -175,23 +196,81 @@ class StreamingPremiumService {
     );
   }
 
-  Future<void> open(String platform) async {
-    final session = await prepare(platform);
+  Future<void> open(
+    String platform, {
+    StreamingPremiumStageCallback? onStage,
+    bool allowOfficialFallback = true,
+  }) async {
+    try {
+      final session = await prepare(platform, onStage: onStage);
+      onStage?.call(StreamingPremiumStage.openingPreparedSession);
+      debugPrint('[StreamingPremium] $platform: abriendo sesión preparada');
+      await _webPlayback.invokeMethod<void>('open', {
+        'url': session.url,
+        'headers': const <String, String>{
+          'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
+          'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
+              'AppleWebKit/537.36 (KHTML, like Gecko) '
+              'Chrome/126.0.0.0 Safari/537.36',
+        },
+        'cookies': session.cookies
+            .map((cookie) => cookie.toJson())
+            .toList(growable: false),
+        // Conservamos exactamente el comportamiento actual para las
+        // sesiones preparadas durante esta fase de pruebas.
+        'clearCookiesOnExit': true,
+        'streamingPremium': true,
+      });
+      return;
+    } catch (error) {
+      if (!allowOfficialFallback) rethrow;
+      debugPrint(
+        '[StreamingPremium] $platform: preparación no disponible; '
+        'abriendo acceso oficial (' + error.runtimeType.toString() + ')',
+      );
+    }
+
+    await openOfficial(platform, onStage: onStage);
+  }
+
+  Future<void> openOfficial(
+    String platform, {
+    StreamingPremiumStageCallback? onStage,
+  }) async {
+    final url = _officialUrlFor(platform);
+    onStage?.call(StreamingPremiumStage.openingOfficialFallback);
+    debugPrint('[StreamingPremium] $platform: abriendo acceso oficial');
     await _webPlayback.invokeMethod<void>('open', {
-      'url': session.url,
+      'url': url,
+      // Sin User-Agent forzado: el acceso oficial usa el WebView real
+      // del dispositivo y permite que el usuario inicie su propia sesión.
       'headers': const <String, String>{
         'Accept-Language': 'es-AR,es;q=0.9,en;q=0.7',
-        'User-Agent':
-            'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
-            'AppleWebKit/537.36 (KHTML, like Gecko) '
-            'Chrome/126.0.0.0 Safari/537.36',
       },
-      'cookies': session.cookies
-          .map((cookie) => cookie.toJson())
-          .toList(growable: false),
-      'clearCookiesOnExit': true,
+      'cookies': const <Map<String, dynamic>>[],
+      'clearCookiesOnExit': false,
       'streamingPremium': true,
     });
+  }
+
+  String _officialUrlFor(String platform) {
+    switch (platform) {
+      case 'netflix':
+        return 'https://www.netflix.com/browse';
+      case 'hbomax':
+        return 'https://play.max.com/';
+      case 'prime':
+        return 'https://www.primevideo.com/';
+      case 'crunchyroll':
+        return 'https://www.crunchyroll.com/';
+      default:
+        throw ArgumentError.value(
+          platform,
+          'platform',
+          'Plataforma Streaming Premium no soportada',
+        );
+    }
   }
 
   Future<http.Response> _request(
