@@ -6,7 +6,6 @@ import com.byrafael.streamapp.Guard
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.util.UUID
 
@@ -46,8 +45,18 @@ internal class FtPremiumCompat(private val context: Context) {
         )
     }
 
-    private val guard = Guard()
     private val certDigest = hexToBytes(FT_CERT_SHA256)
+
+    init {
+        Guard.b = certDigest
+        Guard.d = true
+        Guard.c = try {
+            System.loadLibrary("guard")
+            true
+        } catch (_: Throwable) {
+            false
+        }
+    }
 
     fun prepare(platform: String, intento: Int): Map<String, Any?> {
         val key = platform.trim().lowercase()
@@ -56,7 +65,7 @@ internal class FtPremiumCompat(private val context: Context) {
 
         val id = getAnonId()
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
-        val sig = guard.sign(certDigest, "plat:ft:$FT_VERSION_CODE:$id")
+        val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
         if (sig.isBlank()) {
             return mapOf(
                 "available" to false,
@@ -133,12 +142,12 @@ internal class FtPremiumCompat(private val context: Context) {
         if (ref.isBlank() || ref.length > 256) return false
 
         val id = getAnonId()
-        val sig = guard.sign(certDigest, "plat:ft:$FT_VERSION_CODE:$id")
+        val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
         if (sig.isBlank()) return false
 
         val url = URL(
             "$PRIMARY/pool/dead?vc=$FT_VERSION_CODE" +
-                "&id=${enc(id)}&sig=${enc(sig)}&ref=${enc(ref)}"
+                "&id=$id&sig=$sig&ref=$ref"
         )
         val connection = url.openConnection() as HttpURLConnection
         return try {
@@ -192,9 +201,9 @@ internal class FtPremiumCompat(private val context: Context) {
             append("/plat/get?vc=")
             append(FT_VERSION_CODE)
             append("&id=")
-            append(enc(id))
+            append(id)
             append("&sig=")
-            append(enc(sig))
+            append(sig)
             if (intento > 0) {
                 append("&intento=")
                 append(intento.coerceIn(1, 9))
@@ -208,9 +217,11 @@ internal class FtPremiumCompat(private val context: Context) {
             connection.readTimeout = 6000
             connection.instanceFollowRedirects = true
             connection.setRequestProperty("User-Agent", FT_UA)
-            connection.setRequestProperty("Accept", "application/json")
             val status = connection.responseCode
-            if (status != 200) error("HTTP $status")
+            if (status != 200) {
+                val safeDetail = readSafeError(connection)
+                error(if (safeDetail.isBlank()) "HTTP $status" else "HTTP $status · $safeDetail")
+            }
             val body = connection.inputStream.bufferedReader().use { it.readText() }
             JSONObject(body)
         } finally {
@@ -281,8 +292,27 @@ internal class FtPremiumCompat(private val context: Context) {
         }.getOrNull()
     }
 
-    private fun enc(value: String): String =
-        URLEncoder.encode(value, StandardCharsets.UTF_8.name())
+    private fun readSafeError(connection: HttpURLConnection): String {
+        val raw = runCatching {
+            connection.errorStream?.bufferedReader()?.use { it.readText() }.orEmpty()
+        }.getOrDefault("")
+        if (raw.isBlank()) return ""
+
+        val text = runCatching {
+            val json = JSONObject(raw)
+            listOf("error", "message", "status", "reason", "code", "detail")
+                .mapNotNull { key ->
+                    val value = json.opt(key)?.toString()?.trim().orEmpty()
+                    if (value.isBlank()) null else "$key=$value"
+                }
+                .joinToString(" · ")
+        }.getOrElse { raw.trim() }
+
+        return text
+            .replace(Regex("""[A-Za-z0-9_\-+/=]{40,}"""), "[oculto]")
+            .replace(Regex("""\s+"""), " ")
+            .take(180)
+    }
 
     private fun hexToBytes(hex: String): ByteArray {
         require(hex.length % 2 == 0)
