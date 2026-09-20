@@ -188,23 +188,6 @@ class _PlatformGridState extends State<_PlatformGrid> {
   ) async {
     if (_opening != null) return;
 
-    if (platform == StreamingPremiumPlatform.netflix) {
-      final messenger = ScaffoldMessenger.of(context);
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            duration: Duration(seconds: 3),
-            backgroundColor: Color(0xFF17140D),
-            content: Text(
-              'Netflix queda para la fase final. '
-              'Esta prueba corrige MAX, Prime y Crunchyroll.',
-            ),
-          ),
-        );
-      return;
-    }
-
     setState(() => _opening = platform);
 
     final messenger = ScaffoldMessenger.of(context);
