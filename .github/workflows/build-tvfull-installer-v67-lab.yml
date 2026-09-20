@@ -1,0 +1,90 @@
+name: Build TV FULL Installer LAB V67
+
+on:
+  push:
+    branches:
+      - installer/v67-isolated-lab
+    paths:
+      - 'tv_full_installer/**'
+      - '.github/workflows/build-tvfull-installer-v67-lab.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout installer LAB branch
+        uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Gradle 8.10.2
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.10.2'
+
+      - name: Configure installer signing
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          umask 077
+          mkdir -p "${RUNNER_TEMP}/tvfull-installer"
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > "${RUNNER_TEMP}/tvfull-installer/tvfull-release.jks"
+          echo "TV_FULL_INSTALLER_KEYSTORE=${RUNNER_TEMP}/tvfull-installer/tvfull-release.jks" >> "$GITHUB_ENV"
+
+      - name: Build isolated Installer LAB APK
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          gradle -p tv_full_installer :app:assembleRelease
+
+      - name: Verify Installer LAB package
+        shell: bash
+        run: |
+          set -euo pipefail
+          APK="tv_full_installer/app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$AAPT"
+          "$AAPT" dump badging "$APK" | tee installer-lab.badging.txt
+          grep -Fq "package: name='com.tvfull.pro.installer.lab'" installer-lab.badging.txt
+          mkdir -p artifact
+          cp "$APK" artifact/TV-FULL-INSTALLER-LAB-V67.apk
+          sha256sum artifact/TV-FULL-INSTALLER-LAB-V67.apk > artifact/SHA256SUMS.txt
+
+      - name: Publish Installer LAB release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="tv-full-installer-lab-v67"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG"             artifact/TV-FULL-INSTALLER-LAB-V67.apk             --prerelease             --target "$GITHUB_SHA"             --title "TV FULL Installer LAB - V67 isolated"             --notes "Instalador de laboratorio aislado. No modifica el canal estable, que permanece en V50. Este APK sólo consulta el manifiesto V67 de la rama installer/v67-isolated-lab."
+
+      - name: Upload Installer LAB artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-INSTALLER-LAB-V67
+          path: artifact/
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Remove signing material
+        if: always()
+        run: rm -rf "${RUNNER_TEMP}/tvfull-installer"
