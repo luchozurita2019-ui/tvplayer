@@ -306,6 +306,18 @@ class MainActivity : FlutterActivity() {
                 WebPlaybackActivity.EXTRA_CLEAR_COOKIES_ON_EXIT,
                 call.argument<Boolean>("clearCookiesOnExit") ?: false,
             )
+            putExtra(
+                WebPlaybackActivity.EXTRA_PLATFORM,
+                call.argument<String>("platform")?.trim().orEmpty(),
+            )
+            putExtra(
+                WebPlaybackActivity.EXTRA_REPLACE_PLATFORM_COOKIES,
+                call.argument<Boolean>("replacePlatformCookies") ?: false,
+            )
+            putExtra(
+                WebPlaybackActivity.EXTRA_SESSION_REF,
+                call.argument<String>("sessionRef")?.trim().orEmpty(),
+            )
         }
 
         pendingWebPlaybackResult = result
@@ -325,7 +337,19 @@ class MainActivity : FlutterActivity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode != WEB_PLAYBACK_REQUEST_CODE) return
-        pendingWebPlaybackResult?.success(null)
+        pendingWebPlaybackResult?.success(
+            mapOf(
+                "deadDetected" to
+                    (data?.getBooleanExtra(
+                        WebPlaybackActivity.RESULT_DEAD_DETECTED,
+                        false,
+                    ) ?: false),
+                "platform" to
+                    (data?.getStringExtra(
+                        WebPlaybackActivity.RESULT_PLATFORM,
+                    ) ?: ""),
+            )
+        )
         pendingWebPlaybackResult = null
     }
 
