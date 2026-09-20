@@ -1,6 +1,8 @@
 package com.example.iptv_player
 
+import android.app.UiModeManager
 import android.content.Context
+import android.content.res.Configuration
 import android.os.Build
 import android.provider.Settings
 import android.util.Base64
@@ -84,29 +86,39 @@ internal class FtPremiumCompat(private val context: Context) {
                 )
             }
 
-        var activationRounds = 0
         if (session.ok &&
             session.queda <= 0 &&
             !session.libre &&
             !session.pro
         ) {
-            val activation = runCatching { activateAuthorized(id) }
-                .getOrElse {
-                    FtActivationResult(
-                        ok = false,
-                        rounds = 0,
-                        session = session,
-                        detail = it.message.orEmpty(),
-                    )
-                }
-            activationRounds = activation.rounds
-            session = activation.session ?: session
+            val activationSession = runCatching {
+                ensureFtSession(id, wantAd = true)
+            }.getOrElse {
+                FtSessionState(
+                    ok = false,
+                    httpStatus = -1,
+                    queda = 0,
+                    libre = false,
+                    pro = false,
+                    sessionToken = "",
+                    vastUrl = "",
+                    fallbackAdUrl = "",
+                    detail = it.message.orEmpty(),
+                )
+            }
+            session = activationSession
 
-            if (!activation.ok) {
+            if (session.queda <= 0 && !session.libre && !session.pro) {
+                val mode = when {
+                    session.fallbackAdUrl.isNotBlank() -> "web"
+                    session.vastUrl.isNotBlank() -> "vast"
+                    else -> "none"
+                }
                 return mapOf(
                     "available" to false,
-                    "status" to "activation_failed",
+                    "status" to "activation_required",
                     "stage" to "activation",
+                    "activation_mode" to mode,
                     "ping_ok" to pingOk,
                     "session_ok" to session.ok,
                     "session_http" to session.httpStatus,
@@ -114,8 +126,11 @@ internal class FtPremiumCompat(private val context: Context) {
                     "session_libre" to session.libre,
                     "session_pro" to session.pro,
                     "session_token" to session.hasToken,
-                    "activation_rounds" to activationRounds,
-                    "detail" to activation.detail,
+                    "detail" to when (mode) {
+                        "web" -> "activación web disponible"
+                        "vast" -> "activación de video disponible"
+                        else -> session.detail.ifBlank { "sin método de activación" }
+                    },
                 )
             }
         }
@@ -146,7 +161,6 @@ internal class FtPremiumCompat(private val context: Context) {
                 "session_libre" to session.libre,
                 "session_pro" to session.pro,
                 "session_token" to session.hasToken,
-                "activation_rounds" to activationRounds,
                 "detail" to listOfNotNull(
                     error.message ?: error.javaClass.simpleName,
                     session.detail.takeIf { it.isNotBlank() },
@@ -202,8 +216,7 @@ internal class FtPremiumCompat(private val context: Context) {
             "ref" to ref,
             "intento" to intento,
             "ping_ok" to pingOk,
-            "activation_rounds" to activationRounds,
-            "source" to "ft36-direct-authorized-activation",
+            "source" to "ft36-direct-web-activation-parity",
         )
     }
 
@@ -355,6 +368,53 @@ internal class FtPremiumCompat(private val context: Context) {
             session = ensureFtSession(id, wantAd = false),
             detail = "activación incompleta",
         )
+    }
+
+    internal fun prepareWebActivationUrl(): String? {
+        val id = getAnonId()
+        val session = ensureFtSession(id, wantAd = true)
+        if (!session.ok || !session.hasToken) return null
+        if (session.queda > 0 || session.libre || session.pro) return ""
+
+        val base = session.fallbackAdUrl.trim()
+        if (!isSafeHttpsUrl(base)) return null
+
+        val tvSuffix = if (isTelevision()) "&d=tv" else ""
+        return base + tvSuffix + "&auto=1"
+    }
+
+    internal fun refreshAfterWebActivation(): Map<String, Any?> {
+        val id = getAnonId()
+        var latest = ensureFtSession(id, wantAd = false)
+        repeat(5) {
+            if (latest.queda > 0 || latest.libre || latest.pro) {
+                return mapOf(
+                    "completed" to true,
+                    "http" to latest.httpStatus,
+                    "queda" to latest.queda,
+                    "libre" to latest.libre,
+                    "pro" to latest.pro,
+                    "token" to latest.hasToken,
+                )
+            }
+            Thread.sleep(450L)
+            latest = ensureFtSession(id, wantAd = false)
+        }
+        return mapOf(
+            "completed" to false,
+            "http" to latest.httpStatus,
+            "queda" to latest.queda,
+            "libre" to latest.libre,
+            "pro" to latest.pro,
+            "token" to latest.hasToken,
+        )
+    }
+
+    private fun isTelevision(): Boolean {
+        return runCatching {
+            val manager = context.getSystemService(Context.UI_MODE_SERVICE) as UiModeManager
+            manager.currentModeType == Configuration.UI_MODE_TYPE_TELEVISION
+        }.getOrDefault(false)
     }
 
     internal fun requestAdActivation(): FtAdActivation? {
