@@ -12,6 +12,7 @@ import 'futbol_total_catalog_service.dart';
 import 'futbol_total_embedded_config.dart';
 import 'futbol_total_endpoints.dart';
 import 'futbol_total_manifest_parser.dart';
+import 'provider_flow_stream_service.dart';
 
 class FutbolTotalFastCatalogSnapshot {
   final FutbolTotalManifest manifest;
@@ -78,7 +79,7 @@ class FutbolTotalFastCatalogService {
       );
     }
 
-    final first = definitions.first;
+    final first = await _preferredDefinition(playlist, definitions);
     final cached = await _loadCached(playlist, first);
     if (cached != null) {
       return _snapshot(manifest, first, cached, fromCache: true);
@@ -112,6 +113,7 @@ class FutbolTotalFastCatalogService {
   ) async {
     final manifest = await loadManifest(playlist);
     final definition = _definitionByName(manifest, sourceName);
+    await _rememberSource(playlist, definition.name);
     final cached = await _loadCached(playlist, definition);
     if (cached != null) {
       return _snapshot(manifest, definition, cached, fromCache: true);
@@ -265,6 +267,10 @@ class FutbolTotalFastCatalogService {
         items: channels.map((channel) => channel.toJson()),
       );
 
+      if (channels.any(ProviderFlowStreamService.instance.handles)) {
+        unawaited(ProviderFlowStreamService.instance.warm());
+      }
+
       final fresh = _FutbolTotalCachedSource(
         channels: channels,
         categories: catalog.categories,
@@ -397,6 +403,40 @@ class FutbolTotalFastCatalogService {
         .toString()
         .substring(0, 16);
     return 'ft_v62_$digest';
+  }
+
+  Future<FutbolTotalListDefinition> _preferredDefinition(
+    Playlist playlist,
+    List<FutbolTotalListDefinition> definitions,
+  ) async {
+    if (definitions.isEmpty) {
+      throw const FormatException('Fútbol Total no contiene TvLists.');
+    }
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final preferred = prefs.getString(_lastSourcePreferenceKey(playlist));
+      if (preferred != null && preferred.isNotEmpty) {
+        for (final definition in definitions) {
+          if (definition.name == preferred) return definition;
+        }
+      }
+    } catch (_) {}
+    return definitions.first;
+  }
+
+  Future<void> _rememberSource(Playlist playlist, String sourceName) async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString(_lastSourcePreferenceKey(playlist), sourceName);
+    } catch (_) {}
+  }
+
+  String _lastSourcePreferenceKey(Playlist playlist) {
+    final digest = sha256
+        .convert(utf8.encode(playlist.source.trim()))
+        .toString()
+        .substring(0, 16);
+    return 'tvfull_ft_last_source_v62_$digest';
   }
 
   String _manifestPreferenceKey(Playlist playlist) {
