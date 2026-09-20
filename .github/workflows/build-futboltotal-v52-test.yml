@@ -15,7 +15,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 env:
   BUILD_NAME: '1.4.29'
@@ -121,7 +121,23 @@ jobs:
             grep -Fq "versionName='1.4.29'" "$APK.badging.txt"
           done
 
-      - name: Upload V60 signed test bundle
+      - name: Publish V61 installer test release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="tv-full-pro-v61-futboltotal-installer-test"
+          gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
+          gh release create "$TAG" \
+            artifact/TV-FULL-PRO-V61-FUTBOL-TOTAL-ARM32.apk \
+            artifact/TV-FULL-PRO-V61-FUTBOL-TOTAL-ARM64.apk \
+            --prerelease \
+            --target "$GITHUB_SHA" \
+            --title "TV FULL PRO 1.4.29+3061 - V61 Installer test" \
+            --notes "V61 de prueba para TV FULL Installer. Fútbol Total integrado y navegación optimizada para control remoto. Conserva la firma histórica de TV FULL PRO."
+
+      - name: Upload V61 signed test bundle
         uses: actions/upload-artifact@v4
         with:
           name: TV-FULL-PRO-V61-FUTBOL-TOTAL-TEST
