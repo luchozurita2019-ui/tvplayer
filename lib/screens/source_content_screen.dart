@@ -18,7 +18,6 @@ import '../widgets/parental_lock_button.dart';
 import '../widgets/parental_unlock_dialog.dart';
 import '../widgets/tv_full_premium_ui.dart';
 import 'parental_control_screen.dart';
-import 'add_source_screen.dart';
 import 'xtream_live_screen.dart';
 import 'xtream_movies_screen.dart';
 import 'xtream_series_screen.dart';
@@ -302,18 +301,6 @@ class _SourceContentScreenState extends State<SourceContentScreen>
                         ],
                       ),
                       const Spacer(),
-                      OutlinedButton.icon(
-                        onPressed: () => Navigator.of(context).push(
-                          MaterialPageRoute<void>(
-                            builder: (_) => const AddSourceScreen(
-                              initialType: PlaylistSourceType.localProviderJson,
-                            ),
-                          ),
-                        ),
-                        icon: const Icon(Icons.file_open_outlined, size: 20),
-                        label: const Text('Cargar JSON'),
-                      ),
-                      const SizedBox(width: 18),
                       const AppVersionBadge(),
                     ],
                   ),
