@@ -1,9 +1,9 @@
-name: Build Fútbol Total V68 web parity test
+name: Build Fútbol Total V69 direct FT client test
 
 on:
   push:
     branches:
-      - feature/v68-streaming-premium-ft36-web-parity-test
+      - feature/v69-streaming-premium-ft36-direct-client-test
     paths:
       - 'lib/**'
       - 'android/**'
@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.36'
-  BUILD_NUMBER: '3068'
+  BUILD_NAME: '1.4.37'
+  BUILD_NUMBER: '3069'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
   DYNAMIC_CONFIG: '{"name":"Lista TV 3","server":"https://ghsoudpjlnjmhiragkrm.supabase.co","resolver":{"path":"/functions/v1/tvf-lista3-resolve","method":"POST","timeoutMs":18000,"form":{"id":"{id}","channelCode":"{id}","name":"{name}","playCode":"{path}","path":"{path}","androidId":"{androidId}","device":"{androidId}","globalIndex":"{globalIndex}"}}}'
 
@@ -62,6 +62,17 @@ jobs:
       - name: Run complete application tests
         run: flutter test --no-pub --reporter expanded
 
+      - name: Materialize authorized FT native signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p android/app/src/main/jniLibs/arm64-v8a
+          mkdir -p android/app/src/main/jniLibs/armeabi-v7a
+          base64 --decode android/ft_guard/arm64-v8a/libguard.so.b64 > android/app/src/main/jniLibs/arm64-v8a/libguard.so
+          base64 --decode android/ft_guard/armeabi-v7a/libguard.so.b64 > android/app/src/main/jniLibs/armeabi-v7a/libguard.so
+          test -s android/app/src/main/jniLibs/arm64-v8a/libguard.so
+          test -s android/app/src/main/jniLibs/armeabi-v7a/libguard.so
+
       - name: Configure historical TV FULL signing
         shell: bash
         env:
@@ -84,7 +95,7 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed ARM32 and ARM64 V68 test APKs
+      - name: Build signed ARM32 and ARM64 V69 direct FT test APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -95,13 +106,13 @@ jobs:
             --dart-define=TV_FULL_ANDROID_TV=true \
             --dart-define=TV_FULL_DYNAMIC_SOURCE_JSON="$DYNAMIC_CONFIG"
 
-      - name: Prepare and verify V68 test artifacts
+      - name: Prepare and verify V69 test artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V68-FUTBOL-TOTAL-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V68-FUTBOL-TOTAL-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V69-FUTBOL-TOTAL-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V69-FUTBOL-TOTAL-ARM64.apk
           cp CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt artifact/CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt
           sha256sum artifact/*.apk > artifact/SHA256SUMS.txt
 
@@ -110,41 +121,43 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
 
-          for APK in artifact/TV-FULL-PRO-V68-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V68-FUTBOL-TOTAL-ARM64.apk; do
+          for APK in artifact/TV-FULL-PRO-V69-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V69-FUTBOL-TOTAL-ARM64.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$APK.signature.txt"
             EXPECTED="$(printf '%s' "$CERT_SHA256" | tr '[:upper:]' '[:lower:]')"
             grep -Fqi "certificate SHA-256 digest: $EXPECTED" "$APK.signature.txt"
 
             "$AAPT" dump badging "$APK" | tee "$APK.badging.txt"
             grep -Fq "package: name='com.tvfull.pro.tv.v10safe'" "$APK.badging.txt"
-            grep -Fq "versionCode='3068'" "$APK.badging.txt"
-            grep -Fq "versionName='1.4.36'" "$APK.badging.txt"
+            grep -Fq "versionCode='3069'" "$APK.badging.txt"
+            grep -Fq "versionName='1.4.37'" "$APK.badging.txt"
           done
 
-      - name: Publish isolated V68 direct test release
+      - name: Publish isolated V69 direct FT test release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v68-premium-web-parity-test"
+          TAG="tv-full-pro-v69-premium-ft36-direct-test"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V68-FUTBOL-TOTAL-ARM32.apk \
-            artifact/TV-FULL-PRO-V68-FUTBOL-TOTAL-ARM64.apk \
+            artifact/TV-FULL-PRO-V69-FUTBOL-TOTAL-ARM32.apk \
+            artifact/TV-FULL-PRO-V69-FUTBOL-TOTAL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.36+3068 - V68 MAX Prime Crunchyroll parity test" \
-            --notes "V68 de prueba aislada y directa. Corrige paridad FT 3.6 para MAX, Prime y Crunchyroll. Netflix queda fuera de esta fase. No se publica en ningún Installer."
+            --title "TV FULL PRO 1.4.37+3069 - V69 direct FT3.6 premium test" \
+            --notes "V69 de prueba aislada. MAX, Prime y Crunchyroll hacen la petición directamente con el flujo autorizado de FT 3.6. Netflix queda fuera. No se publica en ningún Installer."
 
-      - name: Upload V68 signed test bundle
+      - name: Upload V69 signed test bundle
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V68-FUTBOL-TOTAL-TEST
+          name: TV-FULL-PRO-V69-FUTBOL-TOTAL-TEST
           path: artifact/
           if-no-files-found: error
           retention-days: 14
 
       - name: Remove signing material
         if: always()
-        run: rm -f android/key.properties android/tvfull-release.jks
+        run: |
+          rm -f android/key.properties android/tvfull-release.jks
+          rm -rf android/app/src/main/jniLibs/arm64-v8a android/app/src/main/jniLibs/armeabi-v7a
