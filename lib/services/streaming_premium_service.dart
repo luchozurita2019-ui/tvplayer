@@ -474,7 +474,7 @@ class StreamingPremiumService {
       'intento=$intento',
     );
 
-    final raw = await _ftPremiumDirect.invokeMethod<dynamic>('prepare', {
+    dynamic raw = await _ftPremiumDirect.invokeMethod<dynamic>('prepare', {
       'platform': platform,
       'intento': intento,
     });
@@ -482,10 +482,60 @@ class StreamingPremiumService {
       throw const FormatException('Respuesta directa FT inválida.');
     }
 
-    final data = Map<String, dynamic>.from(raw);
+    var data = Map<String, dynamic>.from(raw);
+    if (data['available'] != true &&
+        data['status']?.toString() == 'activation_required' &&
+        data['activation_mode']?.toString() == 'web') {
+      onStage?.call(StreamingPremiumStage.validatingSession);
+      debugPrint(
+        '[StreamingPremium] $platform: abriendo activación web autorizada',
+      );
+
+      final activationRaw =
+          await _ftPremiumDirect.invokeMethod<dynamic>('activate');
+      if (activationRaw is! Map) {
+        throw const StreamingPremiumUnavailableException(
+          'activation_failed',
+          'respuesta de activación inválida',
+        );
+      }
+
+      final activation = Map<String, dynamic>.from(activationRaw);
+      final completed = activation['completed'] == true;
+      final queda = (activation['queda'] as num?)?.toInt() ?? 0;
+      final libre = activation['libre'] == true;
+      final pro = activation['pro'] == true;
+
+      if (!completed) {
+        final parts = <String>[
+          'etapa=activation',
+          'queda=${queda}s',
+          'libre=${libre ? 'sí' : 'no'}',
+          'pro=${pro ? 'sí' : 'no'}',
+        ];
+        throw StreamingPremiumUnavailableException(
+          'activation_pending',
+          parts.join(' · '),
+        );
+      }
+
+      onStage?.call(StreamingPremiumStage.requestingSession);
+      raw = await _ftPremiumDirect.invokeMethod<dynamic>('prepare', {
+        'platform': platform,
+        'intento': intento,
+      });
+      if (raw is! Map) {
+        throw const FormatException(
+          'Respuesta FT inválida después de la activación.',
+        );
+      }
+      data = Map<String, dynamic>.from(raw);
+    }
+
     if (data['available'] != true) {
       final status = data['status']?.toString() ?? 'no_session';
       final stage = data['stage']?.toString() ?? '';
+      final activationMode = data['activation_mode']?.toString() ?? '';
       final pingOk = data['ping_ok'];
       final hasRef = data['has_ref'];
       final sessionOk = data['session_ok'];
@@ -494,23 +544,24 @@ class StreamingPremiumService {
       final sessionLibre = data['session_libre'];
       final sessionPro = data['session_pro'];
       final sessionToken = data['session_token'];
-      final activationRounds = data['activation_rounds'];
       final rawDetail = data['detail']?.toString().trim() ?? '';
       final parts = <String>[];
       if (stage.isNotEmpty) parts.add('etapa=$stage');
+      if (activationMode.isNotEmpty) {
+        parts.add('activación=$activationMode');
+      }
       if (pingOk is bool) parts.add('ping=${pingOk ? 'ok' : 'falló'}');
       if (sessionOk is bool) {
         parts.add('sesión=${sessionOk ? 'ok' : 'falló'}');
       }
       if (sessionHttp is num) parts.add('sesión_http=${sessionHttp.toInt()}');
       if (sessionQueda is num) parts.add('queda=${sessionQueda.toInt()}s');
-      if (sessionLibre is bool) parts.add('libre=${sessionLibre ? 'sí' : 'no'}');
+      if (sessionLibre is bool) {
+        parts.add('libre=${sessionLibre ? 'sí' : 'no'}');
+      }
       if (sessionPro is bool) parts.add('pro=${sessionPro ? 'sí' : 'no'}');
       if (sessionToken is bool) {
         parts.add('token=${sessionToken ? 'sí' : 'no'}');
-      }
-      if (activationRounds is num && activationRounds.toInt() > 0) {
-        parts.add('activación_rondas=${activationRounds.toInt()}');
       }
       if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
       if (rawDetail.isNotEmpty) parts.add(rawDetail);
