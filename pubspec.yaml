@@ -31,6 +31,7 @@ flutter:
   uses-material-design: true
   assets:
     - assets/playlists/
+    - assets/futbol_total/
 
 # TV FULL PRO 1.2.7+19 live-error-navigation and updater reliability marker.
 
