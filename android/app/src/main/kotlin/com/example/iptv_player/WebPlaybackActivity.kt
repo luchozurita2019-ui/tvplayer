@@ -12,6 +12,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.PermissionRequest
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -292,6 +293,43 @@ class WebPlaybackActivity : Activity() {
             override fun onHideCustomView() {
                 hideCustomView()
             }
+
+            override fun onPermissionRequest(request: PermissionRequest?) {
+                if (request == null) return
+                runOnUiThread {
+                    if (!streamingPremium ||
+                        !isAllowedProtectedMediaOrigin(request.origin)
+                    ) {
+                        request.deny()
+                        return@runOnUiThread
+                    }
+
+                    val requested = request.resources?.toSet().orEmpty()
+                    val grant = requested.filter {
+                        it == PermissionRequest.RESOURCE_PROTECTED_MEDIA_ID
+                    }.toTypedArray()
+
+                    if (grant.isEmpty()) {
+                        request.deny()
+                        return@runOnUiThread
+                    }
+
+                    Log.i(
+                        "TVFULL_PREMIUM",
+                        "protected_media_granted platform=$platform host=" +
+                            request.origin?.host.orEmpty().lowercase(),
+                    )
+                    request.grant(grant)
+                }
+            }
+
+            override fun onPermissionRequestCanceled(request: PermissionRequest?) {
+                super.onPermissionRequestCanceled(request)
+                Log.i(
+                    "TVFULL_PREMIUM",
+                    "protected_media_canceled platform=$platform",
+                )
+            }
         }
 
         webView.loadUrl(rawUrl, headers)
@@ -314,6 +352,24 @@ class WebPlaybackActivity : Activity() {
             })();
         """.trimIndent()
         runCatching { view.evaluateJavascript(script, null) }
+    }
+
+    private fun isAllowedProtectedMediaOrigin(origin: android.net.Uri?): Boolean {
+        if (origin == null ||
+            !origin.scheme.equals("https", ignoreCase = true)
+        ) {
+            return false
+        }
+        val host = origin.host.orEmpty().lowercase()
+        val allowed = when (platform) {
+            "hbomax" -> listOf("max.com", "hbomax.com")
+            "prime" -> listOf("primevideo.com", "amazon.com")
+            "crunchyroll" -> listOf("crunchyroll.com")
+            else -> emptyList()
+        }
+        return allowed.any { domain ->
+            host == domain || host.endsWith(".$domain")
+        }
     }
 
     private fun safePageLabel(rawUrl: String?): String {
