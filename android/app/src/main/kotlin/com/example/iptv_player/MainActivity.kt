@@ -211,6 +211,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "open" -> openWebPlayback(call, result)
+                    "openExternal" -> openExternalBrowser(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -219,6 +220,65 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 handlePlayerCall(flutterEngine, call, result)
             }
+    }
+
+    private fun openExternalBrowser(
+        call: MethodCall,
+        result: MethodChannel.Result,
+    ) {
+        val rawUrl = call.argument<String>("url")?.trim().orEmpty()
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull()
+        if (uri == null ||
+            (uri.scheme != "http" && uri.scheme != "https") ||
+            uri.host.isNullOrBlank()
+        ) {
+            result.error("INVALID_EXTERNAL_URL", "URL externa inválida.", null)
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        // FT 3.6 fuerza el navegador predeterminado para Netflix. De este
+        // modo la web temporal puede completar el salto a la app oficial.
+        val browserProbe = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("http://example.com"),
+        )
+        val browserPackage = packageManager
+            .resolveActivity(
+                browserProbe,
+                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY,
+            )
+            ?.activityInfo
+            ?.packageName
+            ?.trim()
+            .orEmpty()
+
+        if (browserPackage.isNotEmpty() &&
+            browserPackage != packageName &&
+            browserPackage != "android"
+        ) {
+            intent.setPackage(browserPackage)
+        }
+
+        try {
+            startActivity(intent)
+            result.success(true)
+        } catch (preferredError: Throwable) {
+            try {
+                intent.setPackage(null)
+                startActivity(intent)
+                result.success(true)
+            } catch (fallbackError: Throwable) {
+                result.error(
+                    "EXTERNAL_OPEN_FAILED",
+                    fallbackError.message ?: "No se pudo abrir el navegador.",
+                    null,
+                )
+            }
+        }
     }
 
     @Suppress("DEPRECATION")
