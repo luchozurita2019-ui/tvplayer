@@ -5,10 +5,14 @@ import android.app.Activity
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.util.Log
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.WebResourceError
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
@@ -87,6 +91,7 @@ class WebPlaybackActivity : Activity() {
         webView.settings.apply {
             javaScriptEnabled = true
             domStorageEnabled = true
+            databaseEnabled = true
             mediaPlaybackRequiresUserGesture = false
             useWideViewPort = true
             loadWithOverviewMode = true
@@ -138,7 +143,48 @@ class WebPlaybackActivity : Activity() {
                 ?: arrayListOf()
         installTemporaryCookies(cookieManager, cookieBundles)
 
-        webView.webViewClient = WebViewClient()
+        webView.webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                Log.i("TVFULL_PREMIUM", "page_started " + safePageLabel(url))
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                CookieManager.getInstance().flush()
+                Log.i("TVFULL_PREMIUM", "page_finished " + safePageLabel(url))
+            }
+
+            override fun onReceivedError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                error: WebResourceError?,
+            ) {
+                super.onReceivedError(view, request, error)
+                if (request?.isForMainFrame == true) {
+                    Log.w(
+                        "TVFULL_PREMIUM",
+                        "main_frame_error code=" + error?.errorCode +
+                            " url=" + safePageLabel(request.url?.toString()),
+                    )
+                }
+            }
+
+            override fun onReceivedHttpError(
+                view: WebView?,
+                request: WebResourceRequest?,
+                errorResponse: WebResourceResponse?,
+            ) {
+                super.onReceivedHttpError(view, request, errorResponse)
+                if (request?.isForMainFrame == true) {
+                    Log.w(
+                        "TVFULL_PREMIUM",
+                        "main_frame_http status=" + errorResponse?.statusCode +
+                            " url=" + safePageLabel(request.url?.toString()),
+                    )
+                }
+            }
+        }
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowCustomView(
                 view: View?,
@@ -174,6 +220,13 @@ class WebPlaybackActivity : Activity() {
         webView.requestFocus()
     }
 
+    private fun safePageLabel(rawUrl: String?): String {
+        val parsed = runCatching { android.net.Uri.parse(rawUrl.orEmpty()) }.getOrNull()
+            ?: return "invalid"
+        val host = parsed.host.orEmpty().lowercase()
+        val path = parsed.path.orEmpty().take(160)
+        return if (host.isBlank()) "unknown" else host + path
+    }
     private fun installTemporaryCookies(
         manager: CookieManager,
         bundles: List<Bundle>,
@@ -305,6 +358,7 @@ class WebPlaybackActivity : Activity() {
 
     override fun onPause() {
         if (::webView.isInitialized) webView.onPause()
+        CookieManager.getInstance().flush()
         super.onPause()
     }
 
