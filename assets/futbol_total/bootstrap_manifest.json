@@ -1,0 +1,18 @@
+{
+  "version": 62,
+  "lists": [
+    {"name":"🗓 Agenda","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-agenda3.json","kind":"futbol","ttl":90},
+    {"name":"🗓 Agenda 2","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-agenda2.json","kind":"futbol","ttl":600},
+    {"name":"Flow Premium","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-flow2.json","kind":"flow","ttl":21600},
+    {"name":"Extras","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-24-7.json","kind":"flow","ttl":1800},
+    {"name":"Extra 2","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-extra2.json","kind":"flow","ttl":1800},
+    {"name":"📺 Now Futbol","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-nowfutbol.json","kind":"flow","ttl":1800},
+    {"name":"🇪🇸 España","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-espana.json","kind":"flow","ttl":1800},
+    {"name":"🌎 Mundo TV","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-mundotv.json","kind":"flow","ttl":21600},
+    {"name":"🏆 Deportes 24h","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-deportes-planix.json","kind":"flow","ttl":1800},
+    {"name":"⚡ Canales HLS","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-hls.json","kind":"flow","ttl":3600},
+    {"name":"🌎 TV en Vivo","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-tvlive-planix.json","kind":"flow","ttl":3600},
+    {"name":"🎬 Cine & Series","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-cine-planix.json","kind":"flow","ttl":21600},
+    {"name":"🎵 Música","url":"https://raw.githubusercontent.com/ByRafaelSystem/futboltotal-data/main/ft-musica-planix.json","kind":"flow","ttl":21600}
+  ]
+}
