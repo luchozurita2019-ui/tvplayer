@@ -5,6 +5,7 @@ import android.os.Build
 import android.provider.Settings
 import android.util.Base64
 import com.byrafael.streamapp.Guard
+import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
@@ -68,8 +69,42 @@ internal class FtPremiumCompat(private val context: Context) {
 
         val id = getAnonId()
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
-        val session = runCatching { ensureFtSession(id) }
-            .getOrElse { FtSessionState(false, -1, 0, false, false, false, it.message.orEmpty()) }
+        val session = runCatching { ensureFtSession(id, wantAd = false) }
+            .getOrElse {
+                FtSessionState(
+                    ok = false,
+                    httpStatus = -1,
+                    queda = 0,
+                    libre = false,
+                    pro = false,
+                    sessionToken = "",
+                    vastUrl = "",
+                    fallbackAdUrl = "",
+                    detail = it.message.orEmpty(),
+                )
+            }
+
+        if (session.ok &&
+            session.queda <= 0 &&
+            !session.libre &&
+            !session.pro
+        ) {
+            return mapOf(
+                "available" to false,
+                "status" to "ad_required",
+                "stage" to "session",
+                "ping_ok" to pingOk,
+                "session_ok" to true,
+                "session_http" to session.httpStatus,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+                "session_token" to session.hasToken,
+                "ad_available" to (session.vastUrl.isNotBlank() ||
+                    session.fallbackAdUrl.isNotBlank()),
+            )
+        }
+
         val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
         if (sig.isBlank()) {
             return mapOf(
@@ -181,26 +216,143 @@ internal class FtPremiumCompat(private val context: Context) {
         }
     }
 
+    internal data class FtAdActivation(
+        val token: String,
+        val vastUrl: String,
+        val fallbackAdUrl: String,
+    )
+
+    internal data class FtAdRound(
+        val videoUrl: String,
+        val skipSeconds: Int,
+        val clickUrl: String,
+        val round: Int,
+        val totalRounds: Int,
+        val impressionUrls: List<String>,
+        val startUrls: List<String>,
+    )
+
     private data class FtSessionState(
         val ok: Boolean,
         val httpStatus: Int,
         val queda: Int,
         val libre: Boolean,
         val pro: Boolean,
-        val hasToken: Boolean,
+        val sessionToken: String,
+        val vastUrl: String,
+        val fallbackAdUrl: String,
         val detail: String = "",
-    )
+    ) {
+        val hasToken: Boolean get() = sessionToken.isNotBlank()
+    }
 
-    private fun ensureFtSession(id: String): FtSessionState {
+    internal fun requestAdActivation(): FtAdActivation? {
+        val id = getAnonId()
+        val session = ensureFtSession(id, wantAd = true)
+        if (!session.ok || !session.hasToken) return null
+        if (session.vastUrl.isBlank() && session.fallbackAdUrl.isBlank()) return null
+        return FtAdActivation(
+            token = session.sessionToken,
+            vastUrl = session.vastUrl,
+            fallbackAdUrl = session.fallbackAdUrl,
+        )
+    }
+
+    internal fun fetchAdRound(vastUrl: String): FtAdRound? {
+        if (!isSafeHttpsUrl(vastUrl)) return null
+        val connection = URL(vastUrl).openConnection() as HttpURLConnection
+        return try {
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.instanceFollowRedirects = true
+            val stream = if (connection.responseCode == 200) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            } ?: return null
+            val json = JSONObject(stream.bufferedReader().use { it.readText() })
+            if (!json.optBoolean("ok", false)) return null
+            val video = json.optString("video", "").trim()
+            if (!isSafeHttpsUrl(video)) return null
+            FtAdRound(
+                videoUrl = video,
+                skipSeconds = json.optInt("skip", 8).coerceAtLeast(1),
+                clickUrl = json.optString("click", "").trim()
+                    .takeIf { isSafeHttpsUrl(it) }
+                    .orEmpty(),
+                round = json.optInt("n", 1).coerceAtLeast(1),
+                totalRounds = json.optInt("de", 1).coerceAtLeast(1),
+                impressionUrls = json.optJSONArray("imp").toSafeHttpsList(),
+                startUrls = json.optJSONArray("start").toSafeHttpsList(),
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    internal fun fireAdTrackers(urls: List<String>) {
+        for (url in urls.distinct().take(16)) {
+            if (!isSafeHttpsUrl(url)) continue
+            runCatching {
+                val connection = URL(url).openConnection() as HttpURLConnection
+                try {
+                    connection.connectTimeout = 4000
+                    connection.readTimeout = 4000
+                    connection.instanceFollowRedirects = true
+                    connection.responseCode
+                } finally {
+                    connection.disconnect()
+                }
+            }
+        }
+    }
+
+    internal fun completeAdRound(token: String): Boolean? {
+        if (token.isBlank()) return null
+        val connection = URL("$PRIMARY/vast/ok?t=$token").openConnection() as HttpURLConnection
+        return try {
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.instanceFollowRedirects = true
+            val stream = if (connection.responseCode == 200) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            } ?: return null
+            val json = JSONObject(stream.bufferedReader().use { it.readText() })
+            json.optBoolean("fin", true)
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    internal fun sessionAfterAd(): Map<String, Any?> {
+        val id = getAnonId()
+        val session = ensureFtSession(id, wantAd = false)
+        return mapOf(
+            "ok" to session.ok,
+            "http" to session.httpStatus,
+            "queda" to session.queda,
+            "libre" to session.libre,
+            "pro" to session.pro,
+            "token" to session.hasToken,
+        )
+    }
+
+    private fun ensureFtSession(id: String, wantAd: Boolean): FtSessionState {
         val hw = buildHardwareFingerprint()
-        val first = requestFtSession(id, hw)
+        val first = requestFtSession(id, hw, wantAd)
         if (first.httpStatus == 401 && hw.isNotBlank()) {
-            return requestFtSession(id, "")
+            return requestFtSession(id, "", wantAd)
         }
         return first
     }
 
-    private fun requestFtSession(id: String, hw: String): FtSessionState {
+    private fun requestFtSession(
+        id: String,
+        hw: String,
+        wantAd: Boolean,
+    ): FtSessionState {
         val signInput = buildString {
             append("sesion:ft:")
             append(FT_VERSION_CODE)
@@ -219,7 +371,9 @@ internal class FtPremiumCompat(private val context: Context) {
                 queda = 0,
                 libre = false,
                 pro = false,
-                hasToken = false,
+                sessionToken = "",
+                vastUrl = "",
+                fallbackAdUrl = "",
                 detail = "sesion sin firma",
             )
         }
@@ -237,7 +391,7 @@ internal class FtPremiumCompat(private val context: Context) {
                 .put("vc", FT_VERSION_CODE)
                 .put("hw", hw)
                 .put("sig", sig)
-                .put("quiero", 0)
+                .put("quiero", if (wantAd) 1 else 0)
                 .toString()
                 .toByteArray(StandardCharsets.UTF_8)
             connection.outputStream.use { it.write(body) }
@@ -250,7 +404,9 @@ internal class FtPremiumCompat(private val context: Context) {
                     queda = 0,
                     libre = false,
                     pro = false,
-                    hasToken = false,
+                    sessionToken = "",
+                    vastUrl = "",
+                    fallbackAdUrl = "",
                     detail = readSafeError(connection).ifBlank { "sesion HTTP $status" },
                 )
             }
@@ -258,17 +414,19 @@ internal class FtPremiumCompat(private val context: Context) {
             val raw = connection.inputStream.bufferedReader().use { it.readText() }
             val json = JSONObject(raw)
             val libre = json.optInt("libre", 0) == 1
-            val hasToken = json.optString("t", "").isNotBlank()
+            val token = json.optString("t", "").trim()
             FtSessionState(
-                ok = json.optBoolean("ok", false) && (hasToken || libre),
+                ok = json.optBoolean("ok", false) && (token.isNotBlank() || libre),
                 httpStatus = status,
                 queda = json.optInt("queda", 0),
                 libre = libre,
                 pro = json.optInt("pro", 0) == 1,
-                hasToken = hasToken,
+                sessionToken = token,
+                vastUrl = json.optString("vast", "").trim(),
+                fallbackAdUrl = json.optString("ad", "").trim(),
                 detail = when {
                     !json.optBoolean("ok", false) -> "sesion ok=false"
-                    !hasToken && !libre -> "sesion sin token activo"
+                    token.isBlank() && !libre -> "sesion sin token activo"
                     else -> ""
                 },
             )
@@ -418,6 +576,24 @@ internal class FtPremiumCompat(private val context: Context) {
 
             if (cookies.isEmpty()) null else cookies
         }.getOrNull()
+    }
+
+    private fun isSafeHttpsUrl(raw: String): Boolean {
+        return runCatching {
+            val url = URL(raw)
+            url.protocol.equals("https", ignoreCase = true) &&
+                url.host.isNotBlank()
+        }.getOrDefault(false)
+    }
+
+    private fun JSONArray?.toSafeHttpsList(): List<String> {
+        if (this == null) return emptyList()
+        val out = ArrayList<String>()
+        for (index in 0 until length()) {
+            val value = optString(index, "").trim()
+            if (isSafeHttpsUrl(value)) out.add(value)
+        }
+        return out
     }
 
     private fun readSafeError(connection: HttpURLConnection): String {
