@@ -201,7 +201,18 @@ class _PlatformGridState extends State<_PlatformGrid> {
       );
 
     try {
-      await _service.open(platform.backendId);
+      if (platform == StreamingPremiumPlatform.netflix) {
+        final session = await _service.generate(platform.backendId);
+        if (!session.opensExternally) {
+          throw const FormatException(
+            'Netflix no recibió un acceso externo válido.',
+          );
+        }
+        if (!mounted) return;
+        await _showNetflixAccessDialog(context, session);
+      } else {
+        await _service.open(platform.backendId);
+      }
     } on StreamingPremiumUnavailableException catch (error) {
       if (!mounted) return;
       messenger
@@ -242,6 +253,241 @@ class _PlatformGridState extends State<_PlatformGrid> {
     } finally {
       if (mounted) setState(() => _opening = null);
     }
+  }
+
+  Future<void> _showNetflixAccessDialog(
+    BuildContext pageContext,
+    StreamingPremiumSession initialSession,
+  ) async {
+    var session = initialSession;
+    var tvMode = false;
+    var regenerating = false;
+
+    await showDialog<void>(
+      context: pageContext,
+      barrierDismissible: true,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setLocalState) {
+            final instructions = tvMode
+                ? '1 · En la TV: Netflix → Iniciar sesión → '
+                    '"Iniciar sesión con código de acceso".\n'
+                    '2 · La TV muestra un código.\n'
+                    '3 · Tocá ABRIR y, en la página que se abre, '
+                    'ingresá ese código.\n'
+                    '4 · La TV entra sola.'
+                : '1 · Tocá ABRIR: se abre el navegador con la sesión '
+                    'ya cargada.\n'
+                    '2 · Esperá a que cargue Netflix.\n'
+                    '3 · Tocá "Abrir en la app" y Netflix pasa la sesión '
+                    'a la app oficial.';
+
+            Future<void> openAccess() async {
+              try {
+                await _service.openExternalUrl(
+                  tvMode ? session.tvUrl : session.phoneUrl,
+                );
+              } on PlatformException catch (error) {
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(pageContext)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(
+                      backgroundColor: const Color(0xFF2A1712),
+                      content: Text(
+                        error.message ?? 'No se pudo abrir el navegador.',
+                      ),
+                    ),
+                  );
+              }
+            }
+
+            Future<void> generateAnother() async {
+              if (regenerating) return;
+              setLocalState(() => regenerating = true);
+              try {
+                final next = await _service.generate('netflix');
+                if (!next.opensExternally) {
+                  throw const FormatException(
+                    'Netflix no devolvió un acceso externo.',
+                  );
+                }
+                if (!dialogContext.mounted) return;
+                setLocalState(() => session = next);
+              } catch (error) {
+                if (!dialogContext.mounted) return;
+                ScaffoldMessenger.of(pageContext)
+                  ..hideCurrentSnackBar()
+                  ..showSnackBar(
+                    SnackBar(
+                      duration: const Duration(seconds: 5),
+                      backgroundColor: const Color(0xFF2A1712),
+                      content: Text(
+                        error is StreamingPremiumUnavailableException
+                            ? error.toString()
+                            : 'No se pudo generar otro acceso de Netflix.',
+                      ),
+                    ),
+                  );
+              } finally {
+                if (dialogContext.mounted) {
+                  setLocalState(() => regenerating = false);
+                }
+              }
+            }
+
+            return AlertDialog(
+              backgroundColor: const Color(0xFF0C0D10),
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(22),
+                side: BorderSide(
+                  color: streamingPremiumGold.withValues(alpha: .42),
+                ),
+              ),
+              titlePadding: const EdgeInsets.fromLTRB(26, 24, 18, 8),
+              contentPadding: const EdgeInsets.fromLTRB(26, 10, 26, 12),
+              actionsPadding: const EdgeInsets.fromLTRB(20, 8, 20, 20),
+              title: Row(
+                children: [
+                  const Text(
+                    'NETFLIX · ACCESO',
+                    style: TextStyle(
+                      color: streamingPremiumGoldSoft,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: .8,
+                    ),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    tooltip: 'Cerrar',
+                    onPressed: () => Navigator.of(dialogContext).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                    color: Colors.white54,
+                  ),
+                ],
+              ),
+              content: SizedBox(
+                width: 650,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Acceso generado por Fútbol Total · un solo uso',
+                      style: TextStyle(
+                        color: Colors.white60,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 18),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: _NetflixModeButton(
+                            label: '📱  TELÉFONO',
+                            selected: !tvMode,
+                            onPressed: () =>
+                                setLocalState(() => tvMode = false),
+                          ),
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: _NetflixModeButton(
+                            label: '📺  TV',
+                            selected: tvMode,
+                            onPressed: () =>
+                                setLocalState(() => tvMode = true),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 20),
+                    Text(
+                      instructions,
+                      style: const TextStyle(
+                        color: Colors.white70,
+                        height: 1.55,
+                        fontSize: 15,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton.icon(
+                  onPressed: regenerating ? null : generateAnother,
+                  icon: regenerating
+                      ? const SizedBox(
+                          width: 16,
+                          height: 16,
+                          child: CircularProgressIndicator(
+                            strokeWidth: 2,
+                            color: streamingPremiumGold,
+                          ),
+                        )
+                      : const Icon(Icons.refresh_rounded),
+                  label: const Text('GENERAR OTRO'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: streamingPremiumGold,
+                  ),
+                ),
+                FilledButton.icon(
+                  autofocus: true,
+                  onPressed: openAccess,
+                  icon: const Icon(Icons.open_in_browser_rounded),
+                  label: const Text('ABRIR'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: streamingPremiumGold,
+                    foregroundColor: Colors.black,
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 24,
+                      vertical: 14,
+                    ),
+                  ),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+}
+
+class _NetflixModeButton extends StatelessWidget {
+  final String label;
+  final bool selected;
+  final VoidCallback onPressed;
+
+  const _NetflixModeButton({
+    required this.label,
+    required this.selected,
+    required this.onPressed,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return OutlinedButton(
+      onPressed: onPressed,
+      style: OutlinedButton.styleFrom(
+        foregroundColor:
+            selected ? streamingPremiumGoldSoft : Colors.white60,
+        backgroundColor: selected
+            ? streamingPremiumGold.withValues(alpha: .11)
+            : Colors.transparent,
+        side: BorderSide(
+          color: streamingPremiumGold.withValues(
+            alpha: selected ? .72 : .24,
+          ),
+        ),
+        padding: const EdgeInsets.symmetric(vertical: 14),
+      ),
+      child: Text(
+        label,
+        style: const TextStyle(fontWeight: FontWeight.w900),
+      ),
+    );
   }
 }
 
