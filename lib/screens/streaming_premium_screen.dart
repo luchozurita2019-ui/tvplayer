@@ -1,20 +1,26 @@
 import 'package:flutter/material.dart';
 
 import '../services/device_performance_service.dart';
+import '../services/streaming_premium_service.dart';
 
 const Color streamingPremiumGold = Color(0xFFD8B55B);
 const Color streamingPremiumGoldSoft = Color(0xFFF2D58A);
 
 enum StreamingPremiumPlatform {
-  netflix('NETFLIX', 'Series y películas'),
-  max('HBO MAX', 'Películas, series y estrenos'),
-  prime('PRIME VIDEO', 'Películas, series y originales'),
-  crunchyroll('CRUNCHYROLL', 'Anime y estrenos');
+  netflix('netflix', 'NETFLIX', 'Series y películas'),
+  max('hbomax', 'HBO MAX', 'Películas, series y estrenos'),
+  prime('prime', 'PRIME VIDEO', 'Películas, series y originales'),
+  crunchyroll('crunchyroll', 'CRUNCHYROLL', 'Anime y estrenos');
 
+  final String backendId;
   final String title;
   final String subtitle;
 
-  const StreamingPremiumPlatform(this.title, this.subtitle);
+  const StreamingPremiumPlatform(
+    this.backendId,
+    this.title,
+    this.subtitle,
+  );
 }
 
 /// V63: prueba visual aislada de Streaming Premium.
@@ -125,8 +131,22 @@ class _PremiumHeader extends StatelessWidget {
   }
 }
 
-class _PlatformGrid extends StatelessWidget {
+class _PlatformGrid extends StatefulWidget {
   const _PlatformGrid();
+
+  @override
+  State<_PlatformGrid> createState() => _PlatformGridState();
+}
+
+class _PlatformGridState extends State<_PlatformGrid> {
+  final StreamingPremiumService _service = StreamingPremiumService();
+  StreamingPremiumPlatform? _opening;
+
+  @override
+  void dispose() {
+    _service.close();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -150,7 +170,9 @@ class _PlatformGrid extends StatelessWidget {
               child: _PlatformCard(
                 platform: platform,
                 autofocus: index == 0,
-                onTap: () => _showInterfacePreview(context, platform),
+                opening: _opening == platform,
+                enabled: _opening == null,
+                onTap: () => _openPlatform(context, platform),
               ),
             );
           },
@@ -159,21 +181,66 @@ class _PlatformGrid extends StatelessWidget {
     );
   }
 
-  void _showInterfacePreview(
+  Future<void> _openPlatform(
     BuildContext context,
     StreamingPremiumPlatform platform,
-  ) {
-    ScaffoldMessenger.of(context)
+  ) async {
+    if (_opening != null) return;
+    setState(() => _opening = platform);
+
+    final messenger = ScaffoldMessenger.of(context);
+    messenger
       ..hideCurrentSnackBar()
       ..showSnackBar(
         SnackBar(
           duration: const Duration(seconds: 2),
           backgroundColor: const Color(0xFF17140D),
-          content: Text(
-            '${platform.title}: interfaz lista. La sesión temporal se conecta en la siguiente etapa.',
-          ),
+          content: Text('Preparando ${platform.title}…'),
         ),
       );
+
+    try {
+      await _service.open(platform.backendId);
+    } on StreamingPremiumUnavailableException catch (error) {
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 4),
+            backgroundColor: const Color(0xFF2A1712),
+            content: Text(error.toString()),
+          ),
+        );
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 4),
+            backgroundColor: const Color(0xFF2A1712),
+            content: Text(
+              error.message ?? 'No se pudo abrir ${platform.title}.',
+            ),
+          ),
+        );
+    } catch (_) {
+      if (!mounted) return;
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 4),
+            backgroundColor: const Color(0xFF2A1712),
+            content: Text(
+              'No se pudo preparar ${platform.title}. Intentá nuevamente.',
+            ),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _opening = null);
+    }
   }
 }
 
@@ -181,11 +248,15 @@ class _PlatformCard extends StatefulWidget {
   final StreamingPremiumPlatform platform;
   final VoidCallback onTap;
   final bool autofocus;
+  final bool opening;
+  final bool enabled;
 
   const _PlatformCard({
     required this.platform,
     required this.onTap,
     this.autofocus = false,
+    this.opening = false,
+    this.enabled = true,
   });
 
   @override
@@ -243,7 +314,7 @@ class _PlatformCardState extends State<_PlatformCard> {
             onFocusChange: (value) {
               if (_focused != value) setState(() => _focused = value);
             },
-            onTap: widget.onTap,
+            onTap: widget.enabled ? widget.onTap : null,
             child: Padding(
               padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
               child: Row(
@@ -301,13 +372,23 @@ class _PlatformCardState extends State<_PlatformCard> {
                     ),
                   ),
                   const SizedBox(width: 12),
-                  Icon(
-                    Icons.arrow_forward_ios_rounded,
-                    size: 18,
-                    color: _focused
-                        ? streamingPremiumGoldSoft
-                        : Colors.white24,
-                  ),
+                  if (widget.opening)
+                    const SizedBox(
+                      width: 22,
+                      height: 22,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2.2,
+                        color: streamingPremiumGoldSoft,
+                      ),
+                    )
+                  else
+                    Icon(
+                      Icons.arrow_forward_ios_rounded,
+                      size: 18,
+                      color: _focused
+                          ? streamingPremiumGoldSoft
+                          : Colors.white24,
+                    ),
                 ],
               ),
             ),
