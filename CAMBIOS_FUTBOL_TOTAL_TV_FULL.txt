@@ -1018,3 +1018,11 @@ BF) Build
    - versionName: 1.4.29.
    - versionCode: 3061.
    - Misma firma histórica TV FULL.
+
+
+V68 - Streaming Premium FT 3.6 web parity test
+- Prueba directa: no se publica en ningún Installer.
+- Netflix queda fuera de esta fase.
+- MAX, Prime y Crunchyroll no abren fallback oficial si falta la sesión.
+- WebView premium usa el User-Agent de FT 3.6, cookies por path, third-party cookies y compatibilidad de navegador equivalente.
+- Se replica el comportamiento legacy de cookies para dominios extra de MAX/HBO y Prime/Amazon.
