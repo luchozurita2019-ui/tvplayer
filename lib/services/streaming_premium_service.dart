@@ -78,8 +78,9 @@ typedef StreamingPremiumStageCallback = void Function(
 
 class StreamingPremiumUnavailableException implements Exception {
   final String status;
+  final String detail;
 
-  const StreamingPremiumUnavailableException(this.status);
+  const StreamingPremiumUnavailableException(this.status, [this.detail = '']);
 
   @override
   String toString() {
@@ -88,7 +89,9 @@ class StreamingPremiumUnavailableException implements Exception {
         return 'La plataforma está deshabilitada temporalmente.';
       case 'free_without_session':
       case 'no_session':
-        return 'No hay una sesión disponible en este momento.';
+        return detail.isEmpty
+            ? 'No hay una sesión disponible en este momento.'
+            : 'No hay una sesión disponible en este momento. $detail';
       default:
         return 'La plataforma no está disponible en este momento.';
     }
@@ -115,7 +118,7 @@ class StreamingPremiumService {
         _client = client ?? http.Client();
 
   static const _endpoint =
-      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium';
+      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium-v67-test';
   static const MethodChannel _webPlayback =
       MethodChannel('tvfull/web_playback');
 
@@ -182,13 +185,31 @@ class StreamingPremiumService {
 
     if (response.statusCode == 404) {
       var status = 'no_session';
+      var detail = '';
       try {
         final decoded = jsonDecode(response.body);
-        if (decoded is Map && decoded['status'] != null) {
-          status = decoded['status'].toString();
+        if (decoded is Map) {
+          if (decoded['status'] != null) {
+            status = decoded['status'].toString();
+          }
+          final stage = decoded['stage']?.toString() ?? '';
+          final pingOk = decoded['ping_ok'];
+          final source = decoded['source']?.toString() ?? '';
+          final hasRef = decoded['has_ref'];
+          final attempt = decoded['intento'];
+          final parts = <String>[];
+          if (stage.isNotEmpty) parts.add('etapa=$stage');
+          if (pingOk is bool) parts.add('ping=${pingOk ? 'ok' : 'falló'}');
+          if (source.isNotEmpty) parts.add('origen=$source');
+          if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
+          if (attempt is num) parts.add('intento=${attempt.toInt()}');
+          detail = parts.join(' · ');
         }
       } catch (_) {}
-      throw StreamingPremiumUnavailableException(status);
+      debugPrint(
+        '[StreamingPremium] $platform: sin sesión status=$status $detail',
+      );
+      throw StreamingPremiumUnavailableException(status, detail);
     }
 
     if (response.statusCode == 403) {
@@ -306,8 +327,11 @@ class StreamingPremiumService {
         _sessionCache.remove(platform);
         debugPrint(
           '[StreamingPremium] $platform: login detectado; '
-          'la próxima entrada forzará sesión nueva',
+          'reportando sesión caída',
         );
+        if (session.ref.isNotEmpty) {
+          await _reportDead(platform, session.ref);
+        }
       }
       return;
     } catch (error) {
@@ -381,6 +405,38 @@ class StreamingPremiumService {
           }),
         )
         .timeout(const Duration(seconds: 18));
+  }
+
+  Future<void> _reportDead(String platform, String ref) async {
+    try {
+      final credentials =
+          await _provisioning.loadCredentials() ??
+          await _provisioning.ensureRegistered();
+      final response = await _client
+          .post(
+            Uri.parse(_endpoint),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'x-tvfull-device-code': credentials.code,
+              'x-tvfull-device-secret': credentials.secret,
+            },
+            body: jsonEncode({
+              'action': 'dead',
+              'platform': platform,
+              'ref': ref,
+            }),
+          )
+          .timeout(const Duration(seconds: 8));
+      debugPrint(
+        '[StreamingPremium] $platform: reporte dead HTTP ${response.statusCode}',
+      );
+    } catch (error) {
+      debugPrint(
+        '[StreamingPremium] $platform: no se pudo reportar dead '
+        '(${error.runtimeType})',
+      );
+    }
   }
 
   void close() => _client.close();
