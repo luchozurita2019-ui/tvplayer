@@ -258,9 +258,54 @@ class MainActivity : FlutterActivity() {
             headerBundle.putString(key, value)
         }
 
+        val cookieBundles = arrayListOf<Bundle>()
+        val rawCookies = call.argument<List<*>>("cookies") ?: emptyList<Any?>()
+        for (rawCookie in rawCookies) {
+            val cookie = rawCookie as? Map<*, *> ?: continue
+            val name = cookie["name"]?.toString()?.trim().orEmpty()
+            val value = cookie["value"]?.toString().orEmpty()
+            val domain = cookie["domain"]?.toString()?.trim().orEmpty()
+            val path = cookie["path"]?.toString()?.trim().orEmpty()
+            if (name.isEmpty() ||
+                value.isEmpty() ||
+                domain.isEmpty() ||
+                name.contains(';') ||
+                name.contains('=') ||
+                name.contains('\r') ||
+                name.contains('\n') ||
+                value.contains('\r') ||
+                value.contains('\n') ||
+                domain.contains('\r') ||
+                domain.contains('\n')
+            ) {
+                continue
+            }
+
+            cookieBundles.add(
+                Bundle().apply {
+                    putString("name", name)
+                    putString("value", value)
+                    putString("domain", domain)
+                    putString("path", if (path.startsWith("/")) path else "/")
+                    putBoolean("hostOnly", cookie["hostOnly"] == true)
+                    putBoolean("secure", cookie["secure"] != false)
+                }
+            )
+        }
+
         val intent = Intent(this, WebPlaybackActivity::class.java).apply {
             putExtra(WebPlaybackActivity.EXTRA_URL, rawUrl)
             putExtra(WebPlaybackActivity.EXTRA_HEADERS, headerBundle)
+            if (cookieBundles.isNotEmpty()) {
+                putParcelableArrayListExtra(
+                    WebPlaybackActivity.EXTRA_COOKIES,
+                    cookieBundles,
+                )
+            }
+            putExtra(
+                WebPlaybackActivity.EXTRA_CLEAR_COOKIES_ON_EXIT,
+                call.argument<Boolean>("clearCookiesOnExit") ?: false,
+            )
         }
 
         pendingWebPlaybackResult = result
