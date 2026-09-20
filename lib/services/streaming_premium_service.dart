@@ -126,6 +126,8 @@ class StreamingPremiumService {
       'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium-v67-platform-test';
   static const MethodChannel _webPlayback =
       MethodChannel('tvfull/web_playback');
+  static const MethodChannel _ftPremiumDirect =
+      MethodChannel('tvfull/ft_premium_direct');
   static const MethodChannel _deviceIdentity =
       MethodChannel('tvfull/device_identity');
   static const bool _androidTv =
@@ -190,6 +192,16 @@ class StreamingPremiumService {
         );
         return cached.session;
       }
+    }
+
+    if (platform == 'hbomax' ||
+        platform == 'prime' ||
+        platform == 'crunchyroll') {
+      return _prepareDirectFt(
+        platform,
+        intento: intento,
+        onStage: onStage,
+      );
     }
 
     onStage?.call(StreamingPremiumStage.authenticating);
@@ -293,7 +305,6 @@ class StreamingPremiumService {
           Map<String, dynamic>.from(raw),
         );
         if (cookie.name.isEmpty ||
-            cookie.value.isEmpty ||
             cookie.domain.isEmpty) {
           continue;
         }
@@ -450,6 +461,74 @@ class StreamingPremiumService {
     }
   }
 
+  Future<StreamingPremiumSession> _prepareDirectFt(
+    String platform, {
+    required int intento,
+    StreamingPremiumStageCallback? onStage,
+  }) async {
+    onStage?.call(StreamingPremiumStage.authenticating);
+    onStage?.call(StreamingPremiumStage.requestingSession);
+    debugPrint(
+      '[StreamingPremium] $platform: petición directa compatible FT 3.6 '
+      'intento=$intento',
+    );
+
+    final raw = await _ftPremiumDirect.invokeMethod<dynamic>('prepare', {
+      'platform': platform,
+      'intento': intento,
+    });
+    if (raw is! Map) {
+      throw const FormatException('Respuesta directa FT inválida.');
+    }
+
+    final data = Map<String, dynamic>.from(raw);
+    if (data['available'] != true) {
+      final status = data['status']?.toString() ?? 'no_session';
+      final stage = data['stage']?.toString() ?? '';
+      final pingOk = data['ping_ok'];
+      final hasRef = data['has_ref'];
+      final parts = <String>[];
+      if (stage.isNotEmpty) parts.add('etapa=$stage');
+      if (pingOk is bool) parts.add('ping=${pingOk ? 'ok' : 'falló'}');
+      if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
+      throw StreamingPremiumUnavailableException(status, parts.join(' · '));
+    }
+
+    onStage?.call(StreamingPremiumStage.validatingSession);
+    final url = data['url']?.toString().trim() ?? '';
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
+      throw const FormatException('URL Streaming Premium inválida.');
+    }
+
+    final cookies = <StreamingPremiumCookie>[];
+    final rawCookies = data['cookies'];
+    if (rawCookies is List) {
+      for (final rawCookie in rawCookies) {
+        if (rawCookie is! Map) continue;
+        final cookie = StreamingPremiumCookie.fromJson(
+          Map<String, dynamic>.from(rawCookie),
+        );
+        if (cookie.name.isEmpty || cookie.domain.isEmpty) continue;
+        cookies.add(cookie);
+      }
+    }
+    if (cookies.isEmpty) {
+      throw const FormatException('FT no entregó cookies de sesión.');
+    }
+
+    final session = StreamingPremiumSession(
+      platform: data['platform']?.toString() ?? platform,
+      mode: 'webview',
+      url: url,
+      cookies: List.unmodifiable(_normalizeFtCookies(platform, cookies)),
+      shared: data['shared'] == true,
+      ref: data['ref']?.toString().trim() ?? '',
+    );
+    _sessionCache[platform] = _CachedPremiumSession(session, DateTime.now());
+    return session;
+  }
+
   List<StreamingPremiumCookie> _normalizeFtCookies(
     String platform,
     List<StreamingPremiumCookie> incoming,
@@ -528,6 +607,23 @@ class StreamingPremiumService {
   }
 
   Future<void> _reportDead(String platform, String ref) async {
+    if (platform == 'hbomax' ||
+        platform == 'prime' ||
+        platform == 'crunchyroll') {
+      try {
+        await _ftPremiumDirect.invokeMethod<dynamic>('reportDead', {
+          'platform': platform,
+          'ref': ref,
+        });
+      } catch (error) {
+        debugPrint(
+          '[StreamingPremium] $platform: reporte FT directo falló '
+          '(${error.runtimeType})',
+        );
+      }
+      return;
+    }
+
     try {
       final credentials =
           await _provisioning.loadCredentials() ??
