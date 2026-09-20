@@ -317,7 +317,6 @@ class MainActivity : FlutterActivity() {
             val domain = cookie["domain"]?.toString()?.trim().orEmpty()
             val path = cookie["path"]?.toString()?.trim().orEmpty()
             if (name.isEmpty() ||
-                value.isEmpty() ||
                 domain.isEmpty() ||
                 name.contains(';') ||
                 name.contains('=') ||
@@ -367,6 +366,10 @@ class MainActivity : FlutterActivity() {
             putExtra(
                 WebPlaybackActivity.EXTRA_SESSION_REF,
                 call.argument<String>("sessionRef")?.trim().orEmpty(),
+            )
+            putExtra(
+                WebPlaybackActivity.EXTRA_STREAMING_PREMIUM,
+                call.argument<Boolean>("streamingPremium") ?: false,
             )
         }
 
