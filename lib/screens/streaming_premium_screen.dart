@@ -187,6 +187,24 @@ class _PlatformGridState extends State<_PlatformGrid> {
     StreamingPremiumPlatform platform,
   ) async {
     if (_opening != null) return;
+
+    if (platform == StreamingPremiumPlatform.netflix) {
+      final messenger = ScaffoldMessenger.of(context);
+      messenger
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            duration: Duration(seconds: 3),
+            backgroundColor: Color(0xFF17140D),
+            content: Text(
+              'Netflix queda para la fase final. '
+              'Esta prueba corrige MAX, Prime y Crunchyroll.',
+            ),
+          ),
+        );
+      return;
+    }
+
     setState(() => _opening = platform);
 
     final messenger = ScaffoldMessenger.of(context);
@@ -201,7 +219,10 @@ class _PlatformGridState extends State<_PlatformGrid> {
       );
 
     try {
-      await _service.open(platform.backendId);
+      await _service.open(
+        platform.backendId,
+        allowOfficialFallback: false,
+      );
     } on StreamingPremiumUnavailableException catch (error) {
       if (!mounted) return;
       messenger
