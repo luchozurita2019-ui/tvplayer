@@ -106,7 +106,7 @@ jobs:
             --dart-define=TV_FULL_ANDROID_TV=true \
             --dart-define=TV_FULL_DYNAMIC_SOURCE_JSON="$DYNAMIC_CONFIG"
 
-      - name: Prepare and verify V74 test artifacts
+      - name: Prepare and verify V75 test artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -145,7 +145,7 @@ jobs:
             artifact/TV-FULL-PRO-V75-FUTBOL-TOTAL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.43+3075 - V74 FT authorized activation test" \
+            --title "TV FULL PRO 1.4.43+3075 - V75 FT web activation parity test" \
             --notes "V75 aislada. Replica la activación web autorizada observada en FT: abre la URL entregada por /sesion con auto=1, atiende el callback FT/ftad, vuelve a consultar /sesion y sólo entonces solicita /plat/get. No registra eventos de terceros manualmente. Netflix queda fuera. No se publica en ningún Installer."
 
       - name: Upload V75 signed test bundle
