@@ -1,9 +1,9 @@
-name: Build Fútbol Total V71 exact FT map test
+name: Build Fútbol Total V72 FT session gate test
 
 on:
   push:
     branches:
-      - feature/v71-ft36-exact-guard-map-test
+      - feature/v72-ft36-session-gate-test
     paths:
       - 'lib/**'
       - 'android/**'
@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.39'
-  BUILD_NUMBER: '3071'
+  BUILD_NAME: '1.4.40'
+  BUILD_NUMBER: '3072'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
   DYNAMIC_CONFIG: '{"name":"Lista TV 3","server":"https://ghsoudpjlnjmhiragkrm.supabase.co","resolver":{"path":"/functions/v1/tvf-lista3-resolve","method":"POST","timeoutMs":18000,"form":{"id":"{id}","channelCode":"{id}","name":"{name}","playCode":"{path}","path":"{path}","androidId":"{androidId}","device":"{androidId}","globalIndex":"{globalIndex}"}}}'
 
@@ -95,7 +95,7 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed ARM32 and ARM64 V71 exact FT map test APKs
+      - name: Build signed ARM32 and ARM64 V72 FT session gate APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -106,13 +106,13 @@ jobs:
             --dart-define=TV_FULL_ANDROID_TV=true \
             --dart-define=TV_FULL_DYNAMIC_SOURCE_JSON="$DYNAMIC_CONFIG"
 
-      - name: Prepare and verify V71 test artifacts
+      - name: Prepare and verify V72 test artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V71-FUTBOL-TOTAL-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V71-FUTBOL-TOTAL-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V72-FUTBOL-TOTAL-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V72-FUTBOL-TOTAL-ARM64.apk
           cp CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt artifact/CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt
           sha256sum artifact/*.apk > artifact/SHA256SUMS.txt
 
@@ -121,37 +121,37 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
 
-          for APK in artifact/TV-FULL-PRO-V71-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V71-FUTBOL-TOTAL-ARM64.apk; do
+          for APK in artifact/TV-FULL-PRO-V72-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V72-FUTBOL-TOTAL-ARM64.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$APK.signature.txt"
             EXPECTED="$(printf '%s' "$CERT_SHA256" | tr '[:upper:]' '[:lower:]')"
             grep -Fqi "certificate SHA-256 digest: $EXPECTED" "$APK.signature.txt"
 
             "$AAPT" dump badging "$APK" | tee "$APK.badging.txt"
             grep -Fq "package: name='com.tvfull.pro.tv.v10safe'" "$APK.badging.txt"
-            grep -Fq "versionCode='3071'" "$APK.badging.txt"
-            grep -Fq "versionName='1.4.39'" "$APK.badging.txt"
+            grep -Fq "versionCode='3072'" "$APK.badging.txt"
+            grep -Fq "versionName='1.4.40'" "$APK.badging.txt"
           done
 
-      - name: Publish isolated V71 exact FT map release
+      - name: Publish isolated V72 FT session gate release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v71-ft36-exact-map-test"
+          TAG="tv-full-pro-v72-ft36-session-gate-test"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V71-FUTBOL-TOTAL-ARM32.apk \
-            artifact/TV-FULL-PRO-V71-FUTBOL-TOTAL-ARM64.apk \
+            artifact/TV-FULL-PRO-V72-FUTBOL-TOTAL-ARM32.apk \
+            artifact/TV-FULL-PRO-V72-FUTBOL-TOTAL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.39+3071 - V71 FT3.6 exact map test" \
-            --notes "V71 aislada. Replica la clase Guard de FT3.6 y la petición /plat/get más fielmente, y muestra sólo el motivo seguro del rechazo HTTP. Netflix queda fuera. No se publica en ningún Installer."
+            --title "TV FULL PRO 1.4.40+3072 - V72 FT3.6 session gate test" \
+            --notes "V72 aislada. Reproduce el paso /sesion de FT3.6 antes de /plat/get, incluida la huella de dispositivo y fallback sin huella, y muestra estado seguro de sesión. Netflix queda fuera. No se publica en ningún Installer."
 
-      - name: Upload V71 signed test bundle
+      - name: Upload V72 signed test bundle
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V71-FUTBOL-TOTAL-TEST
+          name: TV-FULL-PRO-V72-FUTBOL-TOTAL-TEST
           path: artifact/
           if-no-files-found: error
           retention-days: 14
