@@ -2,6 +2,7 @@ package com.example.iptv_player
 
 import android.annotation.SuppressLint
 import android.app.Activity
+import android.content.Intent
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -10,10 +11,10 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
 import android.webkit.CookieManager
+import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
 import android.webkit.WebResourceResponse
-import android.webkit.WebChromeClient
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -25,6 +26,12 @@ class WebPlaybackActivity : Activity() {
         const val EXTRA_HEADERS = "headers"
         const val EXTRA_COOKIES = "cookies"
         const val EXTRA_CLEAR_COOKIES_ON_EXIT = "clearCookiesOnExit"
+        const val EXTRA_PLATFORM = "platform"
+        const val EXTRA_REPLACE_PLATFORM_COOKIES = "replacePlatformCookies"
+        const val EXTRA_SESSION_REF = "sessionRef"
+
+        const val RESULT_DEAD_DETECTED = "deadDetected"
+        const val RESULT_PLATFORM = "platform"
 
         private val PREMIUM_COOKIE_DOMAINS = setOf(
             "netflix.com",
@@ -33,6 +40,13 @@ class WebPlaybackActivity : Activity() {
             "primevideo.com",
             "amazon.com",
             "crunchyroll.com",
+        )
+
+        private val PLATFORM_COOKIE_DOMAINS = mapOf(
+            "netflix" to listOf("netflix.com"),
+            "hbomax" to listOf("max.com", "hbomax.com"),
+            "prime" to listOf("primevideo.com", "amazon.com"),
+            "crunchyroll" to listOf("crunchyroll.com"),
         )
     }
 
@@ -50,6 +64,9 @@ class WebPlaybackActivity : Activity() {
     private var customViewCallback: WebChromeClient.CustomViewCallback? = null
     private val temporaryCookies = mutableListOf<TemporaryCookie>()
     private var clearCookiesOnExit = false
+    private var platform = ""
+    private var sessionRef = ""
+    private var deadDetected = false
 
     @SuppressLint("SetJavaScriptEnabled")
     @Suppress("DEPRECATION")
@@ -65,6 +82,9 @@ class WebPlaybackActivity : Activity() {
             finish()
             return
         }
+
+        platform = intent.getStringExtra(EXTRA_PLATFORM)?.trim()?.lowercase().orEmpty()
+        sessionRef = intent.getStringExtra(EXTRA_SESSION_REF)?.trim().orEmpty()
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = Color.BLACK
@@ -138,21 +158,44 @@ class WebPlaybackActivity : Activity() {
 
         clearCookiesOnExit =
             intent.getBooleanExtra(EXTRA_CLEAR_COOKIES_ON_EXIT, false)
+
+        if (intent.getBooleanExtra(EXTRA_REPLACE_PLATFORM_COOKIES, false)) {
+            clearPlatformCookies(cookieManager, platform)
+        }
+
         val cookieBundles =
             intent.getParcelableArrayListExtra<Bundle>(EXTRA_COOKIES)
                 ?: arrayListOf()
         installTemporaryCookies(cookieManager, cookieBundles)
 
         webView.webViewClient = object : WebViewClient() {
-            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+            override fun onPageStarted(
+                view: WebView?,
+                url: String?,
+                favicon: android.graphics.Bitmap?,
+            ) {
                 super.onPageStarted(view, url, favicon)
-                Log.i("TVFULL_PREMIUM", "page_started " + safePageLabel(url))
+                Log.i(
+                    "TVFULL_PREMIUM",
+                    "page_started platform=$platform " + safePageLabel(url),
+                )
             }
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
                 CookieManager.getInstance().flush()
-                Log.i("TVFULL_PREMIUM", "page_finished " + safePageLabel(url))
+                if (!deadDetected && isLoginOrAuthPage(url)) {
+                    deadDetected = true
+                    Log.w(
+                        "TVFULL_PREMIUM",
+                        "session_dead platform=$platform " + safePageLabel(url),
+                    )
+                } else {
+                    Log.i(
+                        "TVFULL_PREMIUM",
+                        "page_finished platform=$platform " + safePageLabel(url),
+                    )
+                }
             }
 
             override fun onReceivedError(
@@ -164,7 +207,8 @@ class WebPlaybackActivity : Activity() {
                 if (request?.isForMainFrame == true) {
                     Log.w(
                         "TVFULL_PREMIUM",
-                        "main_frame_error code=" + error?.errorCode +
+                        "main_frame_error platform=$platform code=" +
+                            error?.errorCode +
                             " url=" + safePageLabel(request.url?.toString()),
                     )
                 }
@@ -179,12 +223,14 @@ class WebPlaybackActivity : Activity() {
                 if (request?.isForMainFrame == true) {
                     Log.w(
                         "TVFULL_PREMIUM",
-                        "main_frame_http status=" + errorResponse?.statusCode +
+                        "main_frame_http platform=$platform status=" +
+                            errorResponse?.statusCode +
                             " url=" + safePageLabel(request.url?.toString()),
                     )
                 }
             }
         }
+
         webView.webChromeClient = object : WebChromeClient() {
             override fun onShowCustomView(
                 view: View?,
@@ -227,6 +273,72 @@ class WebPlaybackActivity : Activity() {
         val path = parsed.path.orEmpty().take(160)
         return if (host.isBlank()) "unknown" else host + path
     }
+
+    private fun isLoginOrAuthPage(rawUrl: String?): Boolean {
+        if (platform.isBlank()) return false
+        val parsed = runCatching { android.net.Uri.parse(rawUrl.orEmpty()) }.getOrNull()
+            ?: return false
+        val host = parsed.host.orEmpty().lowercase()
+        val path = parsed.path.orEmpty().lowercase()
+
+        if (platform == "hbomax" && host == "auth.max.com") return true
+
+        val markers = listOf(
+            "/login",
+            "/signin",
+            "/sign-in",
+            "/log-in",
+            "/auth/login",
+            "/account/login",
+            "/registration",
+            "/signup",
+            "/welcome",
+            "/ap/signin",
+        )
+        return markers.any { path.contains(it) }
+    }
+
+    private fun clearPlatformCookies(
+        manager: CookieManager,
+        platformKey: String,
+    ) {
+        val domains = PLATFORM_COOKIE_DOMAINS[platformKey] ?: return
+        var cleared = 0
+
+        for (domain in domains) {
+            val targetUrl = "https://$domain/"
+            val current = manager.getCookie(targetUrl).orEmpty()
+            if (current.isBlank()) continue
+
+            val names = current.split(';')
+                .mapNotNull { item ->
+                    val index = item.indexOf('=')
+                    if (index <= 0) null else item.substring(0, index).trim()
+                }
+                .filter { it.isNotBlank() }
+                .distinct()
+
+            for (name in names) {
+                manager.setCookie(
+                    targetUrl,
+                    "$name=; Path=/; Max-Age=0; Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+                )
+                manager.setCookie(
+                    targetUrl,
+                    "$name=; Path=/; Domain=.$domain; Max-Age=0; " +
+                        "Expires=Thu, 01 Jan 1970 00:00:00 GMT",
+                )
+                cleared++
+            }
+        }
+
+        manager.flush()
+        Log.i(
+            "TVFULL_PREMIUM",
+            "cookies_cleared platform=$platformKey count=$cleared",
+        )
+    }
+
     private fun installTemporaryCookies(
         manager: CookieManager,
         bundles: List<Bundle>,
@@ -256,7 +368,7 @@ class WebPlaybackActivity : Activity() {
                 continue
             }
 
-            val targetUrl = "https://" + domain + "/"
+            val targetUrl = "https://$domain/"
             val cookie = buildString {
                 append(name)
                 append("=")
@@ -282,12 +394,19 @@ class WebPlaybackActivity : Activity() {
                 ),
             )
         }
-        if (temporaryCookies.isNotEmpty()) manager.flush()
+
+        if (temporaryCookies.isNotEmpty()) {
+            manager.flush()
+            Log.i(
+                "TVFULL_PREMIUM",
+                "cookies_installed platform=$platform count=${temporaryCookies.size}",
+            )
+        }
     }
 
     private fun isAllowedPremiumDomain(domain: String): Boolean {
         return PREMIUM_COOKIE_DOMAINS.any { allowed ->
-            domain == allowed || domain.endsWith("." + allowed)
+            domain == allowed || domain.endsWith(".$allowed")
         }
     }
 
@@ -298,7 +417,7 @@ class WebPlaybackActivity : Activity() {
         for (cookie in temporaryCookies) {
             val domain = cookie.domain.removePrefix(".").lowercase()
             if (!isAllowedPremiumDomain(domain)) continue
-            val targetUrl = "https://" + domain + "/"
+            val targetUrl = "https://$domain/"
             val expired = buildString {
                 append(cookie.name)
                 append("=; Path=")
@@ -360,6 +479,17 @@ class WebPlaybackActivity : Activity() {
         if (::webView.isInitialized) webView.onPause()
         CookieManager.getInstance().flush()
         super.onPause()
+    }
+
+    override fun finish() {
+        setResult(
+            RESULT_OK,
+            Intent().apply {
+                putExtra(RESULT_DEAD_DETECTED, deadDetected)
+                putExtra(RESULT_PLATFORM, platform)
+            },
+        )
+        super.finish()
     }
 
     override fun onDestroy() {
