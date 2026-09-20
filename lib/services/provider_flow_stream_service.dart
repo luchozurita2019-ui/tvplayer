@@ -149,6 +149,17 @@ class ProviderFlowStreamService {
     _cachedToken = null;
   }
 
+  /// Precalienta la sesión CDN sin bloquear la apertura del catálogo.
+  /// V62 la usa únicamente desde Fútbol Total cuando la TvList cargada
+  /// contiene señales Flow.
+  Future<void> warm() async {
+    try {
+      await _freshToken(forceRefresh: false);
+    } catch (_) {
+      // El canal volverá a intentarlo de forma normal al reproducir.
+    }
+  }
+
   Future<_ProviderFlowToken> _freshToken({required bool forceRefresh}) async {
     final now = DateTime.now();
     final cached = _cachedToken;
