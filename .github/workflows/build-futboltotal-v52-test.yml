@@ -127,15 +127,15 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v67-streaming-premium-ft36-server-parity-test"
+          TAG="tv-full-pro-v67-netflix-handoff-r2"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
             artifact/TV-FULL-PRO-V67-FUTBOL-TOTAL-ARM32.apk \
             artifact/TV-FULL-PRO-V67-FUTBOL-TOTAL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.35+3067 - V67 Installer test" \
-            --notes "V67 de prueba aislada de Streaming Premium. Mantiene V65 intacta, agrega flujo de sesión estilo FT 3.6 y conserva la firma histórica de TV FULL PRO."
+            --title "TV FULL PRO 1.4.35+3067 - V67 Netflix handoff R2" \
+            --notes "V67 R2 de prueba aislada. Incluye handoff externo de Netflix y conserva la firma histórica de TV FULL PRO."
 
       - name: Upload V67 signed test bundle
         uses: actions/upload-artifact@v4
