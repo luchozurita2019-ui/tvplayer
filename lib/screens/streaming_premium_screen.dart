@@ -425,13 +425,11 @@ class _GoldIconButton extends StatefulWidget {
   final IconData icon;
   final VoidCallback onPressed;
   final String tooltip;
-  final bool autofocus;
 
   const _GoldIconButton({
     required this.icon,
     required this.onPressed,
     required this.tooltip,
-    this.autofocus = false,
   });
 
   @override
