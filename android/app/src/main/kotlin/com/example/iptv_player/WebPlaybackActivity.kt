@@ -7,7 +7,10 @@ import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.util.Log
+import android.view.KeyEvent
+import android.view.MotionEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -77,6 +80,14 @@ class WebPlaybackActivity : Activity() {
     private var deadDetected = false
     private var streamingPremium = false
     private var firstMainPageFinished = false
+    private var lastRemoteKeyAtMs = 0L
+    private val remoteNavScript: String by lazy {
+        runCatching {
+            assets.open("tvfull_remote_nav.js")
+                .bufferedReader()
+                .use { it.readText() }
+        }.getOrDefault("")
+    }
 
     @SuppressLint("SetJavaScriptEnabled")
     @Suppress("DEPRECATION")
@@ -211,6 +222,7 @@ class WebPlaybackActivity : Activity() {
                 super.onPageFinished(view, url)
                 if (streamingPremium && view != null) {
                     injectFtBrowserCompat(view)
+                    installRemoteNavigation(view)
                     if (!firstMainPageFinished) {
                         firstMainPageFinished = true
                         view.clearHistory()
@@ -365,11 +377,126 @@ class WebPlaybackActivity : Activity() {
             "hbomax" -> listOf("max.com", "hbomax.com")
             "prime" -> listOf("primevideo.com", "amazon.com")
             "crunchyroll" -> listOf("crunchyroll.com")
+            "netflix" -> listOf("netflix.com")
             else -> emptyList()
         }
         return allowed.any { domain ->
             host == domain || host.endsWith(".$domain")
         }
+    }
+
+    private fun installRemoteNavigation(view: WebView) {
+        if (!streamingPremium || remoteNavScript.isBlank()) return
+        runCatching {
+            view.evaluateJavascript(remoteNavScript, null)
+        }
+    }
+
+    private fun evaluateRemoteNavigation(
+        expression: String,
+        callback: ((String) -> Unit)? = null,
+    ) {
+        if (!streamingPremium || !::webView.isInitialized) return
+        val script =
+            "(function(){try{" +
+                "if(!window.__tvfullNav)return 'NO_NAV';" +
+                "return " + expression + ";" +
+                "}catch(e){return 'NAV_ERROR';}})()"
+        runCatching {
+            webView.evaluateJavascript(script) { raw ->
+                val clean = raw
+                    ?.removeSurrounding(""")
+                    ?.replace("\\"", """)
+                    ?.replace("\\\\", "\\")
+                    .orEmpty()
+                callback?.invoke(clean)
+            }
+        }
+    }
+
+    private fun dispatchRemoteTap(spec: String): Boolean {
+        if (!spec.startsWith("TAP:")) return false
+        val parts = spec.removePrefix("TAP:").split(",")
+        if (parts.size < 4) return false
+
+        val pageX = parts[0].toFloatOrNull() ?: return false
+        val pageY = parts[1].toFloatOrNull() ?: return false
+        val viewportW = parts[2].toFloatOrNull() ?: return false
+        val viewportH = parts[3].toFloatOrNull() ?: return false
+        if (viewportW <= 0f || viewportH <= 0f) return false
+
+        val target = customView ?: webView
+        if (target.width <= 0 || target.height <= 0) return false
+
+        val x = (target.width.toFloat() / viewportW) * pageX
+        val y = (target.height.toFloat() / viewportH) * pageY
+        val now = SystemClock.uptimeMillis()
+        val down = MotionEvent.obtain(now, now, MotionEvent.ACTION_DOWN, x, y, 0)
+        val up = MotionEvent.obtain(now, now + 55L, MotionEvent.ACTION_UP, x, y, 0)
+        return try {
+            target.dispatchTouchEvent(down)
+            target.dispatchTouchEvent(up)
+            true
+        } finally {
+            down.recycle()
+            up.recycle()
+        }
+    }
+
+    private fun remoteBack() {
+        evaluateRemoteNavigation("window.__tvfullNav.back()") { result ->
+            if (dispatchRemoteTap(result)) return@evaluateRemoteNavigation
+            if (::webView.isInitialized && webView.canGoBack()) {
+                webView.goBack()
+            } else {
+                finish()
+            }
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!streamingPremium || !::webView.isInitialized) {
+            return super.dispatchKeyEvent(event)
+        }
+
+        val keyCode = event.keyCode
+        val directional = when (keyCode) {
+            KeyEvent.KEYCODE_DPAD_UP -> "up"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+            KeyEvent.KEYCODE_DPAD_LEFT -> "left"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "right"
+            else -> null
+        }
+
+        if (directional != null) {
+            if (event.action == KeyEvent.ACTION_DOWN) {
+                val now = SystemClock.uptimeMillis()
+                if (event.repeatCount == 0 || now - lastRemoteKeyAtMs >= 70L) {
+                    lastRemoteKeyAtMs = now
+                    evaluateRemoteNavigation(
+                        "window.__tvfullNav.move('$directional')"
+                    )
+                }
+            }
+            return true
+        }
+
+        if (keyCode == KeyEvent.KEYCODE_DPAD_CENTER ||
+            keyCode == KeyEvent.KEYCODE_ENTER ||
+            keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER ||
+            keyCode == KeyEvent.KEYCODE_BUTTON_A
+        ) {
+            if (event.action == KeyEvent.ACTION_UP) {
+                evaluateRemoteNavigation(
+                    "window.__tvfullNav.activate()"
+                ) { result ->
+                    dispatchRemoteTap(result)
+                }
+            }
+            return true
+        }
+
+        return super.dispatchKeyEvent(event)
     }
 
     private fun safePageLabel(rawUrl: String?): String {
@@ -565,6 +692,10 @@ class WebPlaybackActivity : Activity() {
     override fun onBackPressed() {
         if (customView != null) {
             hideCustomView()
+            return
+        }
+        if (streamingPremium && ::webView.isInitialized) {
+            remoteBack()
             return
         }
         if (::webView.isInitialized && webView.canGoBack()) {
