@@ -69,7 +69,7 @@ internal class FtPremiumCompat(private val context: Context) {
 
         val id = getAnonId()
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
-        val session = runCatching { ensureFtSession(id, wantAd = false) }
+        var session = runCatching { ensureFtSession(id, wantAd = false) }
             .getOrElse {
                 FtSessionState(
                     ok = false,
@@ -84,25 +84,40 @@ internal class FtPremiumCompat(private val context: Context) {
                 )
             }
 
+        var activationRounds = 0
         if (session.ok &&
             session.queda <= 0 &&
             !session.libre &&
             !session.pro
         ) {
-            return mapOf(
-                "available" to false,
-                "status" to "ad_required",
-                "stage" to "session",
-                "ping_ok" to pingOk,
-                "session_ok" to true,
-                "session_http" to session.httpStatus,
-                "session_queda" to session.queda,
-                "session_libre" to session.libre,
-                "session_pro" to session.pro,
-                "session_token" to session.hasToken,
-                "ad_available" to (session.vastUrl.isNotBlank() ||
-                    session.fallbackAdUrl.isNotBlank()),
-            )
+            val activation = runCatching { activateAuthorized(id) }
+                .getOrElse {
+                    FtActivationResult(
+                        ok = false,
+                        rounds = 0,
+                        session = session,
+                        detail = it.message.orEmpty(),
+                    )
+                }
+            activationRounds = activation.rounds
+            session = activation.session ?: session
+
+            if (!activation.ok) {
+                return mapOf(
+                    "available" to false,
+                    "status" to "activation_failed",
+                    "stage" to "activation",
+                    "ping_ok" to pingOk,
+                    "session_ok" to session.ok,
+                    "session_http" to session.httpStatus,
+                    "session_queda" to session.queda,
+                    "session_libre" to session.libre,
+                    "session_pro" to session.pro,
+                    "session_token" to session.hasToken,
+                    "activation_rounds" to activationRounds,
+                    "detail" to activation.detail,
+                )
+            }
         }
 
         val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
@@ -131,6 +146,7 @@ internal class FtPremiumCompat(private val context: Context) {
                 "session_libre" to session.libre,
                 "session_pro" to session.pro,
                 "session_token" to session.hasToken,
+                "activation_rounds" to activationRounds,
                 "detail" to listOfNotNull(
                     error.message ?: error.javaClass.simpleName,
                     session.detail.takeIf { it.isNotBlank() },
@@ -186,7 +202,8 @@ internal class FtPremiumCompat(private val context: Context) {
             "ref" to ref,
             "intento" to intento,
             "ping_ok" to pingOk,
-            "source" to "ft36-direct",
+            "activation_rounds" to activationRounds,
+            "source" to "ft36-direct-authorized-activation",
         )
     }
 
@@ -216,6 +233,13 @@ internal class FtPremiumCompat(private val context: Context) {
         }
     }
 
+    private data class FtActivationResult(
+        val ok: Boolean,
+        val rounds: Int,
+        val session: FtSessionState?,
+        val detail: String = "",
+    )
+
     internal data class FtAdActivation(
         val token: String,
         val vastUrl: String,
@@ -244,6 +268,95 @@ internal class FtPremiumCompat(private val context: Context) {
         val detail: String = "",
     ) {
         val hasToken: Boolean get() = sessionToken.isNotBlank()
+    }
+
+    private fun activateAuthorized(id: String): FtActivationResult {
+        val activation = ensureFtSession(id, wantAd = true)
+        if (!activation.ok || !activation.hasToken) {
+            return FtActivationResult(
+                ok = false,
+                rounds = 0,
+                session = activation,
+                detail = "activación sin token válido",
+            )
+        }
+
+        if (activation.queda > 0 || activation.libre || activation.pro) {
+            return FtActivationResult(
+                ok = true,
+                rounds = 0,
+                session = activation,
+            )
+        }
+
+        if (activation.vastUrl.isBlank()) {
+            return FtActivationResult(
+                ok = false,
+                rounds = 0,
+                session = activation,
+                detail = if (activation.fallbackAdUrl.isNotBlank()) {
+                    "activación web requerida"
+                } else {
+                    "activación sin VAST disponible"
+                },
+            )
+        }
+
+        var rounds = 0
+        repeat(6) {
+            val round = fetchAdRound(activation.vastUrl)
+                ?: return FtActivationResult(
+                    ok = false,
+                    rounds = rounds,
+                    session = activation,
+                    detail = "no se pudo preparar la ronda de activación",
+                )
+
+            rounds++
+            // Modo de prueba autorizado por el propietario:
+            // validamos la ronda en el Worker sin registrar impresiones/start
+            // de terceros que no fueron realmente reproducidas.
+            val finished = completeAdRound(activation.sessionToken)
+                ?: return FtActivationResult(
+                    ok = false,
+                    rounds = rounds,
+                    session = activation,
+                    detail = "el Worker no confirmó la ronda",
+                )
+
+            if (finished) {
+                var latest = activation
+                repeat(4) {
+                    Thread.sleep(350L)
+                    latest = ensureFtSession(id, wantAd = false)
+                    if (latest.queda > 0 || latest.libre || latest.pro) {
+                        return FtActivationResult(
+                            ok = true,
+                            rounds = rounds,
+                            session = latest,
+                        )
+                    }
+                }
+                return FtActivationResult(
+                    ok = false,
+                    rounds = rounds,
+                    session = latest,
+                    detail = "activación confirmada pero queda=0",
+                )
+            }
+
+            // El original vuelve a consultar el mismo VAST para la ronda siguiente.
+            if (round.totalRounds > 0 && rounds >= maxOf(6, round.totalRounds + 2)) {
+                break
+            }
+        }
+
+        return FtActivationResult(
+            ok = false,
+            rounds = rounds,
+            session = ensureFtSession(id, wantAd = false),
+            detail = "activación incompleta",
+        )
     }
 
     internal fun requestAdActivation(): FtAdActivation? {
