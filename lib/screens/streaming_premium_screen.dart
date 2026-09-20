@@ -6,16 +6,15 @@ const Color streamingPremiumGold = Color(0xFFD8B55B);
 const Color streamingPremiumGoldSoft = Color(0xFFF2D58A);
 
 enum StreamingPremiumPlatform {
-  netflix('NETFLIX', 'Series y películas', 'N'),
-  max('MAX', 'Películas, series y estrenos', 'MAX'),
-  prime('PRIME VIDEO', 'Películas, series y originales', 'prime'),
-  crunchyroll('CRUNCHYROLL', 'Anime y estrenos', 'CR');
+  netflix('NETFLIX', 'Series y películas'),
+  max('HBO MAX', 'Películas, series y estrenos'),
+  prime('PRIME VIDEO', 'Películas, series y originales'),
+  crunchyroll('CRUNCHYROLL', 'Anime y estrenos');
 
   final String title;
   final String subtitle;
-  final String monogram;
 
-  const StreamingPremiumPlatform(this.title, this.subtitle, this.monogram);
+  const StreamingPremiumPlatform(this.title, this.subtitle);
 }
 
 /// V63: prueba visual aislada de Streaming Premium.
@@ -239,7 +238,8 @@ class _PlatformCardState extends State<_PlatformCard> {
           borderRadius: BorderRadius.circular(20),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
-              borderRadius: BorderRadius.circular(20),
+            autofocus: widget.autofocus,
+            borderRadius: BorderRadius.circular(20),
             onFocusChange: (value) {
               if (_focused != value) setState(() => _focused = value);
             },
@@ -248,8 +248,8 @@ class _PlatformCardState extends State<_PlatformCard> {
               padding: const EdgeInsets.fromLTRB(24, 22, 24, 20),
               child: Row(
                 children: [
-                  _PlatformMonogram(
-                    text: widget.platform.monogram,
+                  _PlatformLogo(
+                    platform: widget.platform,
                     focused: _focused,
                   ),
                   const SizedBox(width: 22),
@@ -334,52 +334,210 @@ class _StatusDot extends StatelessWidget {
   }
 }
 
-class _PlatformMonogram extends StatelessWidget {
-  final String text;
+class _PlatformLogo extends StatelessWidget {
+  final StreamingPremiumPlatform platform;
   final bool focused;
 
-  const _PlatformMonogram({
-    required this.text,
+  const _PlatformLogo({
+    required this.platform,
     required this.focused,
   });
 
   @override
   Widget build(BuildContext context) {
     return Container(
-      width: 76,
-      height: 76,
+      width: 92,
+      height: 78,
       alignment: Alignment.center,
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(19),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [
-            streamingPremiumGold.withValues(alpha: focused ? .25 : .12),
-            Colors.white.withValues(alpha: focused ? .07 : .025),
-          ],
-        ),
+        color: const Color(0xFF08090B),
         border: Border.all(
-          color: streamingPremiumGold.withValues(alpha: focused ? .72 : .28),
+          color: streamingPremiumGold.withValues(alpha: focused ? .62 : .20),
         ),
       ),
-      child: FittedBox(
-        fit: BoxFit.scaleDown,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10),
-          child: Text(
-            text,
-            style: TextStyle(
-              color: focused ? streamingPremiumGoldSoft : Colors.white70,
-              fontSize: text.length > 3 ? 17 : 30,
-              fontWeight: FontWeight.w900,
-              letterSpacing: text.length > 3 ? -.4 : .5,
+      child: RepaintBoundary(
+        child: switch (platform) {
+          StreamingPremiumPlatform.netflix => const _NetflixLogo(),
+          StreamingPremiumPlatform.max => const _HboMaxLogo(),
+          StreamingPremiumPlatform.prime => const _PrimeVideoLogo(),
+          StreamingPremiumPlatform.crunchyroll => const _CrunchyrollLogo(),
+        },
+      ),
+    );
+  }
+}
+
+class _NetflixLogo extends StatelessWidget {
+  const _NetflixLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Text(
+      'N',
+      style: TextStyle(
+        color: Color(0xFFE50914),
+        fontSize: 50,
+        height: .9,
+        fontWeight: FontWeight.w900,
+        letterSpacing: -4,
+      ),
+    );
+  }
+}
+
+class _HboMaxLogo extends StatelessWidget {
+  const _HboMaxLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return const FittedBox(
+      fit: BoxFit.scaleDown,
+      child: Padding(
+        padding: EdgeInsets.symmetric(horizontal: 9),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Text(
+              'HBO',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 21,
+                height: .86,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -.8,
+              ),
             ),
-          ),
+            Text(
+              'MAX',
+              style: TextStyle(
+                color: Color(0xFF9D7CFF),
+                fontSize: 25,
+                height: .95,
+                fontWeight: FontWeight.w900,
+                letterSpacing: -1.4,
+              ),
+            ),
+          ],
         ),
       ),
     );
   }
+}
+
+class _PrimeVideoLogo extends StatelessWidget {
+  const _PrimeVideoLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 78,
+      height: 46,
+      child: Stack(
+        alignment: Alignment.center,
+        children: [
+          Positioned(
+            top: 2,
+            child: Text(
+              'prime',
+              style: TextStyle(
+                color: Color(0xFF21A8E0),
+                fontSize: 18,
+                fontWeight: FontWeight.w800,
+                letterSpacing: -.9,
+              ),
+            ),
+          ),
+          Positioned(
+            top: 19,
+            child: Text(
+              'video',
+              style: TextStyle(
+                color: Colors.white,
+                fontSize: 12,
+                fontWeight: FontWeight.w700,
+                letterSpacing: 1.5,
+              ),
+            ),
+          ),
+          Positioned(
+            bottom: 0,
+            left: 13,
+            right: 13,
+            height: 11,
+            child: CustomPaint(painter: _PrimeSmilePainter()),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _PrimeSmilePainter extends CustomPainter {
+  const _PrimeSmilePainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final paint = Paint()
+      ..color = const Color(0xFF21A8E0)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+    final path = Path()
+      ..moveTo(1, 1)
+      ..quadraticBezierTo(size.width * .52, size.height * 1.08, size.width - 5, 2);
+    canvas.drawPath(path, paint);
+
+    final arrow = Path()
+      ..moveTo(size.width - 9, 0)
+      ..lineTo(size.width - 2, 2)
+      ..lineTo(size.width - 7, 7);
+    canvas.drawPath(arrow, paint);
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+class _CrunchyrollLogo extends StatelessWidget {
+  const _CrunchyrollLogo();
+
+  @override
+  Widget build(BuildContext context) {
+    return const SizedBox(
+      width: 66,
+      height: 54,
+      child: CustomPaint(painter: _CrunchyrollMarkPainter()),
+    );
+  }
+}
+
+class _CrunchyrollMarkPainter extends CustomPainter {
+  const _CrunchyrollMarkPainter();
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = Offset(size.width * .5, size.height * .5);
+    final radius = size.height * .39;
+    final orange = Paint()
+      ..color = const Color(0xFFF47521)
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(center, radius, orange);
+    canvas.drawCircle(
+      Offset(center.dx + radius * .30, center.dy - radius * .12),
+      radius * .63,
+      Paint()..color = const Color(0xFF08090B),
+    );
+    canvas.drawCircle(
+      Offset(center.dx + radius * .48, center.dy - radius * .17),
+      radius * .21,
+      orange,
+    );
+  }
+
+  @override
+  bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
 }
 
 class _StatusPill extends StatelessWidget {
