@@ -1,6 +1,8 @@
 package com.example.iptv_player
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import android.util.Base64
 import com.byrafael.streamapp.Guard
 import org.json.JSONObject
@@ -8,6 +10,7 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.UUID
 
 internal class FtPremiumCompat(private val context: Context) {
@@ -55,6 +58,28 @@ internal class FtPremiumCompat(private val context: Context) {
             ?: return mapOf("available" to false, "status" to "unsupported")
 
         val id = getAnonId()
+
+        // FT 3.6 sincroniza /sesion antes de pedir /plat/get.
+        val gate = runCatching { syncSession(id) }.getOrElse { error ->
+            return mapOf(
+                "available" to false,
+                "status" to "session_gate_failed",
+                "stage" to "session",
+                "detail" to (error.message ?: error.javaClass.simpleName),
+            )
+        }
+        if (!gate.ok) {
+            return mapOf(
+                "available" to false,
+                "status" to "session_gate_rejected",
+                "stage" to "session",
+                "gate_http" to gate.httpStatus,
+                "gate_pro" to gate.pro,
+                "gate_libre" to gate.libre,
+                "gate_ticket" to gate.hasTicket,
+            )
+        }
+
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
         val sig = guard.sign(certDigest, "plat:ft:$FT_VERSION_CODE:$id")
         if (sig.isBlank()) {
@@ -102,6 +127,9 @@ internal class FtPremiumCompat(private val context: Context) {
                 "ping_ok" to pingOk,
                 "has_ref" to ref.isNotBlank(),
                 "intento" to intento,
+                "gate_pro" to gate.pro,
+                "gate_libre" to gate.libre,
+                "gate_ticket" to gate.hasTicket,
             )
         }
 
@@ -124,7 +152,10 @@ internal class FtPremiumCompat(private val context: Context) {
             "ref" to ref,
             "intento" to intento,
             "ping_ok" to pingOk,
-            "source" to "ft36-direct",
+            "gate_pro" to gate.pro,
+            "gate_libre" to gate.libre,
+            "gate_ticket" to gate.hasTicket,
+            "source" to "ft36-direct-session-gate",
         )
     }
 
@@ -154,6 +185,86 @@ internal class FtPremiumCompat(private val context: Context) {
         }
     }
 
+    private data class SessionGate(
+        val ok: Boolean,
+        val httpStatus: Int,
+        val pro: Boolean,
+        val libre: Boolean,
+        val hasTicket: Boolean,
+        val queda: Int,
+    )
+
+    private fun syncSession(id: String): SessionGate {
+        val hw = hardwareFingerprint()
+        val first = postSession(id, hw)
+        if (first.httpStatus == 401 && hw.isNotEmpty()) {
+            return postSession(id, "")
+        }
+        return first
+    }
+
+    private fun postSession(id: String, hw: String): SessionGate {
+        val basis = if (hw.isEmpty()) {
+            "sesion:ft:$FT_VERSION_CODE:$id"
+        } else {
+            "sesion:ft:$FT_VERSION_CODE:$id:$hw"
+        }
+        val sig = guard.sign(certDigest, basis)
+        if (sig.isBlank()) {
+            return SessionGate(false, 0, false, false, false, 0)
+        }
+
+        val body = JSONObject()
+            .put("id", id)
+            .put("vc", FT_VERSION_CODE)
+            .put("hw", hw)
+            .put("sig", sig)
+            .put("quiero", 0)
+            .toString()
+            .toByteArray(StandardCharsets.UTF_8)
+
+        val connection = URL("$PRIMARY/sesion").openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "POST"
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.doOutput = true
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("content-type", "application/json")
+            connection.outputStream.use { it.write(body) }
+
+            val status = connection.responseCode
+            if (status != 200) {
+                SessionGate(false, status, false, false, false, 0)
+            } else {
+                val text = connection.inputStream.bufferedReader().use { it.readText() }
+                val json = JSONObject(text)
+                SessionGate(
+                    ok = json.optBoolean("ok", false),
+                    httpStatus = status,
+                    pro = json.optInt("pro", 0) == 1,
+                    libre = json.optInt("libre", 0) == 1,
+                    hasTicket = json.optString("t", "").isNotBlank(),
+                    queda = json.optInt("queda", 0),
+                )
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun hardwareFingerprint(): String {
+        return runCatching {
+            val androidId = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ANDROID_ID,
+            ).orEmpty()
+            val raw = "\${Build.MANUFACTURER}|\${Build.MODEL}|\${Build.DEVICE}|\$androidId"
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(raw.toByteArray(StandardCharsets.UTF_8))
+            digest.joinToString("") { byte -> "%02x".format(byte.toInt() and 0xff) }
+        }.getOrDefault("")
+    }
     private fun getAnonId(): String {
         val prefs = context.getSharedPreferences("ft_state", Context.MODE_PRIVATE)
         val existing = prefs.getString("anon_id", null)
@@ -167,12 +278,10 @@ internal class FtPremiumCompat(private val context: Context) {
         val connection = (URL("$PRIMARY/ping").openConnection() as HttpURLConnection)
         return try {
             connection.requestMethod = "POST"
-            connection.connectTimeout = 6000
-            connection.readTimeout = 6000
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
             connection.doOutput = true
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", FT_UA)
-            connection.setRequestProperty("Accept", "application/json")
             connection.setRequestProperty("Content-Type", "application/json")
             val body = JSONObject()
                 .put("id", id)
@@ -193,9 +302,9 @@ internal class FtPremiumCompat(private val context: Context) {
             append("/plat/get?vc=")
             append(FT_VERSION_CODE)
             append("&id=")
-            append(enc(id))
+            append(id)
             append("&sig=")
-            append(enc(sig))
+            append(sig)
             if (intento > 0) {
                 append("&intento=")
                 append(intento.coerceIn(1, 9))
