@@ -171,8 +171,7 @@ internal class FtPremiumCompat(private val context: Context) {
             connection.readTimeout = 6000
             connection.doOutput = true
             connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", FT_UA)
-            connection.setRequestProperty("Accept", "application/json")
+            // FT 3.6 en /ping sólo envía Content-Type.
             connection.setRequestProperty("Content-Type", "application/json")
             val body = JSONObject()
                 .put("id", id)
