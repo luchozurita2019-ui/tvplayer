@@ -3,6 +3,7 @@ package com.example.iptv_player
 import android.annotation.SuppressLint
 import android.app.Activity
 import android.content.Intent
+import android.content.pm.ActivityInfo
 import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
@@ -29,6 +30,12 @@ class WebPlaybackActivity : Activity() {
         const val EXTRA_PLATFORM = "platform"
         const val EXTRA_REPLACE_PLATFORM_COOKIES = "replacePlatformCookies"
         const val EXTRA_SESSION_REF = "sessionRef"
+        const val EXTRA_STREAMING_PREMIUM = "streamingPremium"
+
+        private const val FT_PREMIUM_UA =
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) " +
+                "AppleWebKit/537.36 (KHTML, like Gecko) " +
+                "Chrome/150.0.0.0 Safari/537.36"
 
         const val RESULT_DEAD_DETECTED = "deadDetected"
         const val RESULT_PLATFORM = "platform"
@@ -67,6 +74,8 @@ class WebPlaybackActivity : Activity() {
     private var platform = ""
     private var sessionRef = ""
     private var deadDetected = false
+    private var streamingPremium = false
+    private var firstMainPageFinished = false
 
     @SuppressLint("SetJavaScriptEnabled")
     @Suppress("DEPRECATION")
@@ -85,6 +94,10 @@ class WebPlaybackActivity : Activity() {
 
         platform = intent.getStringExtra(EXTRA_PLATFORM)?.trim()?.lowercase().orEmpty()
         sessionRef = intent.getStringExtra(EXTRA_SESSION_REF)?.trim().orEmpty()
+        streamingPremium = intent.getBooleanExtra(EXTRA_STREAMING_PREMIUM, false)
+        if (streamingPremium) {
+            requestedOrientation = ActivityInfo.SCREEN_ORIENTATION_SENSOR_LANDSCAPE
+        }
 
         window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
         window.statusBarColor = Color.BLACK
@@ -115,15 +128,22 @@ class WebPlaybackActivity : Activity() {
             mediaPlaybackRequiresUserGesture = false
             useWideViewPort = true
             loadWithOverviewMode = true
-            setSupportZoom(false)
-            builtInZoomControls = false
+            setSupportZoom(streamingPremium)
+            builtInZoomControls = streamingPremium
             displayZoomControls = false
             javaScriptCanOpenWindowsAutomatically = false
             setSupportMultipleWindows(false)
             allowFileAccess = false
             cacheMode = WebSettings.LOAD_DEFAULT
+            if (streamingPremium) {
+                userAgentString = FT_PREMIUM_UA
+            }
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-                mixedContentMode = WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                mixedContentMode = if (streamingPremium) {
+                    WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+                } else {
+                    WebSettings.MIXED_CONTENT_COMPATIBILITY_MODE
+                }
             }
         }
 
@@ -147,7 +167,9 @@ class WebPlaybackActivity : Activity() {
         }
         if (userAgentKey != null) {
             val userAgent = headers.remove(userAgentKey)?.trim().orEmpty()
-            if (userAgent.isNotEmpty()) webView.settings.userAgentString = userAgent
+            if (!streamingPremium && userAgent.isNotEmpty()) {
+                webView.settings.userAgentString = userAgent
+            }
         }
 
         val cookieManager = CookieManager.getInstance()
@@ -175,6 +197,9 @@ class WebPlaybackActivity : Activity() {
                 favicon: android.graphics.Bitmap?,
             ) {
                 super.onPageStarted(view, url, favicon)
+                if (streamingPremium && view != null) {
+                    injectFtBrowserCompat(view)
+                }
                 Log.i(
                     "TVFULL_PREMIUM",
                     "page_started platform=$platform " + safePageLabel(url),
@@ -183,6 +208,13 @@ class WebPlaybackActivity : Activity() {
 
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
+                if (streamingPremium && view != null) {
+                    injectFtBrowserCompat(view)
+                    if (!firstMainPageFinished) {
+                        firstMainPageFinished = true
+                        view.clearHistory()
+                    }
+                }
                 CookieManager.getInstance().flush()
                 if (!deadDetected && isLoginOrAuthPage(url)) {
                     deadDetected = true
@@ -264,6 +296,24 @@ class WebPlaybackActivity : Activity() {
 
         webView.loadUrl(rawUrl, headers)
         webView.requestFocus()
+    }
+
+    private fun injectFtBrowserCompat(view: WebView) {
+        val metrics = resources.displayMetrics
+        val declaredWidth = maxOf(metrics.widthPixels, metrics.heightPixels)
+        val declaredHeight = minOf(metrics.widthPixels, metrics.heightPixels)
+        val script = """
+            (function(){
+              try {
+                Object.defineProperty(navigator,'platform',{get:function(){return 'Win32';}});
+                Object.defineProperty(navigator,'maxTouchPoints',{get:function(){return 0;}});
+                Object.defineProperty(navigator,'userAgentData',{get:function(){return undefined;}});
+                Object.defineProperty(screen,'width',{get:function(){return $declaredWidth;}});
+                Object.defineProperty(screen,'height',{get:function(){return $declaredHeight;}});
+              } catch(e) {}
+            })();
+        """.trimIndent()
+        runCatching { view.evaluateJavascript(script, null) }
     }
 
     private fun safePageLabel(rawUrl: String?): String {
@@ -355,7 +405,6 @@ class WebPlaybackActivity : Activity() {
             val domain = rawDomain.removePrefix(".").lowercase()
 
             if (name.isEmpty() ||
-                value.isEmpty() ||
                 domain.isEmpty() ||
                 !isAllowedPremiumDomain(domain) ||
                 name.contains(';') ||
@@ -368,7 +417,7 @@ class WebPlaybackActivity : Activity() {
                 continue
             }
 
-            val targetUrl = "https://$domain/"
+            val targetUrl = "https://$domain$path"
             val cookie = buildString {
                 append(name)
                 append("=")
@@ -379,7 +428,7 @@ class WebPlaybackActivity : Activity() {
                     append("; Domain=")
                     append(rawDomain)
                 }
-                if (secure) append("; Secure")
+                if (streamingPremium || secure) append("; Secure")
                 append("; SameSite=None")
             }
 
