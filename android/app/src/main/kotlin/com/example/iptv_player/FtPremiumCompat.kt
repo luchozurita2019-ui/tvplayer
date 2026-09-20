@@ -1,12 +1,15 @@
 package com.example.iptv_player
 
 import android.content.Context
+import android.os.Build
+import android.provider.Settings
 import android.util.Base64
 import com.byrafael.streamapp.Guard
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
 import java.nio.charset.StandardCharsets
+import java.security.MessageDigest
 import java.util.UUID
 
 internal class FtPremiumCompat(private val context: Context) {
@@ -65,6 +68,8 @@ internal class FtPremiumCompat(private val context: Context) {
 
         val id = getAnonId()
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
+        val session = runCatching { ensureFtSession(id) }
+            .getOrElse { FtSessionState(false, -1, 0, false, false, it.message.orEmpty()) }
         val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
         if (sig.isBlank()) {
             return mapOf(
@@ -72,6 +77,9 @@ internal class FtPremiumCompat(private val context: Context) {
                 "status" to "guard_failed",
                 "stage" to "sign",
                 "ping_ok" to pingOk,
+                "session_ok" to session.ok,
+                "session_http" to session.httpStatus,
+                "session_queda" to session.queda,
             )
         }
 
@@ -81,7 +89,15 @@ internal class FtPremiumCompat(private val context: Context) {
                 "status" to "map_failed",
                 "stage" to "map",
                 "ping_ok" to pingOk,
-                "detail" to (error.message ?: error.javaClass.simpleName),
+                "session_ok" to session.ok,
+                "session_http" to session.httpStatus,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+                "detail" to listOfNotNull(
+                    error.message ?: error.javaClass.simpleName,
+                    session.detail.takeIf { it.isNotBlank() },
+                ).joinToString(" · "),
             )
         }
 
@@ -161,6 +177,106 @@ internal class FtPremiumCompat(private val context: Context) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private data class FtSessionState(
+        val ok: Boolean,
+        val httpStatus: Int,
+        val queda: Int,
+        val libre: Boolean,
+        val pro: Boolean,
+        val detail: String = "",
+    )
+
+    private fun ensureFtSession(id: String): FtSessionState {
+        val hw = buildHardwareFingerprint()
+        val first = requestFtSession(id, hw)
+        if (first.httpStatus == 401 && hw.isNotBlank()) {
+            return requestFtSession(id, "")
+        }
+        return first
+    }
+
+    private fun requestFtSession(id: String, hw: String): FtSessionState {
+        val signInput = buildString {
+            append("sesion:ft:")
+            append(FT_VERSION_CODE)
+            append(":")
+            append(id)
+            if (hw.isNotBlank()) {
+                append(":")
+                append(hw)
+            }
+        }
+        val sig = Guard.a.b(signInput)
+        if (sig.isBlank()) {
+            return FtSessionState(
+                ok = false,
+                httpStatus = -1,
+                queda = 0,
+                libre = false,
+                pro = false,
+                detail = "sesion sin firma",
+            )
+        }
+
+        val connection = URL("$PRIMARY/sesion").openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.setRequestProperty("content-type", "application/json")
+
+            val body = JSONObject()
+                .put("id", id)
+                .put("vc", FT_VERSION_CODE)
+                .put("hw", hw)
+                .put("sig", sig)
+                .put("quiero", 0)
+                .toString()
+                .toByteArray(StandardCharsets.UTF_8)
+            connection.outputStream.use { it.write(body) }
+
+            val status = connection.responseCode
+            if (status != 200) {
+                return FtSessionState(
+                    ok = false,
+                    httpStatus = status,
+                    queda = 0,
+                    libre = false,
+                    pro = false,
+                    detail = readSafeError(connection).ifBlank { "sesion HTTP $status" },
+                )
+            }
+
+            val raw = connection.inputStream.bufferedReader().use { it.readText() }
+            val json = JSONObject(raw)
+            FtSessionState(
+                ok = json.optBoolean("ok", false),
+                httpStatus = status,
+                queda = json.optInt("queda", 0),
+                libre = json.optInt("libre", 0) == 1,
+                pro = json.optInt("pro", 0) == 1,
+                detail = if (json.optBoolean("ok", false)) "" else "sesion ok=false",
+            )
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun buildHardwareFingerprint(): String {
+        return runCatching {
+            val androidId = Settings.Secure.getString(
+                context.contentResolver,
+                Settings.Secure.ANDROID_ID,
+            ).orEmpty()
+            val source =
+                "${Build.MANUFACTURER}|${Build.MODEL}|${Build.DEVICE}|$androidId"
+            val digest = MessageDigest.getInstance("SHA-256")
+                .digest(source.toByteArray(StandardCharsets.UTF_8))
+            digest.joinToString("") { byte -> "%02x".format(byte) }
+        }.getOrDefault("")
     }
 
     private fun getAnonId(): String {
