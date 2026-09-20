@@ -14,6 +14,7 @@ import '../services/catalog_index.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
 import '../services/futbol_total_authorized_fetcher.dart';
+import '../services/futbol_total_fast_catalog_service.dart';
 import '../services/live_epg_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/remote_access_guard.dart';
@@ -37,10 +38,6 @@ class XtreamLiveScreen extends StatefulWidget {
 
 class _XtreamLiveScreenState extends State<XtreamLiveScreen>
     with WidgetsBindingObserver {
-  // Fútbol Total: durante una misma ejecución de la app sólo se programa
-  // una comprobación de red por fuente. El catálogo válido se sirve siempre
-  // desde la generación persistida en disco al volver a entrar a la pantalla.
-  static final Set<String> _futbolTotalRefreshScheduledThisSession = <String>{};
   static const Duration _cacheFreshFor = Duration(minutes: 3);
 
   late Future<_LiveData> _future;
@@ -243,44 +240,30 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
   }
 
   Future<_LiveData> _loadM3uFallback() async {
+    if (widget.playlist.sourceType == PlaylistSourceType.futbolTotal) {
+      final snapshot =
+          await FutbolTotalFastCatalogService.instance.loadInitial(
+        widget.playlist,
+      );
+      _futbolTotalSource = snapshot.source.name;
+      final data = _adoptFutbolTotalHierarchy(
+        _LiveData(
+          snapshot.channels,
+          categories: snapshot.categories,
+          catalogSources: snapshot.sourceNames,
+        ),
+      );
+      if (snapshot.stale) {
+        unawaited(_refreshFutbolTotalSource(snapshot.source.name));
+      }
+      return data;
+    }
+
     final service = SectionCatalogService.instance;
     final cached = await service.loadCached(
       widget.playlist,
       TvSectionKind.live,
     );
-
-    if (widget.playlist.sourceType == PlaylistSourceType.futbolTotal) {
-      final hierarchyReady = cached != null &&
-          cached.channels.isNotEmpty &&
-          cached.channels.every(
-            (channel) => (channel.catalogSource ?? '').trim().isNotEmpty,
-          );
-
-      if (hierarchyReady) {
-        // Mostrar inmediatamente la generación completa persistida. Sólo la
-        // primera entrada a esta fuente durante la ejecución actual puede
-        // programar una comprobación silenciosa; entradas posteriores no
-        // vuelven a descargar las 13 TvList.
-        if (_futbolTotalRefreshScheduledThisSession.add(widget.playlist.id)) {
-          unawaited(_refreshM3u());
-        }
-        return _adoptFutbolTotalHierarchy(
-          _LiveData(cached.channels, categories: cached.categories),
-        );
-      }
-
-      // Versiones anteriores guardaron todas las listas de Fútbol Total
-      // fusionadas y sin identidad de TvList. No mostramos ese snapshot:
-      // obligamos a reconstruirlo con la jerarquía oficial
-      // TvList -> categories[] -> samples[].
-      final fresh = await service.loadOrRefresh(
-        widget.playlist,
-        TvSectionKind.live,
-        forceNetwork: true,
-      );
-      return _adoptFutbolTotalHierarchy(_LiveData(fresh.channels));
-    }
-
     if (cached != null && cached.channels.isNotEmpty) {
       unawaited(_refreshM3u());
       return _LiveData(cached.channels);
@@ -357,13 +340,64 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
     );
   }
 
+  Future<_LiveData> _loadFutbolTotalSource(String sourceName) async {
+    _setStatus('Cargando $sourceName…');
+    final snapshot =
+        await FutbolTotalFastCatalogService.instance.loadSource(
+      widget.playlist,
+      sourceName,
+    );
+    if (snapshot.stale) {
+      unawaited(_refreshFutbolTotalSource(sourceName));
+    }
+    return _adoptFutbolTotalHierarchy(
+      _LiveData(
+        snapshot.channels,
+        categories: snapshot.categories,
+        catalogSources: snapshot.sourceNames,
+      ),
+    );
+  }
+
+  Future<void> _refreshFutbolTotalSource(String? sourceName) async {
+    if (sourceName == null || sourceName.trim().isEmpty) return;
+    try {
+      final fresh =
+          await FutbolTotalFastCatalogService.instance.refreshSourceIfStale(
+        widget.playlist,
+        sourceName,
+      );
+      if (fresh == null ||
+          !mounted ||
+          _futbolTotalSource != sourceName ||
+          fresh.channels.isEmpty) {
+        return;
+      }
+      final data = _adoptFutbolTotalHierarchy(
+        _LiveData(
+          fresh.channels,
+          categories: fresh.categories,
+          catalogSources: fresh.sourceNames,
+        ),
+      );
+      setState(() {
+        _visibleData = data;
+        _catalogIndex = null;
+        _indexedData = null;
+        _indexedFutbolTotalSource = null;
+      });
+    } catch (_) {}
+  }
+
   Future<void> _refreshM3u() async {
+    if (widget.playlist.sourceType == PlaylistSourceType.futbolTotal) {
+      await _refreshFutbolTotalSource(_futbolTotalSource);
+      return;
+    }
     try {
       final all = await SectionCatalogService.instance.refreshIfStale(
         widget.playlist,
-        freshFor: widget.playlist.sourceType == PlaylistSourceType.futbolTotal
-            ? const Duration(hours: 6)
-            : const Duration(minutes: 5),
+        freshFor: const Duration(minutes: 5),
       );
       if (all == null) return;
       final fresh = all[TvSectionKind.live];
@@ -509,6 +543,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
       _catalogIndex = null;
       _indexedData = null;
       _indexedFutbolTotalSource = null;
+      _visibleData = null;
+      _future = _loadFutbolTotalSource(chosen);
     });
     _resetCatalogScroll();
   }
@@ -792,6 +828,8 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen>
             initialIndex: index,
             settings: provider.playbackSettings,
             isLiveContent: true,
+            futbolTotalPlayback:
+                widget.playlist.sourceType == PlaylistSourceType.futbolTotal,
           ),
         ),
       );
@@ -937,13 +975,17 @@ class _ChannelRowState extends State<_ChannelRow> {
 class _LiveData {
   final List<Channel> channels;
   final List<String> _storedCategories;
+  final List<String> _storedCatalogSources;
 
   const _LiveData(
     this.channels, {
     List<String> categories = const <String>[],
-  }) : _storedCategories = categories;
+    List<String> catalogSources = const <String>[],
+  }) : _storedCategories = categories,
+       _storedCatalogSources = catalogSources;
 
   List<String> get catalogSources {
+    if (_storedCatalogSources.isNotEmpty) return _storedCatalogSources;
     final seen = <String>{};
     final values = <String>[];
     for (final channel in channels) {
