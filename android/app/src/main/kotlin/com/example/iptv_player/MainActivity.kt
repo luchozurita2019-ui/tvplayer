@@ -61,6 +61,7 @@ class MainActivity : FlutterActivity() {
         private const val FT_BRIDGE_ID_EXTRA = "ft_anon_id"
         private const val FT_BRIDGE_FLAG_EXTRA = "ft_bridge"
         private const val WEB_PLAYBACK_REQUEST_CODE = 9041
+        private const val FT_ACTIVATION_REQUEST_CODE = 9042
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
         private const val LIVE_STARTUP_MAX_WAIT_MS = 25000L
         private const val LIVE_RECOVERY_MAX_WAIT_MS = 12000L
@@ -83,6 +84,7 @@ class MainActivity : FlutterActivity() {
     private var surface: Surface? = null
     private var eventSink: EventChannel.EventSink? = null
     private var pendingWebPlaybackResult: MethodChannel.Result? = null
+    private var pendingFtActivationResult: MethodChannel.Result? = null
     private var currentUrl: String? = null
     private var currentAdaptiveProfileKey: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
@@ -284,6 +286,64 @@ class MainActivity : FlutterActivity() {
                             }
                         }, "ft-premium-direct").start()
                     }
+                    "activate" -> {
+                        if (pendingFtActivationResult != null) {
+                            result.error(
+                                "FT_ACTIVATION_ALREADY_OPEN",
+                                "La activación ya está abierta.",
+                                null,
+                            )
+                        } else {
+                            pendingFtActivationResult = result
+                            Thread({
+                                val url = runCatching {
+                                    ftPremiumCompat.prepareWebActivationUrl()
+                                }.getOrNull()
+                                if (url.isNullOrBlank()) {
+                                    val summary = runCatching {
+                                        ftPremiumCompat.refreshAfterWebActivation()
+                                    }.getOrDefault(
+                                        mapOf(
+                                            "completed" to false,
+                                            "queda" to 0,
+                                            "libre" to false,
+                                            "pro" to false,
+                                        )
+                                    )
+                                    mainHandler.post {
+                                        pendingFtActivationResult?.success(summary)
+                                        pendingFtActivationResult = null
+                                    }
+                                } else {
+                                    mainHandler.post {
+                                        try {
+                                            val intent = Intent(
+                                                this,
+                                                FtActivationActivity::class.java,
+                                            ).apply {
+                                                putExtra(
+                                                    FtActivationActivity.EXTRA_URL,
+                                                    url,
+                                                )
+                                            }
+                                            startActivityForResult(
+                                                intent,
+                                                FT_ACTIVATION_REQUEST_CODE,
+                                            )
+                                        } catch (error: Throwable) {
+                                            pendingFtActivationResult?.error(
+                                                "FT_ACTIVATION_OPEN_FAILED",
+                                                error.message
+                                                    ?: "No se pudo abrir la activación.",
+                                                null,
+                                            )
+                                            pendingFtActivationResult = null
+                                        }
+                                    }
+                                }
+                            }, "ft-web-activation").start()
+                        }
+                    }
                     "reportDead" -> {
                         val platform = call.argument<String>("platform")?.trim().orEmpty()
                         val ref = call.argument<String>("ref")?.trim().orEmpty()
@@ -459,6 +519,46 @@ class MainActivity : FlutterActivity() {
     @Suppress("DEPRECATION")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+
+        if (requestCode == FT_ACTIVATION_REQUEST_CODE) {
+            val completed =
+                resultCode == RESULT_OK &&
+                    (data?.getBooleanExtra(
+                        FtActivationActivity.RESULT_COMPLETED,
+                        false,
+                    ) ?: false)
+            if (!completed) {
+                pendingFtActivationResult?.success(
+                    mapOf(
+                        "completed" to false,
+                        "queda" to 0,
+                        "libre" to false,
+                        "pro" to false,
+                    )
+                )
+                pendingFtActivationResult = null
+                return
+            }
+
+            Thread({
+                val summary = runCatching {
+                    ftPremiumCompat.refreshAfterWebActivation()
+                }.getOrDefault(
+                    mapOf(
+                        "completed" to false,
+                        "queda" to 0,
+                        "libre" to false,
+                        "pro" to false,
+                    )
+                )
+                mainHandler.post {
+                    pendingFtActivationResult?.success(summary)
+                    pendingFtActivationResult = null
+                }
+            }, "ft-web-activation-refresh").start()
+            return
+        }
+
         if (requestCode != WEB_PLAYBACK_REQUEST_CODE) return
         pendingWebPlaybackResult?.success(
             mapOf(
