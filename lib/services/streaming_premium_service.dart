@@ -493,6 +493,7 @@ class StreamingPremiumService {
       final sessionQueda = data['session_queda'];
       final sessionLibre = data['session_libre'];
       final sessionPro = data['session_pro'];
+      final sessionToken = data['session_token'];
       final rawDetail = data['detail']?.toString().trim() ?? '';
       final parts = <String>[];
       if (stage.isNotEmpty) parts.add('etapa=$stage');
@@ -504,6 +505,9 @@ class StreamingPremiumService {
       if (sessionQueda is num) parts.add('queda=${sessionQueda.toInt()}s');
       if (sessionLibre is bool) parts.add('libre=${sessionLibre ? 'sí' : 'no'}');
       if (sessionPro is bool) parts.add('pro=${sessionPro ? 'sí' : 'no'}');
+      if (sessionToken is bool) {
+        parts.add('token=${sessionToken ? 'sí' : 'no'}');
+      }
       if (hasRef is bool) parts.add('ref=${hasRef ? 'sí' : 'no'}');
       if (rawDetail.isNotEmpty) parts.add(rawDetail);
       throw StreamingPremiumUnavailableException(status, parts.join(' · '));
