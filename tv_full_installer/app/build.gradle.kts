@@ -7,11 +7,11 @@ android {
     compileSdk = 35
 
     defaultConfig {
-        applicationId = "com.tvfull.pro.installer"
+        applicationId = "com.tvfull.pro.installer.v67test"
         minSdk = 23
         targetSdk = 35
-        versionCode = 2
-        versionName = "1.0.1"
+        versionCode = 1
+        versionName = "1.0.0-v67test"
     }
 
     signingConfigs {
