@@ -57,6 +57,7 @@ class MainActivity : FlutterActivity() {
         private const val EVENT_CHANNEL = "tvfull/media3_texture_events"
         private const val DEVICE_CHANNEL = "tvfull/device_identity"
         private const val WEB_PLAYBACK_CHANNEL = "tvfull/web_playback"
+        private const val FT_PREMIUM_CHANNEL = "tvfull/ft_premium_direct"
         private const val WEB_PLAYBACK_REQUEST_CODE = 9041
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
         private const val LIVE_STARTUP_MAX_WAIT_MS = 25000L
@@ -122,6 +123,7 @@ class MainActivity : FlutterActivity() {
     private var fallbackMediaSourceFactory: DefaultMediaSourceFactory? = null
     private var fallbackMediaSourceKey: String? = null
 
+    private val ftPremiumCompat by lazy { FtPremiumCompat(applicationContext) }
     private val fallbackDns by lazy { TvFullFallbackDns() }
     private val liveLoadErrorPolicy by lazy { TvFullLiveLoadErrorPolicy() }
     private val liveHttpClient by lazy {
@@ -224,6 +226,44 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "open" -> openWebPlayback(call, result)
                     "openExternal" -> openExternalUrl(call, result)
+                    else -> result.notImplemented()
+                }
+            }
+
+        MethodChannel(flutterEngine.dartExecutor.binaryMessenger, FT_PREMIUM_CHANNEL)
+            .setMethodCallHandler { call, result ->
+                when (call.method) {
+                    "prepare" -> {
+                        val platform = call.argument<String>("platform")?.trim().orEmpty()
+                        val intento = call.argument<Number>("intento")?.toInt() ?: 0
+                        Thread({
+                            val response = runCatching {
+                                ftPremiumCompat.prepare(platform, intento)
+                            }
+                            mainHandler.post {
+                                response.fold(
+                                    onSuccess = { result.success(it) },
+                                    onFailure = {
+                                        result.error(
+                                            "FT_PREMIUM_FAILED",
+                                            it.message ?: it.javaClass.simpleName,
+                                            null,
+                                        )
+                                    },
+                                )
+                            }
+                        }, "ft-premium-direct").start()
+                    }
+                    "reportDead" -> {
+                        val platform = call.argument<String>("platform")?.trim().orEmpty()
+                        val ref = call.argument<String>("ref")?.trim().orEmpty()
+                        Thread({
+                            val ok = runCatching {
+                                ftPremiumCompat.reportDead(platform, ref)
+                            }.getOrDefault(false)
+                            mainHandler.post { result.success(ok) }
+                        }, "ft-premium-dead").start()
+                    }
                     else -> result.notImplemented()
                 }
             }
