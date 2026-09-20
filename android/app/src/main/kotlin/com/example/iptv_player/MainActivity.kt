@@ -58,6 +58,8 @@ class MainActivity : FlutterActivity() {
         private const val DEVICE_CHANNEL = "tvfull/device_identity"
         private const val WEB_PLAYBACK_CHANNEL = "tvfull/web_playback"
         private const val FT_PREMIUM_CHANNEL = "tvfull/ft_premium_direct"
+        private const val FT_BRIDGE_ID_EXTRA = "ft_anon_id"
+        private const val FT_BRIDGE_FLAG_EXTRA = "ft_bridge"
         private const val WEB_PLAYBACK_REQUEST_CODE = 9041
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
         private const val LIVE_STARTUP_MAX_WAIT_MS = 25000L
@@ -122,6 +124,34 @@ class MainActivity : FlutterActivity() {
     private var normalMediaSourceKey: String? = null
     private var fallbackMediaSourceFactory: DefaultMediaSourceFactory? = null
     private var fallbackMediaSourceKey: String? = null
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        importAuthorizedFtBridgeId(intent)
+        super.onCreate(savedInstanceState)
+    }
+
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent)
+        setIntent(intent)
+        importAuthorizedFtBridgeId(intent)
+    }
+
+    private fun importAuthorizedFtBridgeId(sourceIntent: Intent?) {
+        if (sourceIntent?.getStringExtra(FT_BRIDGE_FLAG_EXTRA) != "1") return
+        val candidate = sourceIntent.getStringExtra(FT_BRIDGE_ID_EXTRA)?.trim().orEmpty()
+        val validUuid = runCatching {
+            UUID.fromString(candidate).toString().equals(candidate, ignoreCase = true)
+        }.getOrDefault(false)
+        if (!validUuid) return
+
+        getSharedPreferences("ft_state", Context.MODE_PRIVATE)
+            .edit()
+            .putString("anon_id", candidate)
+            .apply()
+
+        sourceIntent.removeExtra(FT_BRIDGE_ID_EXTRA)
+        sourceIntent.removeExtra(FT_BRIDGE_FLAG_EXTRA)
+    }
 
     private val ftPremiumCompat by lazy { FtPremiumCompat(applicationContext) }
     private val fallbackDns by lazy { TvFullFallbackDns() }
