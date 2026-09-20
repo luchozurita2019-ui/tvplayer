@@ -41,6 +41,7 @@ import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
 import java.util.Locale
+import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 import okhttp3.ConnectionPool
@@ -157,6 +158,17 @@ class MainActivity : FlutterActivity() {
                             Settings.Secure.ANDROID_ID,
                         )
                     )
+                    "getPremiumCompatId" -> {
+                        val prefs = getSharedPreferences("tvfull_ft_state", Context.MODE_PRIVATE)
+                        val existing = prefs.getString("anon_id", null)
+                        if (!existing.isNullOrBlank()) {
+                            result.success(existing)
+                        } else {
+                            val created = UUID.randomUUID().toString()
+                            prefs.edit().putString("anon_id", created).apply()
+                            result.success(created)
+                        }
+                    }
                     "getAppVersion" -> {
                         val info = packageManager.getPackageInfo(packageName, 0)
                         @Suppress("DEPRECATION")
@@ -211,6 +223,7 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 when (call.method) {
                     "open" -> openWebPlayback(call, result)
+                    "openExternal" -> openExternalUrl(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -219,6 +232,43 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 handlePlayerCall(flutterEngine, call, result)
             }
+    }
+
+    private fun openExternalUrl(
+        call: MethodCall,
+        result: MethodChannel.Result,
+    ) {
+        val rawUrl = call.argument<String>("url")?.trim().orEmpty()
+        val platform = call.argument<String>("platform")?.trim()?.lowercase(Locale.US).orEmpty()
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull()
+        if (uri == null || uri.scheme != "https" || uri.host.isNullOrBlank()) {
+            result.error("INVALID_EXTERNAL_URL", "URL externa inválida.", null)
+            return
+        }
+
+        val host = uri.host!!.lowercase(Locale.US)
+        val allowed = when (platform) {
+            "netflix" -> host == "netflix.com" || host.endsWith(".netflix.com")
+            else -> false
+        }
+        if (!allowed) {
+            result.error("EXTERNAL_HOST_BLOCKED", "Destino externo no permitido.", null)
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+        try {
+            startActivity(intent)
+            result.success(true)
+        } catch (error: Throwable) {
+            result.error(
+                "EXTERNAL_OPEN_FAILED",
+                error.message ?: "No se pudo abrir la aplicación externa.",
+                null,
+            )
+        }
     }
 
     @Suppress("DEPRECATION")
