@@ -197,7 +197,8 @@ class StreamingPremiumService {
 
     if (platform == 'hbomax' ||
         platform == 'prime' ||
-        platform == 'crunchyroll') {
+        platform == 'crunchyroll' ||
+        platform == 'netflix') {
       return _prepareDirectFt(
         platform,
         intento: intento,
@@ -385,7 +386,7 @@ class StreamingPremiumService {
             .map((cookie) => cookie.toJson())
             .toList(growable: false),
         'platform': platform,
-        'replacePlatformCookies': true,
+        'replacePlatformCookies': platform != 'netflix',
         // FT 3.6 conserva la sesión al salir y sólo limpia antes de
         // instalar una sesión nueva.
         'clearCookiesOnExit': false,
@@ -569,6 +570,8 @@ class StreamingPremiumService {
     }
 
     onStage?.call(StreamingPremiumStage.validatingSession);
+    final mode =
+        data['mode']?.toString().trim().toLowerCase() ?? 'webview';
     final url = data['url']?.toString().trim() ?? '';
     final uri = Uri.tryParse(url);
     if (uri == null || uri.scheme != 'https' || uri.host.isEmpty) {
@@ -587,15 +590,19 @@ class StreamingPremiumService {
         cookies.add(cookie);
       }
     }
-    if (cookies.isEmpty) {
+    if (cookies.isEmpty && mode != 'netflix_handoff') {
       throw const FormatException('FT no entregó cookies de sesión.');
     }
 
+    final normalizedCookies = mode == 'netflix_handoff'
+        ? const <StreamingPremiumCookie>[]
+        : _normalizeFtCookies(platform, cookies);
+
     final session = StreamingPremiumSession(
       platform: data['platform']?.toString() ?? platform,
-      mode: 'webview',
+      mode: mode,
       url: url,
-      cookies: List.unmodifiable(_normalizeFtCookies(platform, cookies)),
+      cookies: List.unmodifiable(normalizedCookies),
       shared: data['shared'] == true,
       ref: data['ref']?.toString().trim() ?? '',
     );
