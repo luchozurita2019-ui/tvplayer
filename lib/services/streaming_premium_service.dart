@@ -107,6 +107,10 @@ class StreamingPremiumUnavailableException implements Exception {
         return 'Ese token PRO no está activado o fue rechazado por el servidor.';
       case 'pro_pending':
         return 'El servidor aceptó el token, pero todavía no devolvió pro=1.';
+      case 'pro_needs_owner_activation':
+        return detail.isEmpty
+            ? 'Este dispositivo todavía no está activo como PRO.'
+            : 'Rafael debe activar este token PRO de instalación: $detail';
       case 'free_without_session':
       case 'no_session':
         return detail.isEmpty
@@ -471,9 +475,23 @@ class StreamingPremiumService {
     } catch (_) {}
 
     if (response.statusCode != 200 || data['activated'] != true) {
+      final explicitStatus = data['status']?.toString().trim() ?? '';
       final rawError = data['error']?.toString().trim() ?? '';
-      final status =
-          rawError.isNotEmpty ? rawError : 'pro_activation_failed';
+      final status = explicitStatus.isNotEmpty
+          ? explicitStatus
+          : rawError.isNotEmpty
+              ? rawError
+              : 'pro_activation_failed';
+
+      if (status == 'pro_needs_owner_activation') {
+        final token =
+            data['installation_token']?.toString().trim() ?? '';
+        throw StreamingPremiumUnavailableException(
+          status,
+          token,
+        );
+      }
+
       final stage = data['stage']?.toString().trim() ?? '';
       final parts = <String>[];
       if (stage.isNotEmpty) parts.add('etapa=$stage');
