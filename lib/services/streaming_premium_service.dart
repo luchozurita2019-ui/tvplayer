@@ -264,9 +264,23 @@ class StreamingPremiumService {
     }
 
     if (response.statusCode != 200) {
-      throw Exception(
-        'No se pudo preparar Streaming Premium (HTTP ${response.statusCode}).',
-      );
+      var status = 'http_${response.statusCode}';
+      var detail = '';
+      try {
+        final decoded = jsonDecode(response.body);
+        if (decoded is Map) {
+          status = decoded['status']?.toString() ??
+              decoded['error']?.toString() ??
+              status;
+          final stage = decoded['stage']?.toString().trim() ?? '';
+          final backendDetail = decoded['detail']?.toString().trim() ?? '';
+          final parts = <String>[];
+          if (stage.isNotEmpty) parts.add('etapa=$stage');
+          if (backendDetail.isNotEmpty) parts.add(backendDetail);
+          detail = parts.join(' · ');
+        }
+      } catch (_) {}
+      throw StreamingPremiumUnavailableException(status, detail);
     }
 
     onStage?.call(StreamingPremiumStage.validatingSession);
