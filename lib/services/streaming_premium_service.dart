@@ -204,8 +204,7 @@ class StreamingPremiumService {
 
     if (platform == 'hbomax' ||
         platform == 'prime' ||
-        platform == 'crunchyroll' ||
-        platform == 'netflix') {
+        platform == 'crunchyroll') {
       return _prepareDirectFt(
         platform,
         intento: intento,
@@ -286,7 +285,9 @@ class StreamingPremiumService {
 
     final mode = data['mode']?.toString().trim().toLowerCase() ?? 'webview';
     var url = data['url']?.toString().trim() ?? '';
-    if (mode == 'external' && platform == 'netflix') {
+    final isExternalHandoff =
+        mode == 'external' || mode == 'netflix_handoff';
+    if (isExternalHandoff && platform == 'netflix') {
       final preferred = _androidTv
           ? data['tv_url']?.toString().trim()
           : data['phone_url']?.toString().trim();
@@ -299,7 +300,7 @@ class StreamingPremiumService {
     if (uri == null || uri.scheme != 'https' || uri.host.trim().isEmpty) {
       throw const FormatException('URL Streaming Premium inválida.');
     }
-    if (mode == 'external' &&
+    if (isExternalHandoff &&
         platform == 'netflix' &&
         !(uri.host == 'netflix.com' || uri.host.endsWith('.netflix.com'))) {
       throw const FormatException('Destino externo de Netflix inválido.');
@@ -321,14 +322,15 @@ class StreamingPremiumService {
       }
     }
 
-    if (mode != 'external' && cookies.isEmpty) {
+    if (!isExternalHandoff && cookies.isEmpty) {
       throw const FormatException(
         'La sesión compartida no contiene cookies válidas.',
       );
     }
 
-    final normalizedCookies =
-        mode == 'external' ? cookies : _normalizeFtCookies(platform, cookies);
+    final normalizedCookies = isExternalHandoff
+        ? cookies
+        : _normalizeFtCookies(platform, cookies);
 
     final session = StreamingPremiumSession(
       platform: data['platform']?.toString() ?? platform,
@@ -352,12 +354,12 @@ class StreamingPremiumService {
     required int intento,
     StreamingPremiumStageCallback? onStage,
   }) async {
-    final session = await _prepareDirectFt(
+    final session = await prepare(
       'netflix',
       intento: intento,
       onStage: onStage,
     );
-    if (session.mode != 'netflix_handoff' ||
+    if (!session.isExternal ||
         session.phoneUrl.isEmpty ||
         session.tvUrl.isEmpty) {
       throw const StreamingPremiumUnavailableException(
