@@ -59,20 +59,25 @@ o0.write_text(text, encoding="utf-8")
 # 2) Preserve Rafael's original public certificate digest for the native Guard
 # while the authorized test APK is re-signed with TV FULL's test key.
 main_text = main.read_text(encoding="utf-8")
-needle = "    sput-object v0, Lcom/byrafael/streamapp/Guard;->b:[B\n"
-idx = main_text.find(needle)
-if idx < 0:
-    raise SystemExit("Guard certificate assignment not found")
-override = (
-    needle
-    + "\n"
-    + "    const-string v0, \"UXGOPSg0is9y/Fejlby58bGp/mO8H8+j9BuOi0A8rb4=\"\n"
-    + "    const/4 v14, 0x2\n"
-    + "    invoke-static {v0, v14}, Landroid/util/Base64;->decode(Ljava/lang/String;I)[B\n"
-    + "    move-result-object v0\n"
-    + "    sput-object v0, Lcom/byrafael/streamapp/Guard;->b:[B\n"
+guard_pattern = re.compile(
+    r"(?m)^(?P<indent>\\s*)sput-object\\s+(?P<reg>[vp]\\d+),\\s*"
+    r"Lcom/byrafael/streamapp/Guard;->b:\\[B\\s*$"
 )
-main_text = main_text[:idx] + main_text[idx:].replace(needle, override, 1)
+gm = guard_pattern.search(main_text)
+if not gm:
+    raise SystemExit("Guard certificate assignment not found")
+indent = gm.group("indent")
+reg = gm.group("reg")
+override = (
+    gm.group(0)
+    + "\n\n"
+    + indent + f"const-string {reg}, \"UXGOPSg0is9y/Fejlby58bGp/mO8H8+j9BuOi0A8rb4=\"\n"
+    + indent + "const/4 v14, 0x2\n"
+    + indent + f"invoke-static {{{reg}, v14}}, Landroid/util/Base64;->decode(Ljava/lang/String;I)[B\n"
+    + indent + f"move-result-object {reg}\n"
+    + indent + f"sput-object {reg}, Lcom/byrafael/streamapp/Guard;->b:[B"
+)
+main_text = main_text[:gm.start()] + override + main_text[gm.end():]
 
 # 3) Bridge preparation runs immediately after Activity.onCreate super-call.
 oncreate_pattern = re.compile(
