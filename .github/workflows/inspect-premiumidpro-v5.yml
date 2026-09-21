@@ -56,6 +56,20 @@ jobs:
               | head -n 3000
           } > artifact/integration-report.txt
 
+          mkdir -p artifact/smali
+          for src in \
+            /tmp/pid/smali/com/premium/id/pro/MainActivity.smali \
+            /tmp/pid/smali/K.smali \
+            /tmp/pid/smali/Q.smali \
+            /tmp/pid/smali/A.smali \
+            /tmp/pid/smali/o.smali \
+            /tmp/pid/smali/p.smali \
+            /tmp/pid/smali/a.smali; do
+            if [ -f "$src" ]; then
+              cp "$src" artifact/smali/
+            fi
+          done
+
       - name: Upload inspection
         uses: actions/upload-artifact@v4
         with:
