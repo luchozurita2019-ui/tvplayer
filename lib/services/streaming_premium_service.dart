@@ -97,8 +97,14 @@ class StreamingPremiumUnavailableException implements Exception {
       case 'disabled':
         return 'La plataforma está deshabilitada temporalmente.';
       case 'netflix_no_account':
-        return 'No hay cuentas de Netflix disponibles ahora mismo. '
+        return 'No hay un acceso temporal de Netflix disponible ahora mismo. '
             'Probá de nuevo en un rato.';
+      case 'test_not_activated':
+        return 'El servidor todavía no marcó este cliente de prueba como activado.';
+      case 'netflix_handoff_required':
+        return detail.isEmpty
+            ? 'El servidor de prueba no entregó el acceso temporal de Netflix.'
+            : 'El servidor de prueba no entregó el acceso temporal de Netflix. $detail';
       case 'free_without_session':
       case 'no_session':
         return detail.isEmpty
@@ -352,19 +358,50 @@ class StreamingPremiumService {
     required int intento,
     StreamingPremiumStageCallback? onStage,
   }) async {
-    final session = await _prepareDirectFt(
-      'netflix',
-      intento: intento,
-      onStage: onStage,
+    onStage?.call(StreamingPremiumStage.requestingSession);
+    final raw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      'prepareNetflixHandoff',
+      <String, dynamic>{'intento': intento},
     );
-    if (session.mode != 'netflix_handoff' ||
-        session.phoneUrl.isEmpty ||
-        session.tvUrl.isEmpty) {
-      throw const StreamingPremiumUnavailableException(
-        'netflix_handoff_failed',
+    if (raw is! Map) {
+      throw const FormatException('Respuesta Netflix de prueba inválida.');
+    }
+
+    final data = Map<String, dynamic>.from(raw);
+    if (data['available'] != true) {
+      throw StreamingPremiumUnavailableException(
+        data['status']?.toString() ?? 'netflix_handoff_required',
+        data['detail']?.toString().trim() ?? '',
       );
     }
-    return session;
+
+    final phoneUrl = data['phone_url']?.toString().trim() ?? '';
+    final tvUrl = data['tv_url']?.toString().trim() ?? '';
+    final preferred = _androidTv ? tvUrl : phoneUrl;
+    final phoneUri = Uri.tryParse(phoneUrl);
+    final tvUri = Uri.tryParse(tvUrl);
+
+    bool validNetflixUri(Uri? uri) =>
+        uri != null &&
+        uri.scheme == 'https' &&
+        (uri.host == 'netflix.com' || uri.host.endsWith('.netflix.com'));
+
+    if (!validNetflixUri(phoneUri) || !validNetflixUri(tvUri)) {
+      throw const FormatException(
+        'El servidor entregó un handoff de Netflix inválido.',
+      );
+    }
+
+    return StreamingPremiumSession(
+      platform: 'netflix',
+      mode: 'netflix_handoff',
+      url: preferred,
+      cookies: const <StreamingPremiumCookie>[],
+      shared: data['shared'] == true,
+      ref: data['ref']?.toString().trim() ?? '',
+      phoneUrl: phoneUrl,
+      tvUrl: tvUrl,
+    );
   }
 
   Future<void> openNetflixGeneratedUrl(String url) async {
