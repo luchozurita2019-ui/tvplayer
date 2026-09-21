@@ -407,36 +407,19 @@ class StreamingPremiumService {
   }) async {
     onStage?.call(StreamingPremiumStage.authenticating);
 
-    final authRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
-      'authorizeTestSession',
-    );
-    if (authRaw is! Map) {
-      throw const StreamingPremiumUnavailableException(
-        'activation_failed',
-        'respuesta de sesión de prueba inválida',
-      );
+    // La prueba autorizada debe entrar como cliente ya activo.
+    // No abrimos anuncios ni registro: primero exigimos pro=1 real
+    // confirmado por el Worker para este mismo anon_id.
+    final proState = await getFtProState();
+    if (proState['pro'] != true) {
+      throw const StreamingPremiumUnavailableException('pro_required');
     }
 
-    final auth = Map<String, dynamic>.from(authRaw);
-    if (auth['completed'] != true) {
-      final status =
-          auth['status']?.toString().trim() ?? 'activation_failed';
-      final stage = auth['stage']?.toString().trim() ?? '';
-      final rounds = auth['rounds'];
-      final detail = auth['detail']?.toString().trim() ?? '';
-      final parts = <String>[];
-      if (stage.isNotEmpty) parts.add('etapa=$stage');
-      if (rounds is num) parts.add('rondas=${rounds.toInt()}');
-      if (detail.isNotEmpty) parts.add(detail);
-      throw StreamingPremiumUnavailableException(
-        status,
-        parts.join(' · '),
-      );
-    }
+    _sessionCache.remove('netflix');
 
-    // El Worker de Rafael ya confirmó el cliente de prueba.
-    // Recién ahora pedimos /plat/get y el handoff temporal de Netflix.
-    final session = await prepare(
+    // Una vez activo, Netflix sigue el recorrido de FT 3.6 desde la TV:
+    // /sesion y /plat/get salen del mismo dispositivo y anon_id.
+    final session = await _prepareDirectFt(
       'netflix',
       intento: intento,
       onStage: onStage,
