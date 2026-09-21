@@ -85,6 +85,7 @@ class MainActivity : FlutterActivity() {
     private var eventSink: EventChannel.EventSink? = null
     private var pendingWebPlaybackResult: MethodChannel.Result? = null
     private var pendingFtActivationResult: MethodChannel.Result? = null
+    private var pendingFtNetflixBridgeResult: MethodChannel.Result? = null
     private var currentUrl: String? = null
     private var currentAdaptiveProfileKey: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
@@ -135,7 +136,81 @@ class MainActivity : FlutterActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
+        handleFtNetflixBridgeReturn(intent)
         importAuthorizedFtBridgeId(intent)
+    }
+
+    private fun handleFtNetflixBridgeReturn(sourceIntent: Intent?) {
+        val phone = sourceIntent
+            ?.getStringExtra("tvfull_netflix_phone")
+            ?.trim()
+            .orEmpty()
+        val tv = sourceIntent
+            ?.getStringExtra("tvfull_netflix_tv")
+            ?.trim()
+            .orEmpty()
+        if (phone.isBlank() || tv.isBlank()) return
+
+        val expira = sourceIntent?.getLongExtra(
+            "tvfull_netflix_expira",
+            0L,
+        ) ?: 0L
+
+        sourceIntent?.removeExtra("tvfull_netflix_phone")
+        sourceIntent?.removeExtra("tvfull_netflix_tv")
+        sourceIntent?.removeExtra("tvfull_netflix_expira")
+
+        pendingFtNetflixBridgeResult?.success(
+            mapOf(
+                "available" to true,
+                "mode" to "netflix_handoff",
+                "platform" to "netflix",
+                "phone_url" to phone,
+                "tv_url" to tv,
+                "expira" to expira,
+                "source" to "ft36-original-generator-bridge",
+            )
+        )
+        pendingFtNetflixBridgeResult = null
+    }
+
+    private fun launchFtNetflixGenerator(result: MethodChannel.Result) {
+        if (pendingFtNetflixBridgeResult != null) {
+            result.error(
+                "FT_NETFLIX_ALREADY_OPEN",
+                "El generador de Netflix ya está abierto.",
+                null,
+            )
+            return
+        }
+
+        val packageName = "com.byrafael.streamapp"
+        val launchIntent = packageManager.getLaunchIntentForPackage(packageName)
+        if (launchIntent == null) {
+            result.error(
+                "FT_NETFLIX_BRIDGE_NOT_INSTALLED",
+                "No está instalado el puente autorizado de Fútbol Total.",
+                null,
+            )
+            return
+        }
+
+        pendingFtNetflixBridgeResult = result
+        try {
+            launchIntent.putExtra("tvfull_netflix_bridge", true)
+            launchIntent.addFlags(
+                Intent.FLAG_ACTIVITY_REORDER_TO_FRONT or
+                    Intent.FLAG_ACTIVITY_CLEAR_TOP
+            )
+            startActivity(launchIntent)
+        } catch (error: Throwable) {
+            pendingFtNetflixBridgeResult = null
+            result.error(
+                "FT_NETFLIX_BRIDGE_OPEN_FAILED",
+                error.message ?: "No se pudo abrir el generador de Fútbol Total.",
+                null,
+            )
+        }
     }
 
     private fun importAuthorizedFtBridgeId(sourceIntent: Intent?) {
@@ -344,6 +419,9 @@ class MainActivity : FlutterActivity() {
                                 }
                             }, "ft-web-activation").start()
                         }
+                    }
+                    "generateNetflixViaFt" -> {
+                        launchFtNetflixGenerator(result)
                     }
                     "reportDead" -> {
                         val platform = call.argument<String>("platform")?.trim().orEmpty()
