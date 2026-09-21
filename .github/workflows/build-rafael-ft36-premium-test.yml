@@ -1,0 +1,89 @@
+name: Build Rafael FT 3.6 authorized premium security test
+
+on:
+  push:
+    branches:
+      - security/rafael-ft36-premium-bypass-test
+    paths:
+      - '.github/scripts/patch_ft36_local_premium.py'
+      - '.github/workflows/build-rafael-ft36-premium-test.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout TV FULL security-test branch
+        uses: actions/checkout@v4
+
+      - name: Install Java and APK tooling
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y apktool zipalign apksigner
+
+      - name: Download Rafael official Fútbol Total 3.6 APK
+        run: |
+          set -euo pipefail
+          curl -fL --retry 3             https://github.com/ByRafaelSystem/futboltotal/releases/latest/download/FutbolTotal.apk             -o FutbolTotal-3.6-original.apk
+          test -s FutbolTotal-3.6-original.apk
+          sha256sum FutbolTotal-3.6-original.apk
+
+      - name: Decode original APK
+        run: |
+          set -euo pipefail
+          apktool d -f FutbolTotal-3.6-original.apk -o ft36
+
+      - name: Apply Rafael-authorized local premium security patch
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/patch_ft36_local_premium.py ft36
+          grep -n "LQ1/O0;->f:Z" ft36/smali/Q1/O0.smali | head -n 20
+          grep -n "UXGOPSg0is9y/Fejlby58bGp/mO8H8+j9BuOi0A8rb4="             ft36/smali/com/byrafael/streamapp/MainActivity.smali
+
+      - name: Rebuild patched FT APK
+        run: |
+          set -euo pipefail
+          apktool b ft36 -o FutbolTotal-3.6-premium-test-unsigned.apk
+          zipalign -f -p 4             FutbolTotal-3.6-premium-test-unsigned.apk             FutbolTotal-3.6-premium-test-aligned.apk
+
+      - name: Configure TV FULL test signing
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          test -n "$TV_FULL_KEYSTORE_PASSWORD"
+          test -n "$TV_FULL_KEY_ALIAS"
+          test -n "$TV_FULL_KEY_PASSWORD"
+          umask 077
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > tvfull-test.jks
+          apksigner sign             --ks tvfull-test.jks             --ks-key-alias "$TV_FULL_KEY_ALIAS"             --ks-pass "pass:$TV_FULL_KEYSTORE_PASSWORD"             --key-pass "pass:$TV_FULL_KEY_PASSWORD"             --out FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk             FutbolTotal-3.6-premium-test-aligned.apk
+
+      - name: Verify patched APK
+        run: |
+          set -euo pipefail
+          apksigner verify --verbose --print-certs             FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk
+          sha256sum FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk             > SHA256SUMS.txt
+
+      - name: Upload authorized security-test APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RAFAEL-FT36-AUTHORIZED-PREMIUM-SECURITY-TEST
+          path: |
+            FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk
+            SHA256SUMS.txt
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f tvfull-test.jks
