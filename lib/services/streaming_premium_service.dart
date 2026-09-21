@@ -416,6 +416,19 @@ class StreamingPremiumService {
     await openOfficial(platform, onStage: onStage);
   }
 
+  Future<Map<String, dynamic>> openRafaelPremiumHelper() async {
+    final raw = await _webPlayback.invokeMethod<dynamic>(
+      'openRafaelPremiumHelper',
+    );
+    if (raw is Map) {
+      return Map<String, dynamic>.from(raw);
+    }
+    return const <String, dynamic>{
+      'opened': false,
+      'installed': false,
+    };
+  }
+
   Future<void> openOfficial(
     String platform, {
     StreamingPremiumStageCallback? onStage,
