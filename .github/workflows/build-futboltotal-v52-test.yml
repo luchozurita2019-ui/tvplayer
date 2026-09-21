@@ -1,9 +1,9 @@
-name: Build TV FULL V89 no FT ads hotfix
+name: Build TV FULL V90 Netflix Rafael handoff
 
 on:
   push:
     branches:
-      - hotfix/v76-tvfull-no-ft-ads
+      - feature/v90-netflix-rafael-handoff
     paths:
       - 'lib/**'
       - 'android/**'
@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.57'
-  BUILD_NUMBER: '3089'
+  BUILD_NAME: '1.4.58'
+  BUILD_NUMBER: '3090'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
   DYNAMIC_CONFIG: '{"name":"Lista TV 3","server":"https://ghsoudpjlnjmhiragkrm.supabase.co","resolver":{"path":"/functions/v1/tvf-lista3-resolve","method":"POST","timeoutMs":18000,"form":{"id":"{id}","channelCode":"{id}","name":"{name}","playCode":"{path}","path":"{path}","androidId":"{androidId}","device":"{androidId}","globalIndex":"{globalIndex}"}}}'
 
@@ -95,7 +95,7 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed ARM32 and ARM64 V89 no FT ads hotfix APKs
+      - name: Build signed ARM32 and ARM64 V90 Netflix Rafael handoff APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -111,8 +111,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V89-NO-FT-ADS-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V89-NO-FT-ADS-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V90-NETFLIX-RAFAEL-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V90-NETFLIX-RAFAEL-ARM64.apk
           cp CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt artifact/CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt
           sha256sum artifact/*.apk > artifact/SHA256SUMS.txt
 
@@ -121,37 +121,37 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
 
-          for APK in artifact/TV-FULL-PRO-V89-NO-FT-ADS-ARM32.apk artifact/TV-FULL-PRO-V89-NO-FT-ADS-ARM64.apk; do
+          for APK in artifact/TV-FULL-PRO-V90-NETFLIX-RAFAEL-ARM32.apk artifact/TV-FULL-PRO-V90-NETFLIX-RAFAEL-ARM64.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$APK.signature.txt"
             EXPECTED="$(printf '%s' "$CERT_SHA256" | tr '[:upper:]' '[:lower:]')"
             grep -Fqi "certificate SHA-256 digest: $EXPECTED" "$APK.signature.txt"
 
             "$AAPT" dump badging "$APK" | tee "$APK.badging.txt"
             grep -Fq "package: name='com.tvfull.pro.tv.v10safe'" "$APK.badging.txt"
-            grep -Fq "versionCode='3089'" "$APK.badging.txt"
-            grep -Fq "versionName='1.4.57'" "$APK.badging.txt"
+            grep -Fq "versionCode='3090'" "$APK.badging.txt"
+            grep -Fq "versionName='1.4.58'" "$APK.badging.txt"
           done
 
-      - name: Publish isolated V89 no FT ads hotfix release
+      - name: Publish isolated V90 Netflix Rafael handoff release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v89-no-ft-ads-hotfix"
+          TAG="tv-full-pro-v90-netflix-rafael-handoff"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V89-NO-FT-ADS-ARM32.apk \
-            artifact/TV-FULL-PRO-V89-NO-FT-ADS-ARM64.apk \
+            artifact/TV-FULL-PRO-V90-NETFLIX-RAFAEL-ARM32.apk \
+            artifact/TV-FULL-PRO-V90-NETFLIX-RAFAEL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.44+3076 - V89 no FT ads hotfix test" \
-            --notes "Hotfix basado en V76. TV FULL ya no solicita sesiones publicitarias de Fútbol Total: fuerza quiero=0 e ignora cualquier vast/ad devuelto por el Worker. Mantiene MAX/Prime/Crunchyroll y el resto de V76 sin cambios. No se publica en ningún Installer."
+            --title "TV FULL PRO 1.4.44+3076 - V90 Netflix Rafael handoff test" \
+            --notes "V90 basada en V76/V89. Netflix ahora usa handoff al generador oficial de Rafael (Premium ID PRO): si está instalado lo abre directamente; si no, abre su release oficial. TV FULL sigue sin solicitar ni consumir publicidad FT. MAX/Prime/Crunchyroll quedan sin cambios. No se publica en ningún Installer."
 
       - name: Upload V76 signed test bundle
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V89-NO-FT-ADS-TEST
+          name: TV-FULL-PRO-V90-NETFLIX-RAFAEL-TEST
           path: artifact/
           if-no-files-found: error
           retention-days: 14
