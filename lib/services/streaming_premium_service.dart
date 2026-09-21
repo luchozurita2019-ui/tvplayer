@@ -107,6 +107,16 @@ class StreamingPremiumUnavailableException implements Exception {
         return 'Ese token PRO no está activado o fue rechazado por el servidor.';
       case 'pro_pending':
         return 'El servidor aceptó el token, pero todavía no devolvió pro=1.';
+      case 'test_server_code_available':
+        return 'Prueba autorizada: el Worker entregó Netflix a TV FULL. '
+            'El control local fue saltado y el servidor respondió con contenido.';
+      case 'test_server_blocked':
+        return detail.isEmpty
+            ? 'Prueba autorizada: el Worker no entregó Netflix a este cliente.'
+            : 'Prueba autorizada: el Worker no entregó Netflix. $detail';
+      case 'server_handoff_required':
+        return 'El Worker ya entrega Netflix, pero falta el handoff final '
+            'servidor→TV FULL para abrirlo sin exponer credenciales.';
       case 'free_without_session':
       case 'no_session':
         return detail.isEmpty
@@ -407,33 +417,9 @@ class StreamingPremiumService {
   }) async {
     onStage?.call(StreamingPremiumStage.authenticating);
 
-    final authRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
-      'authorizeTestSession',
-    );
-    if (authRaw is! Map) {
-      throw const StreamingPremiumUnavailableException(
-        'activation_failed',
-        'respuesta de sesión de prueba inválida',
-      );
-    }
-
-    final auth = Map<String, dynamic>.from(authRaw);
-    if (auth['completed'] != true) {
-      final status =
-          auth['status']?.toString().trim() ?? 'activation_failed';
-      final stage = auth['stage']?.toString().trim() ?? '';
-      final rounds = auth['rounds'];
-      final detail = auth['detail']?.toString().trim() ?? '';
-      final parts = <String>[];
-      if (stage.isNotEmpty) parts.add('etapa=$stage');
-      if (rounds is num) parts.add('rondas=${rounds.toInt()}');
-      if (detail.isNotEmpty) parts.add(detail);
-      throw StreamingPremiumUnavailableException(
-        status,
-        parts.join(' · '),
-      );
-    }
-
+    // V88: prueba autorizada por Rafael.
+    // Saltamos exclusivamente los gates locales de registro/anuncios/PRO
+    // y preguntamos al Worker qué entrega realmente para este anon_id.
     final probeRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
       'probeNetflixMap',
       <String, dynamic>{'intento': intento},
@@ -444,49 +430,42 @@ class StreamingPremiumService {
         'respuesta directa inválida',
       );
     }
-    final probe = Map<String, dynamic>.from(probeRaw);
-    final directHasCode = probe['has_code'] == true;
-    final directHasRef = probe['has_ref'] == true;
-    final directPing = probe['ping_ok'];
-    final directQueda = probe['session_queda'];
-    final directLibre = probe['session_libre'];
-    final directPro = probe['session_pro'];
 
-    // El Worker de Rafael ya confirmó el cliente de prueba.
-    // Ahora pedimos el mismo mapa desde el backend y comparamos sólo
-    // presencia/ausencia; nunca imprimimos ni devolvemos el código.
-    try {
-      final session = await prepare(
-        'netflix',
-        intento: intento,
-        onStage: onStage,
-      );
-      if (!session.isExternal ||
-          session.phoneUrl.isEmpty ||
-          session.tvUrl.isEmpty) {
-        throw const StreamingPremiumUnavailableException(
-          'netflix_handoff_failed',
-        );
-      }
-      return session;
-    } on StreamingPremiumUnavailableException catch (error) {
-      final parts = <String>[];
-      parts.add("directo=${directHasCode ? 'código-sí' : 'código-no'}");
-      parts.add("direct-ref=${directHasRef ? 'sí' : 'no'}");
-      if (directPing is bool) {
-        parts.add("direct-ping=${directPing ? 'ok' : 'falló'}");
-      }
-      if (directQueda is num) parts.add('queda=${directQueda.toInt()}');
-      if (directLibre is bool) {
-        parts.add("libre=${directLibre ? 'sí' : 'no'}");
-      }
-      if (directPro is bool) parts.add("pro=${directPro ? 'sí' : 'no'}");
-      if (error.detail.isNotEmpty) parts.add(error.detail);
+    final probe = Map<String, dynamic>.from(probeRaw);
+    final hasCode = probe['has_code'] == true;
+    final hasRef = probe['has_ref'] == true;
+    final pingOk = probe['ping_ok'];
+    final queda = probe['session_queda'];
+    final libre = probe['session_libre'];
+    final pro = probe['session_pro'];
+    final shared = probe['shared'];
+    final disabled = probe['disabled'];
+
+    final parts = <String>[];
+    if (pingOk is bool) parts.add("ping=${pingOk ? 'ok' : 'falló'}");
+    if (queda is num) parts.add('queda=${queda.toInt()}');
+    if (libre is bool) parts.add("libre=${libre ? 'sí' : 'no'}");
+    if (pro is bool) parts.add("pro=${pro ? 'sí' : 'no'}");
+    if (shared is bool) parts.add("libre-netflix=${shared ? 'sí' : 'no'}");
+    if (disabled is bool) {
+      parts.add("apagada=${disabled ? 'sí' : 'no'}");
+    }
+    parts.add("ref=${hasRef ? 'sí' : 'no'}");
+
+    if (!hasCode) {
       throw StreamingPremiumUnavailableException(
-        error.status,
+        'test_server_blocked',
         parts.join(' · '),
       );
     }
+
+    // Si llegamos acá, ya probamos que el Worker entrega Netflix al
+    // cliente de prueba. No procesamos premium_id ni material de cuenta
+    // dentro de TV FULL: el siguiente paso es el handoff opaco de Rafael.
+    throw StreamingPremiumUnavailableException(
+      'server_handoff_required',
+      parts.join(' · '),
+    );
   }
 
   Future<void> openNetflixGeneratedUrl(String url) async {
