@@ -11,6 +11,8 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLDecoder
+import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
@@ -20,6 +22,12 @@ internal class FtPremiumCompat(private val context: Context) {
         private const val FT_VERSION_CODE = 26
         private const val FT_UA = "FT-PRO/1.0"
         private const val PRIMARY = "https://novax-online.iptvnovax.workers.dev"
+        private const val NETFLIX_APP_VERSION = "15.48.1"
+        private const val NETFLIX_IOS_VERSION = "15.8.5"
+        private const val NETFLIX_ESN =
+            "NFAPPL-02-IPHONE8%3D1-PXA-02026U9VV5O8AUKEAEO8PUJETCGDD4PQRI9DEB3MDLEMD0EACM4CS78LMD334MN3MQ3NMJ8SU9O9MVGS6BJCURM1PH1MUTGDPF4S4200"
+        private const val NETFLIX_CONFIG =
+            "{\"gamesInTrailersEnabled\":\"false\",\"isTrailersEvidenceEnabled\":\"false\",\"cdsMyListSortEnabled\":\"true\",\"kidsBillboardEnabled\":\"true\",\"addHorizontalBoxArtToVideoSummariesEnabled\":\"false\",\"skOverlayTestEnabled\":\"false\",\"homeFeedTestTVMovieListsEnabled\":\"false\",\"baselineOnIpadEnabled\":\"true\",\"trailersVideoIdLoggingFixEnabled\":\"true\",\"postPlayPreviewsEnabled\":\"false\",\"bypassContextualAssetsEnabled\":\"false\",\"roarEnabled\":\"false\",\"useSeason1AltLabelEnabled\":\"false\",\"disableCDSSearchPaginationSectionKinds\":[\"searchVideoCarousel\"],\"cdsSearchHorizontalPaginationEnabled\":\"true\",\"searchPreQueryGamesEnabled\":\"true\",\"kidsMyListEnabled\":\"true\",\"billboardEnabled\":\"true\",\"useCDSGalleryEnabled\":\"true\",\"contentWarningEnabled\":\"true\",\"videosInPopularGamesEnabled\":\"true\",\"avifFormatEnabled\":\"false\",\"sharksEnabled\":\"true\"}"
 
         // SHA-256 del certificado público de la APK FT 3.6 autorizada por Rafael.
         // No es una clave privada ni una credencial de usuario.
@@ -48,10 +56,20 @@ internal class FtPremiumCompat(private val context: Context) {
                 ".crunchyroll.com",
                 emptyList(),
             ),
+            "netflix" to PlatformConfig(
+                "https://www.netflix.com/",
+                ".netflix.com",
+                emptyList(),
+            ),
         )
     }
 
     private val certDigest = hexToBytes(FT_CERT_SHA256)
+    private val premiumMapLock = Any()
+    @Volatile private var premiumMapCache: JSONObject? = null
+    @Volatile private var premiumMapFetchedAtMs: Long = 0L
+    private val premiumMapCacheTtlMs = 15 * 60 * 1000L
+
 
     init {
         Guard.b = certDigest
@@ -71,68 +89,23 @@ internal class FtPremiumCompat(private val context: Context) {
 
         val id = getAnonId()
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
-        var session = runCatching { ensureFtSession(id, wantAd = false) }
-            .getOrElse {
-                FtSessionState(
-                    ok = false,
-                    httpStatus = -1,
-                    queda = 0,
-                    libre = false,
-                    pro = false,
-                    sessionToken = "",
-                    vastUrl = "",
-                    fallbackAdUrl = "",
-                    detail = it.message.orEmpty(),
-                )
-            }
-
-        if (session.ok &&
-            session.queda <= 0 &&
-            !session.libre &&
-            !session.pro
-        ) {
-            val activationSession = runCatching {
-                ensureFtSession(id, wantAd = true)
-            }.getOrElse {
-                FtSessionState(
-                    ok = false,
-                    httpStatus = -1,
-                    queda = 0,
-                    libre = false,
-                    pro = false,
-                    sessionToken = "",
-                    vastUrl = "",
-                    fallbackAdUrl = "",
-                    detail = it.message.orEmpty(),
-                )
-            }
-            session = activationSession
-
-            if (session.queda <= 0 && !session.libre && !session.pro) {
-                val mode = when {
-                    session.fallbackAdUrl.isNotBlank() -> "web"
-                    session.vastUrl.isNotBlank() -> "vast"
-                    else -> "none"
-                }
-                return mapOf(
-                    "available" to false,
-                    "status" to "activation_required",
-                    "stage" to "activation",
-                    "activation_mode" to mode,
-                    "ping_ok" to pingOk,
-                    "session_ok" to session.ok,
-                    "session_http" to session.httpStatus,
-                    "session_queda" to session.queda,
-                    "session_libre" to session.libre,
-                    "session_pro" to session.pro,
-                    "session_token" to session.hasToken,
-                    "detail" to when (mode) {
-                        "web" -> "activación web disponible"
-                        "vast" -> "activación de video disponible"
-                        else -> session.detail.ifBlank { "sin método de activación" }
-                    },
-                )
-            }
+        val session = ensureAuthorizedSession(id)
+        if (!sessionAuthorized(session)) {
+            return mapOf(
+                "available" to false,
+                "status" to "activation_failed",
+                "stage" to "activation_authorized",
+                "ping_ok" to pingOk,
+                "session_ok" to session.ok,
+                "session_http" to session.httpStatus,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+                "session_token" to session.hasToken,
+                "detail" to session.detail.ifBlank {
+                    "el servidor no confirmó el modo de prueba activado"
+                },
+            )
         }
 
         val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
@@ -149,7 +122,7 @@ internal class FtPremiumCompat(private val context: Context) {
             )
         }
 
-        val map = runCatching { fetchMap(id, sig, intento) }.getOrElse { error ->
+        val map = runCatching { fetchMapCached(id, sig, intento) }.getOrElse { error ->
             return mapOf(
                 "available" to false,
                 "status" to "map_failed",
@@ -187,6 +160,16 @@ internal class FtPremiumCompat(private val context: Context) {
             .orEmpty()
 
         if (!rawCode.startsWith("premium_id:")) {
+            if (key == "netflix") {
+                return mapOf(
+                    "available" to false,
+                    "status" to "netflix_no_account",
+                    "stage" to "netflix_map",
+                    "ping_ok" to pingOk,
+                    "intento" to intento,
+                    "shared" to shared,
+                )
+            }
             return mapOf(
                 "available" to false,
                 "status" to if (shared) "free_without_session" else "no_session",
@@ -194,6 +177,32 @@ internal class FtPremiumCompat(private val context: Context) {
                 "ping_ok" to pingOk,
                 "has_ref" to ref.isNotBlank(),
                 "intento" to intento,
+            )
+        }
+
+        if (key == "netflix") {
+            val handoff = generateNetflixHandoff(rawCode)
+                ?: return mapOf(
+                    "available" to false,
+                    "status" to "netflix_handoff_failed",
+                    "stage" to "netflix",
+                    "ping_ok" to pingOk,
+                    "has_ref" to ref.isNotBlank(),
+                )
+
+            return mapOf(
+                "platform" to key,
+                "available" to true,
+                "mode" to "netflix_handoff",
+                "shared" to shared,
+                "url" to if (isTelevision()) handoff.tvUrl else handoff.phoneUrl,
+                "phone_url" to handoff.phoneUrl,
+                "tv_url" to handoff.tvUrl,
+                "cookies" to emptyList<Map<String, Any?>>(),
+                "ref" to ref,
+                "intento" to intento,
+                "ping_ok" to pingOk,
+                "source" to "ft36-netflix-handoff",
             )
         }
 
@@ -217,6 +226,103 @@ internal class FtPremiumCompat(private val context: Context) {
             "intento" to intento,
             "ping_ok" to pingOk,
             "source" to "ft36-direct-web-activation-parity",
+        )
+    }
+
+
+    fun prepareNetflix(intento: Int): Map<String, Any?> {
+        val id = getAnonId()
+        val session = ensureAuthorizedSession(id)
+        if (!sessionAuthorized(session)) {
+            return mapOf(
+                "available" to false,
+                "status" to "activation_failed",
+                "stage" to "activation_authorized",
+                "session_ok" to session.ok,
+                "session_http" to session.httpStatus,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+                "session_token" to session.hasToken,
+                "detail" to session.detail.ifBlank {
+                    "el servidor no confirmó el modo de prueba activado"
+                },
+            )
+        }
+
+        val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
+        if (sig.isBlank()) {
+            return mapOf(
+                "available" to false,
+                "status" to "guard_failed",
+                "stage" to "sign",
+            )
+        }
+
+        val map = runCatching {
+            fetchMapCached(id, sig, intento)
+        }.getOrElse { error ->
+            return mapOf(
+                "available" to false,
+                "status" to "map_failed",
+                "stage" to "map",
+                "detail" to (error.message ?: error.javaClass.simpleName),
+            )
+        }
+
+        if (map.optJSONObject("apagadas")?.optBoolean("netflix", false) == true) {
+            return mapOf(
+                "available" to false,
+                "status" to "disabled",
+                "stage" to "map",
+            )
+        }
+
+        val ref = map.optJSONObject("refs")
+            ?.optString("netflix", "")
+            ?.trim()
+            .orEmpty()
+        val shared = map.optJSONObject("libres")?.has("netflix") == true
+        val rawCode = map.optJSONObject("codigos")
+            ?.optString("netflix", "")
+            ?.trim()
+            .orEmpty()
+
+        if (!rawCode.startsWith("premium_id:netflix:")) {
+            return mapOf(
+                "available" to false,
+                "status" to "netflix_no_account",
+                "stage" to "netflix_map",
+                "has_ref" to ref.isNotBlank(),
+                "intento" to intento,
+                "shared" to shared,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+            )
+        }
+
+        val handoff = generateNetflixHandoff(rawCode)
+            ?: return mapOf(
+                "available" to false,
+                "status" to "netflix_handoff_failed",
+                "stage" to "netflix",
+                "has_ref" to ref.isNotBlank(),
+                "intento" to intento,
+            )
+
+        return mapOf(
+            "platform" to "netflix",
+            "available" to true,
+            "mode" to "netflix_handoff",
+            "shared" to shared,
+            "url" to if (isTelevision()) handoff.tvUrl else handoff.phoneUrl,
+            "phone_url" to handoff.phoneUrl,
+            "tv_url" to handoff.tvUrl,
+            "cookies" to emptyList<Map<String, Any?>>(),
+            "ref" to ref,
+            "intento" to intento,
+            "source" to "ft36-netflix-generator-authorized-parity",
         )
     }
 
@@ -283,6 +389,65 @@ internal class FtPremiumCompat(private val context: Context) {
         val hasToken: Boolean get() = sessionToken.isNotBlank()
     }
 
+    private fun sessionAuthorized(session: FtSessionState): Boolean {
+        return session.ok && (session.queda > 0 || session.libre || session.pro)
+    }
+
+    private fun emptySession(detail: String): FtSessionState {
+        return FtSessionState(
+            ok = false,
+            httpStatus = -1,
+            queda = 0,
+            libre = false,
+            pro = false,
+            sessionToken = "",
+            vastUrl = "",
+            fallbackAdUrl = "",
+            detail = detail,
+        )
+    }
+
+    private fun ensureAuthorizedSession(id: String): FtSessionState {
+        val current = runCatching {
+            ensureFtSession(id, wantAd = false)
+        }.getOrElse {
+            emptySession(it.message ?: it.javaClass.simpleName)
+        }
+        if (sessionAuthorized(current)) return current
+
+        val activated = runCatching {
+            activateAuthorized(id)
+        }.getOrElse {
+            return emptySession(it.message ?: it.javaClass.simpleName)
+        }
+        val latest = activated.session ?: current
+        return if (activated.ok && sessionAuthorized(latest)) {
+            latest
+        } else {
+            latest.copyWithDetail(
+                activated.detail.ifBlank {
+                    latest.detail.ifBlank {
+                        "el servidor no confirmó la activación autorizada"
+                    }
+                }
+            )
+        }
+    }
+
+    private fun FtSessionState.copyWithDetail(value: String): FtSessionState {
+        return FtSessionState(
+            ok = ok,
+            httpStatus = httpStatus,
+            queda = queda,
+            libre = libre,
+            pro = pro,
+            sessionToken = sessionToken,
+            vastUrl = vastUrl,
+            fallbackAdUrl = fallbackAdUrl,
+            detail = value,
+        )
+    }
+
     private fun activateAuthorized(id: String): FtActivationResult {
         val activation = ensureFtSession(id, wantAd = true)
         if (!activation.ok || !activation.hasToken) {
@@ -302,28 +467,26 @@ internal class FtPremiumCompat(private val context: Context) {
             )
         }
 
-        if (activation.vastUrl.isBlank()) {
+        if (activation.vastUrl.isBlank() && activation.fallbackAdUrl.isBlank()) {
             return FtActivationResult(
                 ok = false,
                 rounds = 0,
                 session = activation,
-                detail = if (activation.fallbackAdUrl.isNotBlank()) {
-                    "activación web requerida"
-                } else {
-                    "activación sin VAST disponible"
-                },
+                detail = "activación sin método disponible",
             )
         }
 
         var rounds = 0
         for (attempt in 0 until 6) {
-            val round = fetchAdRound(activation.vastUrl)
-                ?: return FtActivationResult(
-                    ok = false,
-                    rounds = rounds,
-                    session = activation,
-                    detail = "no se pudo preparar la ronda de activación",
-                )
+            if (activation.vastUrl.isNotBlank()) {
+                fetchAdRound(activation.vastUrl)
+                    ?: return FtActivationResult(
+                        ok = false,
+                        rounds = rounds,
+                        session = activation,
+                        detail = "no se pudo preparar la ronda autorizada",
+                    )
+            }
 
             rounds++
             // Modo de prueba autorizado por el propietario:
@@ -652,6 +815,30 @@ internal class FtPremiumCompat(private val context: Context) {
         }
     }
 
+    private fun fetchMapCached(
+        id: String,
+        sig: String,
+        intento: Int,
+    ): JSONObject {
+        if (intento == 0) {
+            synchronized(premiumMapLock) {
+                val cached = premiumMapCache
+                if (cached != null &&
+                    System.currentTimeMillis() - premiumMapFetchedAtMs < premiumMapCacheTtlMs
+                ) {
+                    return JSONObject(cached.toString())
+                }
+            }
+        }
+
+        val fresh = fetchMap(id, sig, intento)
+        synchronized(premiumMapLock) {
+            premiumMapCache = JSONObject(fresh.toString())
+            premiumMapFetchedAtMs = System.currentTimeMillis()
+        }
+        return fresh
+    }
+
     private fun fetchMap(id: String, sig: String, intento: Int): JSONObject {
         val url = buildString {
             append(PRIMARY)
@@ -684,6 +871,188 @@ internal class FtPremiumCompat(private val context: Context) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private data class NetflixHandoff(
+        val phoneUrl: String,
+        val tvUrl: String,
+    )
+
+    private data class NetflixCookies(
+        val netflixId: String,
+        val secureNetflixId: String,
+        val nfvdid: String,
+    )
+
+    private fun generateNetflixHandoff(rawCode: String): NetflixHandoff? {
+        return runCatching {
+            val cookies = decodeNetflixCookies(rawCode) ?: return null
+            val query = StringBuilder().apply {
+                appendNetflixParam(this, "appVersion", NETFLIX_APP_VERSION)
+                appendNetflixParam(this, "config", NETFLIX_CONFIG)
+                appendNetflixParam(this, "device_type", "NFAPPL-02-")
+                appendNetflixParam(this, "esn", NETFLIX_ESN)
+                appendNetflixParam(this, "idiom", "phone")
+                appendNetflixParam(this, "iosVersion", NETFLIX_IOS_VERSION)
+                appendNetflixParam(this, "isTablet", "false")
+                appendNetflixParam(this, "languages", "en-US")
+                appendNetflixParam(this, "locale", "en-US")
+                appendNetflixParam(this, "maxDeviceWidth", "375")
+                appendNetflixParam(this, "model", "saget")
+                appendNetflixParam(this, "modelType", "IPHONE8-1")
+                appendNetflixParam(this, "odpAware", "true")
+                appendNetflixParam(this, "path", "[\"account\",\"token\",\"default\"]")
+                appendNetflixParam(this, "pathFormat", "graph")
+                appendNetflixParam(this, "pixelDensity", "2.0")
+                appendNetflixParam(this, "progressive", "false")
+                appendNetflixParam(this, "responseFormat", "json")
+            }.toString()
+
+            val connection = URL(
+                "https://ios.prod.ftl.netflix.com/iosui/user/15.48?$query"
+            ).openConnection() as HttpURLConnection
+            try {
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 25000
+                connection.readTimeout = 25000
+                connection.instanceFollowRedirects = true
+
+                val cookieHeader = buildString {
+                    append("NetflixId=")
+                    append(decodeNetflixValue(cookies.netflixId))
+                    if (cookies.secureNetflixId.isNotBlank()) {
+                        append("; SecureNetflixId=")
+                        append(decodeNetflixValue(cookies.secureNetflixId))
+                    }
+                    if (cookies.nfvdid.isNotBlank()) {
+                        append("; nfvdid=")
+                        append(cookies.nfvdid)
+                    }
+                }
+                connection.setRequestProperty("Cookie", cookieHeader)
+                connection.setRequestProperty(
+                    "User-Agent",
+                    "Argo/$NETFLIX_APP_VERSION (iPhone; iOS $NETFLIX_IOS_VERSION; Scale/2.00)",
+                )
+                connection.setRequestProperty("x-netflix.request.attempt", "1")
+                connection.setRequestProperty(
+                    "x-netflix.context.app-version",
+                    NETFLIX_APP_VERSION,
+                )
+                connection.setRequestProperty(
+                    "x-netflix.client.appversion",
+                    NETFLIX_APP_VERSION,
+                )
+                connection.setRequestProperty("x-netflix.context.form-factor", "phone")
+                connection.setRequestProperty("x-netflix.context.max-device-width", "375")
+                connection.setRequestProperty("x-netflix.client.type", "argo")
+                connection.setRequestProperty(
+                    "x-netflix.client.ftl.esn",
+                    decodeNetflixValue(NETFLIX_ESN),
+                )
+                connection.setRequestProperty("x-netflix.argo.translated", "true")
+                connection.setRequestProperty(
+                    "x-netflix.request.routing",
+                    "{\"path\":\"/nq/mobile/nqios/~15.48.0/user\",\"control_tag\":\"iosui_argo\"}",
+                )
+                connection.setRequestProperty("x-netflix.context.sdk-version", "2012.4")
+                connection.setRequestProperty("x-netflix.context.locales", "en-US")
+                connection.setRequestProperty("x-netflix.context.ui-flavor", "argo")
+                connection.setRequestProperty("x-netflix.context.pixel-density", "2.0")
+                connection.setRequestProperty("x-netflix.argo.abtests", "")
+                connection.setRequestProperty("x-netflix.context.ab-tests", "")
+                connection.setRequestProperty("x-netflix.argo.nfnsm", "9")
+                connection.setRequestProperty("accept-language", "en-US;q=1")
+
+                if (connection.responseCode != 200) return null
+                val json = JSONObject(
+                    connection.inputStream.bufferedReader().use { it.readText() }
+                )
+                val token = json
+                    .optJSONObject("value")
+                    ?.optJSONObject("account")
+                    ?.optJSONObject("token")
+                    ?.optJSONObject("default")
+                    ?.optString("token", "")
+                    ?.trim()
+                    .orEmpty()
+                if (token.isBlank()) return null
+
+                NetflixHandoff(
+                    phoneUrl = "https://www.netflix.com/unsupported?nftoken=$token",
+                    tvUrl = "https://www.netflix.com/tv8?nftoken=$token",
+                )
+            } finally {
+                connection.disconnect()
+            }
+        }.getOrNull()
+    }
+
+    private fun decodeNetflixCookies(rawCode: String): NetflixCookies? {
+        val normalized = rawCode.replace(Regex("""\s+"""), "")
+        val marker = "premium_id:netflix:"
+        val start = normalized.indexOf(marker)
+        if (start < 0) return null
+
+        val parts = normalized.substring(start).split(":")
+        if (parts.size < 5) return null
+        var payloadText = parts.drop(4).joinToString(":")
+            .replace(Regex("""[^A-Za-z0-9+/=]"""), "")
+        if (payloadText.isBlank()) return null
+
+        var payload: JSONObject? = null
+        val minimum = (payloadText.length - 64).coerceAtLeast(1)
+        var end = payloadText.length
+        while (end >= minimum) {
+            payload = runCatching {
+                val decoded = String(
+                    Base64.decode(payloadText.substring(0, end), Base64.DEFAULT),
+                    Charsets.UTF_8,
+                )
+                JSONObject(decoded)
+            }.getOrNull()
+            if (payload != null) break
+            end--
+        }
+        val json = payload ?: return null
+        val rawCookies = json.optString("cookies", "")
+        if (rawCookies.isBlank()) return null
+
+        val values = HashMap<String, String>()
+        for (piece in rawCookies.split(";")) {
+            val index = piece.indexOf('=')
+            if (index <= 0) continue
+            val name = piece.substring(0, index).trim()
+            val value = piece.substring(index + 1).trim()
+            if (name.isNotBlank()) values[name] = value
+        }
+
+        val netflixId = values["NetflixId"].orEmpty()
+        if (netflixId.isBlank()) return null
+        return NetflixCookies(
+            netflixId = netflixId,
+            secureNetflixId = values["SecureNetflixId"].orEmpty(),
+            nfvdid = values["nfvdid"].orEmpty(),
+        )
+    }
+
+    private fun appendNetflixParam(
+        builder: StringBuilder,
+        key: String,
+        value: String,
+    ) {
+        if (builder.isNotEmpty()) builder.append("&")
+        builder.append(key)
+        builder.append("=")
+        builder.append(
+            runCatching { URLEncoder.encode(value, "UTF-8") }.getOrDefault(value)
+        )
+    }
+
+    private fun decodeNetflixValue(value: String): String {
+        return runCatching {
+            URLDecoder.decode(value.replace("+", "%2B"), "UTF-8")
+        }.getOrDefault(value)
     }
 
     private fun decodePremiumCode(
