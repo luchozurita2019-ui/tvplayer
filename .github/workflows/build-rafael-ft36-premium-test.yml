@@ -21,11 +21,14 @@ jobs:
       - name: Checkout TV FULL security-test branch
         uses: actions/checkout@v4
 
-      - name: Install Java and APK tooling
+      - name: Install Java and Android APK tooling
         run: |
           set -euo pipefail
           sudo apt-get update
-          sudo apt-get install -y apktool zipalign apksigner
+          sudo apt-get install -y zipalign apksigner
+          curl -fL --retry 3             https://github.com/iBotPeaches/Apktool/releases/download/v3.0.3/apktool_3.0.3.jar             -o apktool.jar
+          echo "dbf930b076c6b9be08d57c449cacefc3bdd6b71ebd59b3066fc0e1f5b14f9423  apktool.jar" | sha256sum -c -
+          java -jar apktool.jar --version
 
       - name: Download Rafael official Fútbol Total 3.6 APK
         run: |
@@ -37,7 +40,7 @@ jobs:
       - name: Decode original APK
         run: |
           set -euo pipefail
-          apktool d -f FutbolTotal-3.6-original.apk -o ft36
+          java -jar apktool.jar d -f FutbolTotal-3.6-original.apk -o ft36
 
       - name: Apply Rafael-authorized local premium security patch
         run: |
@@ -49,7 +52,13 @@ jobs:
       - name: Rebuild patched FT APK
         run: |
           set -euo pipefail
-          apktool b ft36 -o FutbolTotal-3.6-premium-test-unsigned.apk
+          set +e
+          java -jar apktool.jar b ft36 -o FutbolTotal-3.6-premium-test-unsigned.apk 2>&1 | tee apktool-build.log
+          STATUS=${PIPESTATUS[0]}
+          set -e
+          if [ "$STATUS" -ne 0 ]; then
+            exit "$STATUS"
+          fi
           zipalign -f -p 4             FutbolTotal-3.6-premium-test-unsigned.apk             FutbolTotal-3.6-premium-test-aligned.apk
 
       - name: Configure TV FULL test signing
@@ -82,6 +91,15 @@ jobs:
             FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk
             SHA256SUMS.txt
           if-no-files-found: error
+          retention-days: 7
+
+      - name: Upload apktool build log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: RAFAEL-FT36-APKTOOL-BUILD-LOG
+          path: apktool-build.log
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Remove signing material
