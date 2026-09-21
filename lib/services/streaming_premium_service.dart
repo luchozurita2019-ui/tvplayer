@@ -434,21 +434,59 @@ class StreamingPremiumService {
       );
     }
 
-    // El Worker de Rafael ya confirmó el cliente de prueba.
-    // Recién ahora pedimos /plat/get y el handoff temporal de Netflix.
-    final session = await prepare(
-      'netflix',
-      intento: intento,
-      onStage: onStage,
+    final probeRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      'probeNetflixMap',
+      <String, dynamic>{'intento': intento},
     );
-    if (!session.isExternal ||
-        session.phoneUrl.isEmpty ||
-        session.tvUrl.isEmpty) {
+    if (probeRaw is! Map) {
       throw const StreamingPremiumUnavailableException(
-        'netflix_handoff_failed',
+        'map_probe_failed',
+        'respuesta directa inválida',
       );
     }
-    return session;
+    final probe = Map<String, dynamic>.from(probeRaw);
+    final directHasCode = probe['has_code'] == true;
+    final directHasRef = probe['has_ref'] == true;
+    final directPing = probe['ping_ok'];
+    final directQueda = probe['session_queda'];
+    final directLibre = probe['session_libre'];
+    final directPro = probe['session_pro'];
+
+    // El Worker de Rafael ya confirmó el cliente de prueba.
+    // Ahora pedimos el mismo mapa desde el backend y comparamos sólo
+    // presencia/ausencia; nunca imprimimos ni devolvemos el código.
+    try {
+      final session = await prepare(
+        'netflix',
+        intento: intento,
+        onStage: onStage,
+      );
+      if (!session.isExternal ||
+          session.phoneUrl.isEmpty ||
+          session.tvUrl.isEmpty) {
+        throw const StreamingPremiumUnavailableException(
+          'netflix_handoff_failed',
+        );
+      }
+      return session;
+    } on StreamingPremiumUnavailableException catch (error) {
+      final parts = <String>[];
+      parts.add('directo=${directHasCode ? 'código-sí' : 'código-no'}');
+      parts.add('direct-ref=${directHasRef ? 'sí' : 'no'}');
+      if (directPing is bool) {
+        parts.add('direct-ping=${directPing ? 'ok' : 'falló'}');
+      }
+      if (directQueda is num) parts.add('queda=${directQueda.toInt()}');
+      if (directLibre is bool) {
+        parts.add('libre=${directLibre ? 'sí' : 'no'}');
+      }
+      if (directPro is bool) parts.add('pro=${directPro ? 'sí' : 'no'}');
+      if (error.detail.isNotEmpty) parts.add(error.detail);
+      throw StreamingPremiumUnavailableException(
+        error.status,
+        parts.join(' · '),
+      );
+    }
   }
 
   Future<void> openNetflixGeneratedUrl(String url) async {
