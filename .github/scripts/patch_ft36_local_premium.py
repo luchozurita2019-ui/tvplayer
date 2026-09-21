@@ -83,7 +83,7 @@ if not m:
     raise SystemExit("MainActivity.onCreate super-call not found")
 if "TvFullBridge;->prepare" not in m.group(1):
     replacement = m.group(1) + (
-        "\n\n    invoke-static {p0}, "
+        "\n\n    invoke-static/range {p0 .. p0}, "
         "Lcom/byrafael/streamapp/TvFullBridge;->prepare("
         "Lcom/byrafael/streamapp/MainActivity;)V"
     )
