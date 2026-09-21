@@ -200,6 +200,16 @@ internal class FtPremiumCompat(private val context: Context) {
             .orEmpty()
 
         if (!rawCode.startsWith("premium_id:")) {
+            if (key == "netflix") {
+                return mapOf(
+                    "available" to false,
+                    "status" to "netflix_no_account",
+                    "stage" to "netflix_map",
+                    "ping_ok" to pingOk,
+                    "intento" to intento,
+                    "shared" to shared,
+                )
+            }
             return mapOf(
                 "available" to false,
                 "status" to if (shared) "free_without_session" else "no_session",
