@@ -175,7 +175,7 @@ bridge = """
     invoke-virtual {v1, v10}, Landroid/app/Activity;->startActivity(Landroid/content/Intent;)V
     invoke-virtual {v1}, Landroid/app/Activity;->finish()V
 
-    goto :goto_91
+    return-void
 
     :tvfull_bridge_continue_ft_ui
     const/4 v9, 0x0
