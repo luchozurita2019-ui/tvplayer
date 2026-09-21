@@ -15,7 +15,8 @@ import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
 import java.util.UUID
 
-internal // V89 hotfix: TV FULL must never request or consume FT advertising.\nclass FtPremiumCompat(private val context: Context) {
+// V89/V90: TV FULL never requests or consumes FT advertising.
+internal class FtPremiumCompat(private val context: Context) {
     companion object {
         private const val FT_VERSION_CODE = 26
         private const val FT_UA = "FT-PRO/1.0"
