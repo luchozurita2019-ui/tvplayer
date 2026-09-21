@@ -1,9 +1,9 @@
-name: Build TV FULL V93 original FT Netflix bridge
+name: Build TV FULL V94 exact FT Netflix handoff
 
 on:
   push:
     branches:
-      - feature/v93-ft-original-netflix-bridge
+      - feature/v94-netflix-ft-exact-handoff
     paths:
       - 'lib/**'
       - 'android/**'
@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.61'
-  BUILD_NUMBER: '3093'
+  BUILD_NAME: '1.4.62'
+  BUILD_NUMBER: '3094'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
   DYNAMIC_CONFIG: '{"name":"Lista TV 3","server":"https://ghsoudpjlnjmhiragkrm.supabase.co","resolver":{"path":"/functions/v1/tvf-lista3-resolve","method":"POST","timeoutMs":18000,"form":{"id":"{id}","channelCode":"{id}","name":"{name}","playCode":"{path}","path":"{path}","androidId":"{androidId}","device":"{androidId}","globalIndex":"{globalIndex}"}}}'
 
@@ -95,7 +95,7 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed ARM32 and ARM64 V93 original FT Netflix bridge APKs
+      - name: Build signed ARM32 and ARM64 V94 exact FT Netflix handoff APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -111,8 +111,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V93-FT-NETFLIX-BRIDGE-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V93-FT-NETFLIX-BRIDGE-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V94-FT-NETFLIX-HANDOFF-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V94-FT-NETFLIX-HANDOFF-ARM64.apk
           cp CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt artifact/CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt
           sha256sum artifact/*.apk > artifact/SHA256SUMS.txt
 
@@ -121,37 +121,37 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
 
-          for APK in artifact/TV-FULL-PRO-V93-FT-NETFLIX-BRIDGE-ARM32.apk artifact/TV-FULL-PRO-V93-FT-NETFLIX-BRIDGE-ARM64.apk; do
+          for APK in artifact/TV-FULL-PRO-V94-FT-NETFLIX-HANDOFF-ARM32.apk artifact/TV-FULL-PRO-V94-FT-NETFLIX-HANDOFF-ARM64.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$APK.signature.txt"
             EXPECTED="$(printf '%s' "$CERT_SHA256" | tr '[:upper:]' '[:lower:]')"
             grep -Fqi "certificate SHA-256 digest: $EXPECTED" "$APK.signature.txt"
 
             "$AAPT" dump badging "$APK" | tee "$APK.badging.txt"
             grep -Fq "package: name='com.tvfull.pro.tv.v10safe'" "$APK.badging.txt"
-            grep -Fq "versionCode='3093'" "$APK.badging.txt"
-            grep -Fq "versionName='1.4.61'" "$APK.badging.txt"
+            grep -Fq "versionCode='3094'" "$APK.badging.txt"
+            grep -Fq "versionName='1.4.62'" "$APK.badging.txt"
           done
 
-      - name: Publish isolated V93 original FT Netflix bridge release
+      - name: Publish isolated V94 exact FT Netflix handoff release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v93-ft-netflix-bridge"
+          TAG="tv-full-pro-v94-ft-netflix-handoff"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V93-FT-NETFLIX-BRIDGE-ARM32.apk \
-            artifact/TV-FULL-PRO-V93-FT-NETFLIX-BRIDGE-ARM64.apk \
+            artifact/TV-FULL-PRO-V94-FT-NETFLIX-HANDOFF-ARM32.apk \
+            artifact/TV-FULL-PRO-V94-FT-NETFLIX-HANDOFF-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.61+3093 - V93 original FT Netflix bridge" \
-            --notes "V93 parte de la V91/V76 funcional para MAX, Prime y Crunchyroll. Netflix llama al Fútbol Total 3.6 puente autorizado, deja que el generador original produzca W0 y recibe únicamente phone_url/tv_url finales; luego abre el acceso temporal en navegador. No usa GitHub/PremiumIDPro ni un generador reimplementado. No se publica en ningún Installer."
+            --title "TV FULL PRO 1.4.62+3094 - V94 exact FT Netflix handoff" \
+            --notes "V94 parte de la V93 funcional para MAX, Prime y Crunchyroll. Netflix llama al Fútbol Total 3.6 puente autorizado, deja que el generador original produzca W0 y recibe únicamente phone_url/tv_url finales; luego abre el acceso temporal en navegador. No usa GitHub/PremiumIDPro ni un generador reimplementado. No se publica en ningún Installer."
 
-      - name: Upload V93 signed test bundle
+      - name: Upload V94 signed test bundle
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V93-FT-NETFLIX-BRIDGE-TEST
+          name: TV-FULL-PRO-V94-FT-NETFLIX-HANDOFF-TEST
           path: artifact/
           if-no-files-found: error
           retention-days: 14
