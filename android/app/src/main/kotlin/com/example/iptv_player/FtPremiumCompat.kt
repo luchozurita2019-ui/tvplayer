@@ -478,15 +478,57 @@ internal class FtPremiumCompat(private val context: Context) {
         }
 
         if (activation.vastUrl.isBlank()) {
+            if (activation.fallbackAdUrl.isBlank()) {
+                return FtActivationResult(
+                    ok = false,
+                    rounds = 0,
+                    session = activation,
+                    detail = "activación sin método disponible",
+                )
+            }
+
+            // Prueba autorizada por el propietario del Worker:
+            // no abrimos el fallback web ni simulamos impresiones/clicks.
+            // Sólo confirmamos la sesión directamente contra su propio Worker.
+            var rounds = 0
+            for (attempt in 0 until 6) {
+                rounds++
+                val finished = completeAdRound(activation.sessionToken)
+                    ?: return FtActivationResult(
+                        ok = false,
+                        rounds = rounds,
+                        session = activation,
+                        detail = "el Worker no confirmó la activación de prueba",
+                    )
+
+                var latest = activation
+                repeat(5) {
+                    Thread.sleep(350L)
+                    latest = ensureFtSession(id, wantAd = false)
+                    if (latest.queda > 0 || latest.libre || latest.pro) {
+                        return FtActivationResult(
+                            ok = true,
+                            rounds = rounds,
+                            session = latest,
+                        )
+                    }
+                }
+
+                if (finished) {
+                    return FtActivationResult(
+                        ok = false,
+                        rounds = rounds,
+                        session = latest,
+                        detail = "el Worker confirmó la prueba pero la sesión sigue inactiva",
+                    )
+                }
+            }
+
             return FtActivationResult(
                 ok = false,
-                rounds = 0,
-                session = activation,
-                detail = if (activation.fallbackAdUrl.isNotBlank()) {
-                    "activación web requerida"
-                } else {
-                    "activación sin VAST disponible"
-                },
+                rounds = rounds,
+                session = ensureFtSession(id, wantAd = false),
+                detail = "activación de prueba incompleta",
             )
         }
 
