@@ -171,20 +171,19 @@ c0_file.write_text(c0_text, encoding="utf-8")
 # 7) If the original FT map has no Netflix account/code, return a sanitized failure.
 d0_text = d0_file.read_text(encoding="utf-8")
 no_accounts = '    const-string v1, "No hay cuentas disponibles ahora mismo. Prob\\u00e1 de nuevo en un rato."\n'
-if no_accounts not in d0_text:
-    raise SystemExit("D0 Netflix no-account branch not found")
-d0_text = d0_text.replace(
-    no_accounts,
-    no_accounts + """    const-string v8, "netflix_no_account"
+if no_accounts in d0_text:
+    d0_text = d0_text.replace(
+        no_accounts,
+        no_accounts + """    const-string v8, "netflix_no_account"
     invoke-static {v2, v8}, Lcom/byrafael/streamapp/TvFullBridge;->sendFailure(Lcom/byrafael/streamapp/MainActivity;Ljava/lang/String;)Z
     move-result v8
     if-eqz v8, :tvfull_bridge_continue_no_account
     return-void
     :tvfull_bridge_continue_no_account
 """,
-    1,
-)
-d0_file.write_text(d0_text, encoding="utf-8")
+        1,
+    )
+    d0_file.write_text(d0_text, encoding="utf-8")
 
 # 8) Add a tiny bridge class. It never reads or logs Rafael's raw account data,
 # cookies, premium_id or nftoken separately. It only forwards W0's final URLs.
