@@ -42,6 +42,11 @@ jobs:
           set -euo pipefail
           java -jar apktool.jar d -f FutbolTotal-3.6-original.apk -o ft36
 
+      - name: Inspect FT Guard layout
+        run: |
+          set -euo pipefail
+          grep -R -n "Lcom/byrafael/streamapp/Guard;->" ft36/smali* | head -n 80 || true
+
       - name: Apply Rafael-authorized Netflix bridge patch
         run: |
           set -euo pipefail
