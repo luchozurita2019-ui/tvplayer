@@ -562,7 +562,9 @@ internal class FtPremiumCompat(private val context: Context) {
                 .put("vc", FT_VERSION_CODE)
                 .put("hw", hw)
                 .put("sig", sig)
-                .put("quiero", if (wantAd) 1 else 0)
+                // TV FULL nunca solicita publicidad al Worker.
+                // La integración autorizada usa únicamente la sesión sin anuncios.
+                .put("quiero", 0)
                 .toString()
                 .toByteArray(StandardCharsets.UTF_8)
             connection.outputStream.use { it.write(body) }
@@ -593,8 +595,9 @@ internal class FtPremiumCompat(private val context: Context) {
                 libre = libre,
                 pro = json.optInt("pro", 0) == 1,
                 sessionToken = token,
-                vastUrl = json.optString("vast", "").trim(),
-                fallbackAdUrl = json.optString("ad", "").trim(),
+                // Ignoramos cualquier payload publicitario aunque el Worker lo incluya.
+                vastUrl = "",
+                fallbackAdUrl = "",
                 detail = when {
                     !json.optBoolean("ok", false) -> "sesion ok=false"
                     token.isBlank() && !libre -> "sesion sin token activo"
