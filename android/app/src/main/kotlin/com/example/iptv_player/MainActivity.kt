@@ -258,6 +258,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "open" -> openWebPlayback(call, result)
                     "openExternal" -> openExternalUrl(call, result)
+                    "openRafaelPremiumHelper" -> openRafaelPremiumHelper(result)
                     else -> result.notImplemented()
                 }
             }
@@ -362,6 +363,84 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 handlePlayerCall(flutterEngine, call, result)
             }
+    }
+
+    private fun openRafaelPremiumHelper(
+        result: MethodChannel.Result,
+    ) {
+        val launcherQuery = Intent(Intent.ACTION_MAIN).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+
+        val candidates = runCatching {
+            packageManager.queryIntentActivities(launcherQuery, 0)
+        }.getOrDefault(emptyList())
+
+        val helper = candidates.firstOrNull { info ->
+            val label = runCatching {
+                info.loadLabel(packageManager)?.toString().orEmpty()
+            }.getOrDefault("")
+            val normalizedLabel = label.lowercase(Locale.US)
+                .replace(" ", "")
+                .replace("_", "")
+                .replace("-", "")
+            val normalizedPackage = info.activityInfo.packageName
+                .lowercase(Locale.US)
+                .replace("_", "")
+                .replace("-", "")
+
+            (normalizedLabel.contains("premiumidpro") ||
+                (normalizedLabel.contains("premium") &&
+                    normalizedLabel.contains("id"))) ||
+                normalizedPackage.contains("premiumidpro")
+        }
+
+        if (helper != null) {
+            try {
+                val launchIntent = Intent(Intent.ACTION_MAIN).apply {
+                    addCategory(Intent.CATEGORY_LAUNCHER)
+                    setClassName(
+                        helper.activityInfo.packageName,
+                        helper.activityInfo.name,
+                    )
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                startActivity(launchIntent)
+                result.success(
+                    mapOf(
+                        "opened" to true,
+                        "installed" to true,
+                        "package" to helper.activityInfo.packageName,
+                    )
+                )
+                return
+            } catch (_: Throwable) {
+                // Si el helper existe pero no abre, caemos a su release oficial.
+            }
+        }
+
+        val releaseUri = Uri.parse(
+            "https://github.com/ByRafaelSystem/premiumidpro/releases/latest"
+        )
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, releaseUri).apply {
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+            result.success(
+                mapOf(
+                    "opened" to true,
+                    "installed" to false,
+                )
+            )
+        } catch (error: Throwable) {
+            result.error(
+                "RAFAEL_HELPER_OPEN_FAILED",
+                error.message ?: "No se pudo abrir Premium ID PRO.",
+                null,
+            )
+        }
     }
 
     private fun openExternalUrl(
