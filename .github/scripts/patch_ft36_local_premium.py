@@ -60,8 +60,8 @@ o0.write_text(text, encoding="utf-8")
 # while the authorized test APK is re-signed with TV FULL's test key.
 main_text = main.read_text(encoding="utf-8")
 guard_pattern = re.compile(
-    r"(?m)^(?P<indent>\\s*)sput-object\\s+(?P<reg>[vp]\\d+),\\s*"
-    r"Lcom/byrafael/streamapp/Guard;->b:\\[B\\s*$"
+    r"(?m)^(?P<indent>\s*)sput-object\s+(?P<reg>[vp]\d+),\s*"
+    r"Lcom/byrafael/streamapp/Guard;->b:\[B\s*$"
 )
 gm = guard_pattern.search(main_text)
 if not gm:
