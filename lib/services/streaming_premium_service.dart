@@ -99,6 +99,14 @@ class StreamingPremiumUnavailableException implements Exception {
       case 'netflix_no_account':
         return 'No hay cuentas de Netflix disponibles ahora mismo. '
             'Probá de nuevo en un rato.';
+      case 'pro_required':
+        return 'Este cliente de prueba todavía no está activo como PRO.';
+      case 'invalid_pro_token':
+        return 'El token PRO no tiene el formato esperado.';
+      case 'pro_token_rejected':
+        return 'Ese token PRO no está activado o fue rechazado por el servidor.';
+      case 'pro_pending':
+        return 'El servidor aceptó el token, pero todavía no devolvió pro=1.';
       case 'free_without_session':
       case 'no_session':
         return detail.isEmpty
@@ -364,40 +372,47 @@ class StreamingPremiumService {
     return session;
   }
 
+  Future<Map<String, dynamic>> getFtProState() async {
+    final raw = await _ftPremiumDirect.invokeMethod<dynamic>('getProState');
+    if (raw is! Map) {
+      throw const StreamingPremiumUnavailableException(
+        'pro_state_failed',
+      );
+    }
+    return Map<String, dynamic>.from(raw);
+  }
+
+  Future<Map<String, dynamic>> activateFtProToken(String token) async {
+    final raw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      'activateProToken',
+      <String, dynamic>{'token': token},
+    );
+    if (raw is! Map) {
+      throw const StreamingPremiumUnavailableException(
+        'pro_activation_failed',
+      );
+    }
+    final data = Map<String, dynamic>.from(raw);
+    if (data['activated'] != true) {
+      throw StreamingPremiumUnavailableException(
+        data['status']?.toString() ?? 'pro_activation_failed',
+      );
+    }
+    return data;
+  }
+
   Future<StreamingPremiumSession> generateNetflixAccess({
     required int intento,
     StreamingPremiumStageCallback? onStage,
   }) async {
     onStage?.call(StreamingPremiumStage.authenticating);
-    final authRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
-      'authorizeTestSession',
-    );
-
-    if (authRaw is! Map) {
-      throw const StreamingPremiumUnavailableException(
-        'activation_failed',
-        'respuesta de sesión inválida',
-      );
+    final pro = await getFtProState();
+    if (pro['pro'] != true) {
+      throw const StreamingPremiumUnavailableException('pro_required');
     }
 
-    final auth = Map<String, dynamic>.from(authRaw);
-    if (auth['completed'] != true) {
-      final stage = auth['stage']?.toString().trim() ?? '';
-      final status = auth['status']?.toString().trim() ?? 'activation_failed';
-      final detail = auth['detail']?.toString().trim() ?? '';
-      final rounds = auth['rounds'];
-      final parts = <String>[];
-      if (stage.isNotEmpty) parts.add('etapa=$stage');
-      if (rounds is num) parts.add('rondas=${rounds.toInt()}');
-      if (detail.isNotEmpty) parts.add(detail);
-      throw StreamingPremiumUnavailableException(
-        status,
-        parts.join(' · '),
-      );
-    }
-
-    // Con la sesión autorizada confirmada recién pedimos /plat/get,
-    // igual que el orden observado en FT 3.6 antes del generador.
+    // Con pro=1 confirmado en el Worker, recién pedimos /plat/get.
+    // En esta rama de prueba Netflix no abre ni completa anuncios.
     final session = await prepare(
       'netflix',
       intento: intento,
