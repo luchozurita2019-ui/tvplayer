@@ -228,6 +228,31 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                     }
+                    "openPremiumIdPro" -> {
+                        val helperPackage = "com.premium.id.pro"
+                        val launchIntent = packageManager.getLaunchIntentForPackage(helperPackage)
+                        if (launchIntent != null) {
+                            launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(launchIntent)
+                            result.success("opened")
+                        } else {
+                            val releaseUri = Uri.parse(
+                                "https://github.com/ByRafaelSystem/premiumidpro/releases/latest"
+                            )
+                            val browserIntent = Intent(Intent.ACTION_VIEW, releaseUri).apply {
+                                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            }
+                            runCatching { startActivity(browserIntent) }
+                                .onSuccess { result.success("download") }
+                                .onFailure {
+                                    result.error(
+                                        "PREMIUM_ID_PRO_OPEN_FAILED",
+                                        it.message ?: "No se pudo abrir Premium ID PRO.",
+                                        null,
+                                    )
+                                }
+                        }
+                    }
                     "getDeviceProfile" -> {
                         val manager = getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
                         result.success(
