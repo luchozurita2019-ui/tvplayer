@@ -1,9 +1,9 @@
-name: Build Fútbol Total V83 FT authorized auto test
+name: Build Fútbol Total V87 FT token normalization
 
 on:
   push:
     branches:
-      - feature/v83-ft-authorized-auto-test
+      - feature/v87-ft-token-normalization
     paths:
       - 'lib/**'
       - 'android/**'
@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.51'
-  BUILD_NUMBER: '3083'
+  BUILD_NAME: '1.4.55'
+  BUILD_NUMBER: '3087'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
   DYNAMIC_CONFIG: '{"name":"Lista TV 3","server":"https://ghsoudpjlnjmhiragkrm.supabase.co","resolver":{"path":"/functions/v1/tvf-lista3-resolve","method":"POST","timeoutMs":18000,"form":{"id":"{id}","channelCode":"{id}","name":"{name}","playCode":"{path}","path":"{path}","androidId":"{androidId}","device":"{androidId}","globalIndex":"{globalIndex}"}}}'
 
@@ -95,7 +95,7 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed ARM32 and ARM64 V83 FT authorized auto test APKs
+      - name: Build signed ARM32 and ARM64 V87 FT token normalization APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -106,13 +106,13 @@ jobs:
             --dart-define=TV_FULL_ANDROID_TV=true \
             --dart-define=TV_FULL_DYNAMIC_SOURCE_JSON="$DYNAMIC_CONFIG"
 
-      - name: Prepare and verify V83 test artifacts
+      - name: Prepare and verify V87 test artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V83-FUTBOL-TOTAL-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V83-FUTBOL-TOTAL-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V87-FUTBOL-TOTAL-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V87-FUTBOL-TOTAL-ARM64.apk
           cp CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt artifact/CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt
           sha256sum artifact/*.apk > artifact/SHA256SUMS.txt
 
@@ -121,37 +121,37 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
 
-          for APK in artifact/TV-FULL-PRO-V83-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V83-FUTBOL-TOTAL-ARM64.apk; do
+          for APK in artifact/TV-FULL-PRO-V87-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V87-FUTBOL-TOTAL-ARM64.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$APK.signature.txt"
             EXPECTED="$(printf '%s' "$CERT_SHA256" | tr '[:upper:]' '[:lower:]')"
             grep -Fqi "certificate SHA-256 digest: $EXPECTED" "$APK.signature.txt"
 
             "$AAPT" dump badging "$APK" | tee "$APK.badging.txt"
             grep -Fq "package: name='com.tvfull.pro.tv.v10safe'" "$APK.badging.txt"
-            grep -Fq "versionCode='3083'" "$APK.badging.txt"
-            grep -Fq "versionName='1.4.51'" "$APK.badging.txt"
+            grep -Fq "versionCode='3087'" "$APK.badging.txt"
+            grep -Fq "versionName='1.4.55'" "$APK.badging.txt"
           done
 
-      - name: Publish isolated V83 FT authorized auto test release
+      - name: Publish isolated V87 FT token normalization release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v83-ft-authorized-auto-test"
+          TAG="tv-full-pro-v87-ft-token-normalization"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V83-FUTBOL-TOTAL-ARM32.apk \
-            artifact/TV-FULL-PRO-V83-FUTBOL-TOTAL-ARM64.apk \
+            artifact/TV-FULL-PRO-V87-FUTBOL-TOTAL-ARM32.apk \
+            artifact/TV-FULL-PRO-V87-FUTBOL-TOTAL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.47+3079 - V83 FT authorized auto test" \
-            --notes "V82 aislada. Replica el flujo PRO de FT 3.6: /pro muestra el token de instalación, /pro/usar acepta un token PRO activo y Netflix sólo continúa cuando el Worker devuelve pro=1. No hardcodea ni registra tokens. Mantiene Teléfono/TV y ABRIR externo. No se publica en ningún Installer."
+            --title "TV FULL PRO 1.4.47+3079 - V87 FT token normalization" \
+            --notes "V87 aislada. Corrige el formato real FT-XXXX-XXXX: el token autorizado se ingresa una sola vez, se normaliza exactamente como FT 3.6 antes de /pro/usar, se confirma pro=1 y luego Netflix continúa por el flujo directo del mismo dispositivo/anon_id. Sin anuncios, sin registro y sin hardcodear el token. No se publica en ningún Installer."
 
-      - name: Upload V83 signed test bundle
+      - name: Upload V87 signed test bundle
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V83-FUTBOL-TOTAL-TEST
+          name: TV-FULL-PRO-V87-FUTBOL-TOTAL-TEST
           path: artifact/
           if-no-files-found: error
           retention-days: 14
