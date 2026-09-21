@@ -288,6 +288,25 @@ class MainActivity : FlutterActivity() {
                             }
                         }, "ft-premium-direct").start()
                     }
+                    "authorizeTestSession" -> {
+                        Thread({
+                            val response = runCatching {
+                                ftPremiumCompat.authorizeTestSession()
+                            }
+                            mainHandler.post {
+                                response.fold(
+                                    onSuccess = { result.success(it) },
+                                    onFailure = {
+                                        result.error(
+                                            "FT_TEST_SESSION_FAILED",
+                                            it.message ?: it.javaClass.simpleName,
+                                            null,
+                                        )
+                                    },
+                                )
+                            }
+                        }, "ft-test-session").start()
+                    }
                     "activate" -> {
                         if (pendingFtActivationResult != null) {
                             result.error(
