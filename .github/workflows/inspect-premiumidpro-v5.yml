@@ -1,0 +1,64 @@
+name: Inspect PremiumIDPro v5 handoff
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - research/premiumidpro-v5-netflix-handoff
+    paths:
+      - '.github/workflows/inspect-premiumidpro-v5.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  inspect:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y apktool aapt unzip ripgrep
+
+      - name: Download Rafael PremiumIDPro v5
+        run: |
+          curl -L --fail --retry 3 \
+            -o /tmp/PremiumIDPro.apk \
+            https://github.com/ByRafaelSystem/premiumidpro/releases/download/v5.0/PremiumIDPro.apk
+          test -s /tmp/PremiumIDPro.apk
+          sha256sum /tmp/PremiumIDPro.apk
+
+      - name: Decode APK
+        run: |
+          apktool d -f /tmp/PremiumIDPro.apk -o /tmp/pid
+          mkdir -p artifact
+          aapt dump badging /tmp/PremiumIDPro.apk > artifact/badging.txt
+          cp /tmp/pid/AndroidManifest.xml artifact/AndroidManifest.xml
+
+      - name: Build sanitized integration report
+        shell: bash
+        run: |
+          {
+            echo '=== PACKAGE / LAUNCHER ==='
+            grep -E "package=|launchable-activity|application-label" artifact/badging.txt || true
+            echo
+            echo '=== EXPORTED / INTENT FILTERS ==='
+            grep -nE 'activity|activity-alias|intent-filter|action android:name|category android:name|data android:' artifact/AndroidManifest.xml || true
+            echo
+            echo '=== NETFLIX / HANDOFF REFERENCES ==='
+            rg -n -i --glob '*.smali' --glob '*.xml' \
+              'netflix|nftoken|premium.?id|token|intent|startActivity|ACTION_VIEW|scheme|deep.?link|clipboard|copiar|generar|telefono|teléfono|tv8|unsupported' \
+              /tmp/pid 2>/dev/null \
+              | sed -E 's#([A-Za-z0-9_=-]{48,})#<redacted>#g' \
+              | head -n 3000
+          } > artifact/integration-report.txt
+
+      - name: Upload inspection
+        uses: actions/upload-artifact@v4
+        with:
+          name: PREMIUMIDPRO-V5-INTEGRATION-REPORT
+          path: artifact/
+          retention-days: 7
