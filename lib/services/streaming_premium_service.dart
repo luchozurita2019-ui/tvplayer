@@ -516,10 +516,16 @@ class StreamingPremiumService {
       'intento=$intento',
     );
 
-    dynamic raw = await _ftPremiumDirect.invokeMethod<dynamic>('prepare', {
-      'platform': platform,
-      'intento': intento,
-    });
+    final method = platform == 'netflix' ? 'prepareNetflix' : 'prepare';
+    dynamic raw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      method,
+      platform == 'netflix'
+          ? <String, dynamic>{'intento': intento}
+          : <String, dynamic>{
+              'platform': platform,
+              'intento': intento,
+            },
+    );
     if (raw is! Map) {
       throw const FormatException('Respuesta directa FT inválida.');
     }
