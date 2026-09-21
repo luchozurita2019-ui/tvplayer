@@ -65,6 +65,11 @@ internal class FtPremiumCompat(private val context: Context) {
     }
 
     private val certDigest = hexToBytes(FT_CERT_SHA256)
+    private val premiumMapLock = Any()
+    @Volatile private var premiumMapCache: JSONObject? = null
+    @Volatile private var premiumMapFetchedAtMs: Long = 0L
+    private val premiumMapCacheTtlMs = 15 * 60 * 1000L
+
 
     init {
         Guard.b = certDigest
@@ -84,68 +89,23 @@ internal class FtPremiumCompat(private val context: Context) {
 
         val id = getAnonId()
         val pingOk = runCatching { ping(id) }.getOrDefault(false)
-        var session = runCatching { ensureFtSession(id, wantAd = false) }
-            .getOrElse {
-                FtSessionState(
-                    ok = false,
-                    httpStatus = -1,
-                    queda = 0,
-                    libre = false,
-                    pro = false,
-                    sessionToken = "",
-                    vastUrl = "",
-                    fallbackAdUrl = "",
-                    detail = it.message.orEmpty(),
-                )
-            }
-
-        if (session.ok &&
-            session.queda <= 0 &&
-            !session.libre &&
-            !session.pro
-        ) {
-            val activationSession = runCatching {
-                ensureFtSession(id, wantAd = true)
-            }.getOrElse {
-                FtSessionState(
-                    ok = false,
-                    httpStatus = -1,
-                    queda = 0,
-                    libre = false,
-                    pro = false,
-                    sessionToken = "",
-                    vastUrl = "",
-                    fallbackAdUrl = "",
-                    detail = it.message.orEmpty(),
-                )
-            }
-            session = activationSession
-
-            if (session.queda <= 0 && !session.libre && !session.pro) {
-                val mode = when {
-                    session.fallbackAdUrl.isNotBlank() -> "web"
-                    session.vastUrl.isNotBlank() -> "vast"
-                    else -> "none"
-                }
-                return mapOf(
-                    "available" to false,
-                    "status" to "activation_required",
-                    "stage" to "activation",
-                    "activation_mode" to mode,
-                    "ping_ok" to pingOk,
-                    "session_ok" to session.ok,
-                    "session_http" to session.httpStatus,
-                    "session_queda" to session.queda,
-                    "session_libre" to session.libre,
-                    "session_pro" to session.pro,
-                    "session_token" to session.hasToken,
-                    "detail" to when (mode) {
-                        "web" -> "activación web disponible"
-                        "vast" -> "activación de video disponible"
-                        else -> session.detail.ifBlank { "sin método de activación" }
-                    },
-                )
-            }
+        val session = ensureAuthorizedSession(id)
+        if (!sessionAuthorized(session)) {
+            return mapOf(
+                "available" to false,
+                "status" to "activation_failed",
+                "stage" to "activation_authorized",
+                "ping_ok" to pingOk,
+                "session_ok" to session.ok,
+                "session_http" to session.httpStatus,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+                "session_token" to session.hasToken,
+                "detail" to session.detail.ifBlank {
+                    "el servidor no confirmó el modo de prueba activado"
+                },
+            )
         }
 
         val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
@@ -162,7 +122,7 @@ internal class FtPremiumCompat(private val context: Context) {
             )
         }
 
-        val map = runCatching { fetchMap(id, sig, intento) }.getOrElse { error ->
+        val map = runCatching { fetchMapCached(id, sig, intento) }.getOrElse { error ->
             return mapOf(
                 "available" to false,
                 "status" to "map_failed",
@@ -269,6 +229,103 @@ internal class FtPremiumCompat(private val context: Context) {
         )
     }
 
+
+    fun prepareNetflix(intento: Int): Map<String, Any?> {
+        val id = getAnonId()
+        val session = ensureAuthorizedSession(id)
+        if (!sessionAuthorized(session)) {
+            return mapOf(
+                "available" to false,
+                "status" to "activation_failed",
+                "stage" to "activation_authorized",
+                "session_ok" to session.ok,
+                "session_http" to session.httpStatus,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+                "session_token" to session.hasToken,
+                "detail" to session.detail.ifBlank {
+                    "el servidor no confirmó el modo de prueba activado"
+                },
+            )
+        }
+
+        val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
+        if (sig.isBlank()) {
+            return mapOf(
+                "available" to false,
+                "status" to "guard_failed",
+                "stage" to "sign",
+            )
+        }
+
+        val map = runCatching {
+            fetchMapCached(id, sig, intento)
+        }.getOrElse { error ->
+            return mapOf(
+                "available" to false,
+                "status" to "map_failed",
+                "stage" to "map",
+                "detail" to (error.message ?: error.javaClass.simpleName),
+            )
+        }
+
+        if (map.optJSONObject("apagadas")?.optBoolean("netflix", false) == true) {
+            return mapOf(
+                "available" to false,
+                "status" to "disabled",
+                "stage" to "map",
+            )
+        }
+
+        val ref = map.optJSONObject("refs")
+            ?.optString("netflix", "")
+            ?.trim()
+            .orEmpty()
+        val shared = map.optJSONObject("libres")?.has("netflix") == true
+        val rawCode = map.optJSONObject("codigos")
+            ?.optString("netflix", "")
+            ?.trim()
+            .orEmpty()
+
+        if (!rawCode.startsWith("premium_id:netflix:")) {
+            return mapOf(
+                "available" to false,
+                "status" to "netflix_no_account",
+                "stage" to "netflix_map",
+                "has_ref" to ref.isNotBlank(),
+                "intento" to intento,
+                "shared" to shared,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+            )
+        }
+
+        val handoff = generateNetflixHandoff(rawCode)
+            ?: return mapOf(
+                "available" to false,
+                "status" to "netflix_handoff_failed",
+                "stage" to "netflix",
+                "has_ref" to ref.isNotBlank(),
+                "intento" to intento,
+            )
+
+        return mapOf(
+            "platform" to "netflix",
+            "available" to true,
+            "mode" to "netflix_handoff",
+            "shared" to shared,
+            "url" to if (isTelevision()) handoff.tvUrl else handoff.phoneUrl,
+            "phone_url" to handoff.phoneUrl,
+            "tv_url" to handoff.tvUrl,
+            "cookies" to emptyList<Map<String, Any?>>(),
+            "ref" to ref,
+            "intento" to intento,
+            "source" to "ft36-netflix-generator-authorized-parity",
+        )
+    }
+
     fun reportDead(platform: String, ref: String): Boolean {
         if (!platforms.containsKey(platform)) return false
         if (ref.isBlank() || ref.length > 256) return false
@@ -332,6 +389,65 @@ internal class FtPremiumCompat(private val context: Context) {
         val hasToken: Boolean get() = sessionToken.isNotBlank()
     }
 
+    private fun sessionAuthorized(session: FtSessionState): Boolean {
+        return session.ok && (session.queda > 0 || session.libre || session.pro)
+    }
+
+    private fun emptySession(detail: String): FtSessionState {
+        return FtSessionState(
+            ok = false,
+            httpStatus = -1,
+            queda = 0,
+            libre = false,
+            pro = false,
+            sessionToken = "",
+            vastUrl = "",
+            fallbackAdUrl = "",
+            detail = detail,
+        )
+    }
+
+    private fun ensureAuthorizedSession(id: String): FtSessionState {
+        val current = runCatching {
+            ensureFtSession(id, wantAd = false)
+        }.getOrElse {
+            emptySession(it.message ?: it.javaClass.simpleName)
+        }
+        if (sessionAuthorized(current)) return current
+
+        val activated = runCatching {
+            activateAuthorized(id)
+        }.getOrElse {
+            return emptySession(it.message ?: it.javaClass.simpleName)
+        }
+        val latest = activated.session ?: current
+        return if (activated.ok && sessionAuthorized(latest)) {
+            latest
+        } else {
+            latest.copyWithDetail(
+                activated.detail.ifBlank {
+                    latest.detail.ifBlank {
+                        "el servidor no confirmó la activación autorizada"
+                    }
+                }
+            )
+        }
+    }
+
+    private fun FtSessionState.copyWithDetail(value: String): FtSessionState {
+        return FtSessionState(
+            ok = ok,
+            httpStatus = httpStatus,
+            queda = queda,
+            libre = libre,
+            pro = pro,
+            sessionToken = sessionToken,
+            vastUrl = vastUrl,
+            fallbackAdUrl = fallbackAdUrl,
+            detail = value,
+        )
+    }
+
     private fun activateAuthorized(id: String): FtActivationResult {
         val activation = ensureFtSession(id, wantAd = true)
         if (!activation.ok || !activation.hasToken) {
@@ -351,28 +467,26 @@ internal class FtPremiumCompat(private val context: Context) {
             )
         }
 
-        if (activation.vastUrl.isBlank()) {
+        if (activation.vastUrl.isBlank() && activation.fallbackAdUrl.isBlank()) {
             return FtActivationResult(
                 ok = false,
                 rounds = 0,
                 session = activation,
-                detail = if (activation.fallbackAdUrl.isNotBlank()) {
-                    "activación web requerida"
-                } else {
-                    "activación sin VAST disponible"
-                },
+                detail = "activación sin método disponible",
             )
         }
 
         var rounds = 0
         for (attempt in 0 until 6) {
-            val round = fetchAdRound(activation.vastUrl)
-                ?: return FtActivationResult(
-                    ok = false,
-                    rounds = rounds,
-                    session = activation,
-                    detail = "no se pudo preparar la ronda de activación",
-                )
+            if (activation.vastUrl.isNotBlank()) {
+                fetchAdRound(activation.vastUrl)
+                    ?: return FtActivationResult(
+                        ok = false,
+                        rounds = rounds,
+                        session = activation,
+                        detail = "no se pudo preparar la ronda autorizada",
+                    )
+            }
 
             rounds++
             // Modo de prueba autorizado por el propietario:
@@ -699,6 +813,30 @@ internal class FtPremiumCompat(private val context: Context) {
         } finally {
             connection.disconnect()
         }
+    }
+
+    private fun fetchMapCached(
+        id: String,
+        sig: String,
+        intento: Int,
+    ): JSONObject {
+        if (intento == 0) {
+            synchronized(premiumMapLock) {
+                val cached = premiumMapCache
+                if (cached != null &&
+                    System.currentTimeMillis() - premiumMapFetchedAtMs < premiumMapCacheTtlMs
+                ) {
+                    return JSONObject(cached.toString())
+                }
+            }
+        }
+
+        val fresh = fetchMap(id, sig, intento)
+        synchronized(premiumMapLock) {
+            premiumMapCache = JSONObject(fresh.toString())
+            premiumMapFetchedAtMs = System.currentTimeMillis()
+        }
+        return fresh
     }
 
     private fun fetchMap(id: String, sig: String, intento: Int): JSONObject {
