@@ -471,16 +471,16 @@ class StreamingPremiumService {
       return session;
     } on StreamingPremiumUnavailableException catch (error) {
       final parts = <String>[];
-      parts.add('directo=${directHasCode ? 'código-sí' : 'código-no'}');
-      parts.add('direct-ref=${directHasRef ? 'sí' : 'no'}');
+      parts.add("directo=${directHasCode ? 'código-sí' : 'código-no'}");
+      parts.add("direct-ref=${directHasRef ? 'sí' : 'no'}");
       if (directPing is bool) {
-        parts.add('direct-ping=${directPing ? 'ok' : 'falló'}');
+        parts.add("direct-ping=${directPing ? 'ok' : 'falló'}");
       }
       if (directQueda is num) parts.add('queda=${directQueda.toInt()}');
       if (directLibre is bool) {
-        parts.add('libre=${directLibre ? 'sí' : 'no'}');
+        parts.add("libre=${directLibre ? 'sí' : 'no'}");
       }
-      if (directPro is bool) parts.add('pro=${directPro ? 'sí' : 'no'}');
+      if (directPro is bool) parts.add("pro=${directPro ? 'sí' : 'no'}");
       if (error.detail.isNotEmpty) parts.add(error.detail);
       throw StreamingPremiumUnavailableException(
         error.status,
