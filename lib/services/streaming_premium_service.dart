@@ -361,8 +361,8 @@ class StreamingPremiumService {
       onStage: onStage,
     );
     if (!session.isExternal ||
-        session.phoneUrl.isEmpty ||
-        session.tvUrl.isEmpty) {
+        !_isNetflixPhoneHandoff(session.phoneUrl) ||
+        !_isNetflixTvHandoff(session.tvUrl)) {
       throw const StreamingPremiumUnavailableException(
         'netflix_handoff_failed',
       );
@@ -370,12 +370,31 @@ class StreamingPremiumService {
     return session;
   }
 
-  Future<void> openNetflixGeneratedUrl(String url) async {
+  bool _isNetflixPhoneHandoff(String url) {
     final uri = Uri.tryParse(url);
-    if (uri == null ||
-        uri.scheme != 'https' ||
-        !(uri.host == 'netflix.com' || uri.host.endsWith('.netflix.com'))) {
-      throw const FormatException('Destino de Netflix inválido.');
+    if (uri == null || uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    if (host != 'www.netflix.com' && host != 'netflix.com') return false;
+    if (uri.path != '/unsupported') return false;
+    final token = uri.queryParameters['nftoken']?.trim() ?? '';
+    return token.isNotEmpty;
+  }
+
+  bool _isNetflixTvHandoff(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    if (host != 'www.netflix.com' && host != 'netflix.com') return false;
+    if (uri.path != '/tv8') return false;
+    final token = uri.queryParameters['nftoken']?.trim() ?? '';
+    return token.isNotEmpty;
+  }
+
+  Future<void> openNetflixGeneratedUrl(String url) async {
+    if (!_isNetflixPhoneHandoff(url) && !_isNetflixTvHandoff(url)) {
+      throw const FormatException(
+        'El generador no entregó un acceso temporal de Netflix válido.',
+      );
     }
     await _webPlayback.invokeMethod<dynamic>('openExternalBrowser', {
       'url': url,
