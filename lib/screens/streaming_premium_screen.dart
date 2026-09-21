@@ -273,8 +273,6 @@ class NetflixAccessScreen extends StatefulWidget {
 class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
   StreamingPremiumSession? _access;
   bool _generating = false;
-  bool _activatingPro = false;
-  bool _proRequired = false;
   bool _tvMode = false;
   int _attempt = 0;
   String _status = '';
@@ -299,12 +297,10 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
       setState(() {
         _access = access;
         _attempt += 1;
-        _proRequired = false;
       });
     } on StreamingPremiumUnavailableException catch (error) {
       if (!mounted) return;
       setState(() {
-        _proRequired = error.status == 'pro_required';
         _status = error.toString();
       });
     } on PlatformException catch (error) {
@@ -320,145 +316,6 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
       });
     } finally {
       if (mounted) setState(() => _generating = false);
-    }
-  }
-
-  Future<void> _openProActivation() async {
-    if (_activatingPro) return;
-    setState(() {
-      _activatingPro = true;
-      _status = 'Verificando estado PRO con el servidor…';
-    });
-
-    try {
-      final state = await widget.service.getFtProState();
-      if (!mounted) return;
-
-      if (state['pro'] == true) {
-        setState(() {
-          _proRequired = false;
-          _status = 'Cliente de prueba activo como PRO.';
-        });
-        await _generate();
-        return;
-      }
-
-      final installationToken = state['token']?.toString().trim() ?? '';
-      final controller = TextEditingController();
-      final provided = await showDialog<String>(
-        context: context,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          return AlertDialog(
-            backgroundColor: const Color(0xFF111720),
-            title: const Text(
-              'ACTIVAR CLIENTE DE PRUEBA',
-              style: TextStyle(
-                color: Colors.white,
-                fontWeight: FontWeight.w900,
-              ),
-            ),
-            content: SizedBox(
-              width: 520,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  const Text(
-                    'Fútbol Total requiere que este anon_id esté marcado '
-                    'como PRO en el Worker.',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                  if (installationToken.isNotEmpty) ...[
-                    const SizedBox(height: 16),
-                    const Text(
-                      'Token de esta instalación',
-                      style: TextStyle(
-                        color: Colors.white54,
-                        fontSize: 12,
-                      ),
-                    ),
-                    const SizedBox(height: 6),
-                    SelectableText(
-                      installationToken,
-                      style: const TextStyle(
-                        color: streamingPremiumGoldSoft,
-                        fontSize: 22,
-                        fontWeight: FontWeight.w900,
-                        letterSpacing: 2,
-                      ),
-                    ),
-                  ],
-                  const SizedBox(height: 18),
-                  const Text(
-                    'Si Rafael ya te dio un token PRO activo, ingresalo acá:',
-                    style: TextStyle(color: Colors.white70),
-                  ),
-                  const SizedBox(height: 8),
-                  TextField(
-                    controller: controller,
-                    autofocus: true,
-                    textCapitalization: TextCapitalization.characters,
-                    style: const TextStyle(color: Colors.white),
-                    decoration: const InputDecoration(
-                      hintText: 'XXXXXXXX',
-                      hintStyle: TextStyle(color: Colors.white30),
-                      filled: true,
-                      fillColor: Color(0xFF0A0E14),
-                      border: OutlineInputBorder(),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
-                child: const Text('CERRAR'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.of(dialogContext).pop(
-                  controller.text.trim(),
-                ),
-                child: const Text('ACTIVAR'),
-              ),
-            ],
-          );
-        },
-      );
-      controller.dispose();
-
-      if (!mounted || provided == null || provided.trim().isEmpty) {
-        setState(() {
-          _status = installationToken.isEmpty
-              ? 'El servidor no entregó un token de instalación.'
-              : 'Cliente todavía sin activar como PRO.';
-        });
-        return;
-      }
-
-      final result = await widget.service.activateFtProToken(provided);
-      if (!mounted) return;
-      if (result['activated'] == true) {
-        setState(() {
-          _proRequired = false;
-          _status = 'Cliente PRO activado. Generando acceso…';
-        });
-        await _generate();
-      }
-    } on StreamingPremiumUnavailableException catch (error) {
-      if (!mounted) return;
-      setState(() => _status = error.toString());
-    } on PlatformException catch (error) {
-      if (!mounted) return;
-      setState(() {
-        _status = error.message ?? 'No se pudo activar el cliente PRO.';
-      });
-    } catch (_) {
-      if (!mounted) return;
-      setState(() => _status = 'No se pudo activar el cliente PRO.');
-    } finally {
-      if (mounted) setState(() => _activatingPro = false);
     }
   }
 
@@ -549,15 +406,6 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
                               color: Color(0xFFFFA39F),
                               fontSize: 13,
                             ),
-                          ),
-                        ],
-                        if (_proRequired) ...[
-                          const SizedBox(height: 14),
-                          _NetflixActionButton(
-                            label: _activatingPro
-                                ? 'VERIFICANDO…'
-                                : 'ACTIVAR CLIENTE DE PRUEBA',
-                            onTap: _activatingPro ? null : _openProActivation,
                           ),
                         ],
                         if (generated) ...[
