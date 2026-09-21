@@ -136,18 +136,22 @@ n_file.write_text(n_text, encoding="utf-8")
 
 # 6) After q3.a.z(...) returns the ORIGINAL W0 result, bridge only final phone/tv URLs.
 c0_text = c0_file.read_text(encoding="utf-8")
-success_label = "    :cond_63\n"
-if success_label not in c0_text:
-    raise SystemExit("C0 Netflix success label not found")
-c0_text = c0_text.replace(
-    success_label,
-    success_label + """    invoke-static {v1, v0}, Lcom/byrafael/streamapp/TvFullBridge;->sendSuccess(Lcom/byrafael/streamapp/MainActivity;LQ1/W0;)Z
+failure_pos = c0_text.find('const-string v0, "No se pudo con esa cuenta.')
+if failure_pos < 0:
+    raise SystemExit("C0 Netflix failure branch not found")
+success_instruction = "    iput-boolean v9, v1, Lcom/byrafael/streamapp/MainActivity;->z1:Z"
+success_pos = c0_text.find(success_instruction, failure_pos)
+if success_pos < 0:
+    raise SystemExit("C0 Netflix success instruction not found")
+c0_text = (
+    c0_text[:success_pos]
+    + """    invoke-static {v1, v0}, Lcom/byrafael/streamapp/TvFullBridge;->sendSuccess(Lcom/byrafael/streamapp/MainActivity;LQ1/W0;)Z
     move-result v10
     if-eqz v10, :tvfull_bridge_continue_success
     return-void
     :tvfull_bridge_continue_success
-""",
-    1,
+"""
+    + c0_text[success_pos:]
 )
 
 failure_text = '    const-string v0, "No se pudo con esa cuenta. Toc\\u00e1 de nuevo y sale otra."\n'
