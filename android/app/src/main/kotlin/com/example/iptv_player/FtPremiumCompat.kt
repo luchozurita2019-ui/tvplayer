@@ -270,6 +270,70 @@ internal class FtPremiumCompat(private val context: Context) {
         )
     }
 
+    internal fun probeNetflixMap(intento: Int): Map<String, Any?> {
+        val id = getAnonId()
+        val pingOk = runCatching { ping(id) }.getOrDefault(false)
+        val session = runCatching { ensureFtSession(id, wantAd = false) }
+            .getOrElse {
+                return mapOf(
+                    "ok" to false,
+                    "stage" to "session",
+                    "ping_ok" to pingOk,
+                    "detail" to it.message.orEmpty().take(160),
+                )
+            }
+
+        val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
+        if (sig.isBlank()) {
+            return mapOf(
+                "ok" to false,
+                "stage" to "sign",
+                "ping_ok" to pingOk,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+            )
+        }
+
+        val map = runCatching { fetchMap(id, sig, intento) }.getOrElse { error ->
+            return mapOf(
+                "ok" to false,
+                "stage" to "map",
+                "ping_ok" to pingOk,
+                "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
+                "detail" to error.message.orEmpty().take(160),
+            )
+        }
+
+        val rawCode = map.optJSONObject("codigos")
+            ?.optString("netflix", "")
+            ?.trim()
+            .orEmpty()
+        val ref = map.optJSONObject("refs")
+            ?.optString("netflix", "")
+            ?.trim()
+            .orEmpty()
+        val shared = map.optJSONObject("libres")?.has("netflix") == true
+        val disabled = map.optJSONObject("apagadas")
+            ?.optBoolean("netflix", false) == true
+
+        return mapOf(
+            "ok" to true,
+            "stage" to "codes",
+            "ping_ok" to pingOk,
+            "has_code" to rawCode.startsWith("premium_id:"),
+            "has_ref" to ref.isNotBlank(),
+            "shared" to shared,
+            "disabled" to disabled,
+            "intento" to intento,
+            "session_queda" to session.queda,
+            "session_libre" to session.libre,
+            "session_pro" to session.pro,
+        )
+    }
+
     fun reportDead(platform: String, ref: String): Boolean {
         if (!platforms.containsKey(platform)) return false
         if (ref.isBlank() || ref.length > 256) return false
