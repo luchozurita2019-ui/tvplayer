@@ -535,15 +535,11 @@ class _NetflixGeneratedCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final help = tvMode
-        ? '1 · En la TV: Netflix → Iniciar sesión → '
-            '"Iniciar sesión con código de acceso".\n'
-            '2 · La TV muestra un código.\n'
-            '3 · Acá tocá ABRIR y, en la página que se abre, '
-            'ingresá ese código.\n'
-            '4 · La TV entra sola.'
-        : '1 · Tocá ABRIR: se abre el navegador con el acceso temporal.\n'
-            '2 · Esperá a que cargue Netflix en el navegador.\n'
-            '3 · Usá ese acceso desde el navegador mientras siga vigente.';
+        ? 'TV · El generador entregó el acceso temporal /tv8?nftoken=.\n'
+            'Tocá ABRIR EN NAVEGADOR y esperá a que Netflix cargue.'
+        : 'TELÉFONO · El generador entregó el acceso temporal '
+            '/unsupported?nftoken=.\n'
+            'Tocá ABRIR EN NAVEGADOR y esperá a que Netflix cargue.';
 
     return Container(
       width: double.infinity,
@@ -564,7 +560,9 @@ class _NetflixGeneratedCard extends StatelessWidget {
               border: Border.all(color: Colors.white10),
             ),
             child: Text(
-              url,
+              tvMode
+                  ? 'https://www.netflix.com/tv8?nftoken=••••••••'
+                  : 'https://www.netflix.com/unsupported?nftoken=••••••••',
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
               style: const TextStyle(
