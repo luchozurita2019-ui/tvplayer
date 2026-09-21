@@ -124,17 +124,16 @@ c0 = root / "smali" / "Q1" / "C0.smali"
 if not c0.exists():
     raise SystemExit("Q1/C0.smali not found")
 c0_text = c0.read_text(encoding="utf-8")
-success_needle = """:cond_63
-    iput-boolean v9, v1, Lcom/byrafael/streamapp/MainActivity;->z1:Z
 
-    .line 101
-"""
-if success_needle not in c0_text:
-    raise SystemExit("Netflix success anchor not found in C0.smali")
+success_pattern = re.compile(
+    r"(?m)^(\s*)iput-boolean\s+v9,\s+v1,\s+Lcom/byrafael/streamapp/MainActivity;->z1:Z\s*$"
+)
+success_match = success_pattern.search(c0_text)
+if not success_match:
+    raise SystemExit("Netflix W0 success point not found in C0.smali")
 
-success_patch = """:cond_63
-    iput-boolean v9, v1, Lcom/byrafael/streamapp/MainActivity;->z1:Z
-
+indent = success_match.group(1)
+bridge = """
     # If this generation was launched from TV FULL, return the final W0 URLs.
     invoke-virtual {v1}, Landroid/app/Activity;->getIntent()Landroid/content/Intent;
     move-result-object v10
@@ -180,9 +179,9 @@ success_patch = """:cond_63
 
     :tvfull_bridge_continue_ft_ui
     const/4 v9, 0x0
-
-    .line 101
 """
-c0_text = c0_text.replace(success_needle, success_patch, 1)
+
+insert_at = success_match.end()
+c0_text = c0_text[:insert_at] + "\n" + bridge + c0_text[insert_at:]
 c0.write_text(c0_text, encoding="utf-8")
 print("patched TV FULL bridge return of final Netflix URLs; generator untouched")
