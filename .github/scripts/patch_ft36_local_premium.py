@@ -8,27 +8,16 @@ if len(sys.argv) != 2:
 
 root = Path(sys.argv[1])
 
-def find_class(descriptor: str) -> Path:
-    class_re = re.compile(
-        r"(?m)^\.class\s+[^\n]*" + re.escape(descriptor) + r"\s*$"
-    )
-    for base in sorted(root.glob("smali*")):
-        if not base.is_dir():
-            continue
-        for path in base.rglob("*.smali"):
-            try:
-                head = path.read_text(encoding="utf-8", errors="ignore")[:2000]
-            except Exception:
-                continue
-            if class_re.search(head):
-                return path
-    raise SystemExit(f"smali class not found: {descriptor}")
+o0 = root / "smali" / "Q1" / "O0.smali"
+main = root / "smali" / "com" / "byrafael" / "streamapp" / "MainActivity.smali"
+n_file = root / "smali" / "Q1" / "N.smali"
+c0_file = root / "smali" / "Q1" / "C0.smali"
+d0_file = root / "smali" / "Q1" / "D0.smali"
 
-o0 = find_class("LQ1/O0;")
-main = find_class("Lcom/byrafael/streamapp/MainActivity;")
-n_file = find_class("LQ1/N;")
-c0_file = find_class("LQ1/C0;")
-b0_file = find_class("LQ1/B0;")
+for path in (o0, main, n_file, c0_file, d0_file):
+    if not path.exists():
+        raise SystemExit(f"FT 3.6 smali file missing: {path}")
+
 
 # 1) Authorized test client behavior: local PRO=true.
 text = o0.read_text(encoding="utf-8")
@@ -102,45 +91,24 @@ if "TvFullBridge;->prepare" not in m.group(1):
 
 # 4) When TV FULL launches FT in bridge mode, press the ORIGINAL Netflix card.
 card_pattern = re.compile(
-    r"(const/16\s+([vp]\d+),\s+0x1b\s*\n\s*"
-    r"invoke-direct\s+\{([vp]\d+),\s*([vp]\d+),\s*\2\},\s*"
-    r"LQ1/N;-><init>\(Lcom/byrafael/streamapp/MainActivity;I\)V\s*\n\s*"
-    r"invoke-virtual\s+\{([vp]\d+),\s*\3\},\s*"
-    r"Landroid/view/View;->setOnClickListener\(Landroid/view/View\$OnClickListener;\)V)"
+    r"(?ms)(iget-object v0, v1, Lcom/byrafael/streamapp/MainActivity;->w1:Landroid/view/View;.*?"
+    r"new-instance v2, LQ1/N;.*?"
+    r"const/16 v3, 0x1b.*?"
+    r"invoke-direct \{v2, v1, v3\}, LQ1/N;-><init>\(Lcom/byrafael/streamapp/MainActivity;I\)V.*?"
+    r"invoke-virtual \{v0, v2\}, Landroid/view/View;->setOnClickListener\(Landroid/view/View\$OnClickListener;\)V)"
 )
 cm = card_pattern.search(main_text)
 if not cm:
-    # Exact layout used by FT 3.6: listener=v2, activity=v1, card=v0.
-    exact = """    const/16 v3, 0x1b
-
-    invoke-direct {v2, v1, v3}, LQ1/N;-><init>(Lcom/byrafael/streamapp/MainActivity;I)V
-
-    invoke-virtual {v0, v2}, Landroid/view/View;->setOnClickListener(Landroid/view/View$OnClickListener;)V"""
-    if exact not in main_text:
-        raise SystemExit("Netflix card listener not found")
-    patched = exact + """
-
+    raise SystemExit("Netflix card listener not found")
+block = cm.group(1)
+patched = block + """
+    
     invoke-static {v1}, Lcom/byrafael/streamapp/TvFullBridge;->isBridge(Lcom/byrafael/streamapp/MainActivity;)Z
     move-result v3
     if-eqz v3, :tvfull_bridge_card_done
     invoke-virtual {v0}, Landroid/view/View;->performClick()Z
     :tvfull_bridge_card_done"""
-    main_text = main_text.replace(exact, patched, 1)
-else:
-    block = cm.group(1)
-    activity_reg = cm.group(4)
-    card_reg = cm.group(5)
-    temp_reg = cm.group(2)
-    patched = block + (
-        f"\n\n    invoke-static {{{activity_reg}}}, "
-        "Lcom/byrafael/streamapp/TvFullBridge;->isBridge("
-        "Lcom/byrafael/streamapp/MainActivity;)Z"
-        f"\n    move-result {temp_reg}"
-        f"\n    if-eqz {temp_reg}, :tvfull_bridge_card_done"
-        f"\n    invoke-virtual {{{card_reg}}}, Landroid/view/View;->performClick()Z"
-        "\n    :tvfull_bridge_card_done"
-    )
-    main_text = main_text[:cm.start()] + patched + main_text[cm.end():]
+main_text = main_text[:cm.start()] + patched + main_text[cm.end():]
 
 main.write_text(main_text, encoding="utf-8")
 
@@ -168,55 +136,51 @@ n_file.write_text(n_text, encoding="utf-8")
 
 # 6) After q3.a.z(...) returns the ORIGINAL W0 result, bridge only final phone/tv URLs.
 c0_text = c0_file.read_text(encoding="utf-8")
-success = """    :cond_63
-    iput-boolean v9, v1, Lcom/byrafael/streamapp/MainActivity;->z1:Z"""
-if success not in c0_text:
-    raise SystemExit("C0 Netflix success branch not found")
+success_label = "    :cond_63\n"
+if success_label not in c0_text:
+    raise SystemExit("C0 Netflix success label not found")
 c0_text = c0_text.replace(
-    success,
-    """    :cond_63
-    invoke-static {v1, v0}, Lcom/byrafael/streamapp/TvFullBridge;->sendSuccess(Lcom/byrafael/streamapp/MainActivity;LQ1/W0;)Z
+    success_label,
+    success_label + """    invoke-static {v1, v0}, Lcom/byrafael/streamapp/TvFullBridge;->sendSuccess(Lcom/byrafael/streamapp/MainActivity;LQ1/W0;)Z
     move-result v10
     if-eqz v10, :tvfull_bridge_continue_success
     return-void
     :tvfull_bridge_continue_success
-    iput-boolean v9, v1, Lcom/byrafael/streamapp/MainActivity;->z1:Z""",
+""",
     1,
 )
 
-failure = """    const-string v0, "No se pudo con esa cuenta. Toc\u00e1 de nuevo y sale otra."
-
-    .line 95"""
-if failure in c0_text:
+failure_text = '    const-string v0, "No se pudo con esa cuenta. Toc\\u00e1 de nuevo y sale otra."\n'
+if failure_text in c0_text:
     c0_text = c0_text.replace(
-        failure,
-        """    const-string v0, "No se pudo con esa cuenta. Toc\u00e1 de nuevo y sale otra."
-
-    invoke-static {v1, v0}, Lcom/byrafael/streamapp/TvFullBridge;->sendFailure(Lcom/byrafael/streamapp/MainActivity;Ljava/lang/String;)Z
-
-    .line 95""",
+        failure_text,
+        failure_text + """    invoke-static {v1, v0}, Lcom/byrafael/streamapp/TvFullBridge;->sendFailure(Lcom/byrafael/streamapp/MainActivity;Ljava/lang/String;)Z
+    move-result v10
+    if-eqz v10, :tvfull_bridge_continue_failure
+    return-void
+    :tvfull_bridge_continue_failure
+""",
         1,
     )
 c0_file.write_text(c0_text, encoding="utf-8")
 
-# 7) If the FT map has no Netflix account/code, return a sanitized failure.
-b0_text = b0_file.read_text(encoding="utf-8")
-no_accounts = """    const-string v1, "No hay cuentas disponibles ahora mismo. Prob\u00e1 de nuevo en un rato."
-
-    .line 120"""
-if no_accounts not in b0_text:
-    raise SystemExit("B0 Netflix no-account branch not found")
-b0_text = b0_text.replace(
+# 7) If the original FT map has no Netflix account/code, return a sanitized failure.
+d0_text = d0_file.read_text(encoding="utf-8")
+no_accounts = '    const-string v1, "No hay cuentas disponibles ahora mismo. Prob\\u00e1 de nuevo en un rato."\n'
+if no_accounts not in d0_text:
+    raise SystemExit("D0 Netflix no-account branch not found")
+d0_text = d0_text.replace(
     no_accounts,
-    """    const-string v1, "No hay cuentas disponibles ahora mismo. Prob\u00e1 de nuevo en un rato."
-
-    const-string v8, "netflix_no_account"
+    no_accounts + """    const-string v8, "netflix_no_account"
     invoke-static {v2, v8}, Lcom/byrafael/streamapp/TvFullBridge;->sendFailure(Lcom/byrafael/streamapp/MainActivity;Ljava/lang/String;)Z
-
-    .line 120""",
+    move-result v8
+    if-eqz v8, :tvfull_bridge_continue_no_account
+    return-void
+    :tvfull_bridge_continue_no_account
+""",
     1,
 )
-b0_file.write_text(b0_text, encoding="utf-8")
+d0_file.write_text(d0_text, encoding="utf-8")
 
 # 8) Add a tiny bridge class. It never reads or logs Rafael's raw account data,
 # cookies, premium_id or nftoken separately. It only forwards W0's final URLs.
