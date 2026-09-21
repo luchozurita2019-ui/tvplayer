@@ -546,6 +546,55 @@ internal class FtPremiumCompat(private val context: Context) {
         }
     }
 
+    internal fun authorizeTestSession(): Map<String, Any?> {
+        val id = getAnonId()
+        var session = runCatching { ensureFtSession(id, wantAd = false) }
+            .getOrElse {
+                return mapOf(
+                    "completed" to false,
+                    "status" to "session_failed",
+                    "stage" to "session",
+                    "detail" to it.message.orEmpty().take(160),
+                )
+            }
+
+        if (session.queda > 0 || session.libre || session.pro) {
+            return mapOf(
+                "completed" to true,
+                "status" to "already_active",
+                "stage" to "session",
+                "queda" to session.queda,
+                "libre" to session.libre,
+                "pro" to session.pro,
+            )
+        }
+
+        val activation = runCatching { activateAuthorized(id) }
+            .getOrElse {
+                return mapOf(
+                    "completed" to false,
+                    "status" to "activation_failed",
+                    "stage" to "activation",
+                    "detail" to it.message.orEmpty().take(160),
+                )
+            }
+
+        session = activation.session ?: session
+        val active = activation.ok &&
+            (session.queda > 0 || session.libre || session.pro)
+
+        return mapOf(
+            "completed" to active,
+            "status" to if (active) "activated" else "activation_failed",
+            "stage" to "activation",
+            "queda" to session.queda,
+            "libre" to session.libre,
+            "pro" to session.pro,
+            "rounds" to activation.rounds,
+            "detail" to activation.detail.take(160),
+        )
+    }
+
     internal fun sessionAfterAd(): Map<String, Any?> {
         val id = getAnonId()
         val session = ensureFtSession(id, wantAd = false)
