@@ -387,29 +387,32 @@ class StreamingPremiumService {
       );
     }
 
-    final phone = data['phone_url']?.toString().trim() ?? '';
-    final tv = data['tv_url']?.toString().trim() ?? '';
-    if (!_isNetflixPhoneHandoff(phone) || !_isNetflixTvHandoff(tv)) {
+    // FT/Rafael entrega el enlace web final ya generado. TV FULL no crea,
+    // decodifica ni reconstruye nftoken: conserva la URL completa.
+    final generatedUrl = (data['url'] ?? data['phone_url'])
+            ?.toString()
+            .trim() ??
+        '';
+    if (!_isNetflixPhoneHandoff(generatedUrl)) {
       throw const StreamingPremiumUnavailableException(
         'netflix_handoff_failed',
       );
     }
 
-    final selected = _androidTv ? tv : phone;
     return StreamingPremiumSession(
       platform: 'netflix',
       mode: 'netflix_handoff',
-      url: selected,
+      url: generatedUrl,
       cookies: const <StreamingPremiumCookie>[],
       shared: true,
       ref: '',
-      phoneUrl: phone,
-      tvUrl: tv,
+      phoneUrl: generatedUrl,
+      tvUrl: '',
     );
   }
 
   Future<void> openNetflixGeneratedUrl(String url) async {
-    if (!_isNetflixPhoneHandoff(url) && !_isNetflixTvHandoff(url)) {
+    if (!_isNetflixPhoneHandoff(url)) {
       throw const FormatException(
         'El generador no entregó un acceso temporal válido.',
       );
