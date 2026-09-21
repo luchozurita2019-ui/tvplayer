@@ -300,7 +300,15 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
       });
     } on StreamingPremiumUnavailableException catch (error) {
       if (!mounted) return;
-      setState(() => _status = error.toString());
+      setState(() {
+        if (error.status == 'netflix_handoff_failed') {
+          _attempt += 1;
+          _status =
+              'No se pudo con esa cuenta. Tocá GENERAR ACCESO de nuevo y sale otra.';
+        } else {
+          _status = error.toString();
+        }
+      });
     } on PlatformException catch (error) {
       if (!mounted) return;
       setState(() {
