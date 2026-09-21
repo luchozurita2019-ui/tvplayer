@@ -406,13 +406,36 @@ class StreamingPremiumService {
     StreamingPremiumStageCallback? onStage,
   }) async {
     onStage?.call(StreamingPremiumStage.authenticating);
-    final pro = await getFtProState();
-    if (pro['pro'] != true) {
-      throw const StreamingPremiumUnavailableException('pro_required');
+
+    final authRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      'authorizeTestSession',
+    );
+    if (authRaw is! Map) {
+      throw const StreamingPremiumUnavailableException(
+        'activation_failed',
+        'respuesta de sesión de prueba inválida',
+      );
     }
 
-    // Con pro=1 confirmado en el Worker, recién pedimos /plat/get.
-    // En esta rama de prueba Netflix no abre ni completa anuncios.
+    final auth = Map<String, dynamic>.from(authRaw);
+    if (auth['completed'] != true) {
+      final status =
+          auth['status']?.toString().trim() ?? 'activation_failed';
+      final stage = auth['stage']?.toString().trim() ?? '';
+      final rounds = auth['rounds'];
+      final detail = auth['detail']?.toString().trim() ?? '';
+      final parts = <String>[];
+      if (stage.isNotEmpty) parts.add('etapa=$stage');
+      if (rounds is num) parts.add('rondas=${rounds.toInt()}');
+      if (detail.isNotEmpty) parts.add(detail);
+      throw StreamingPremiumUnavailableException(
+        status,
+        parts.join(' · '),
+      );
+    }
+
+    // El Worker de Rafael ya confirmó el cliente de prueba.
+    // Recién ahora pedimos /plat/get y el handoff temporal de Netflix.
     final session = await prepare(
       'netflix',
       intento: intento,
