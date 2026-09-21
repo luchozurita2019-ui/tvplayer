@@ -53,6 +53,8 @@ class StreamingPremiumSession {
   final List<StreamingPremiumCookie> cookies;
   final bool shared;
   final String ref;
+  final String phoneUrl;
+  final String tvUrl;
 
   const StreamingPremiumSession({
     required this.platform,
@@ -61,9 +63,11 @@ class StreamingPremiumSession {
     required this.cookies,
     required this.shared,
     required this.ref,
+    this.phoneUrl = '',
+    this.tvUrl = '',
   });
 
-  bool get isExternal => mode == 'external';
+  bool get isExternal => mode == 'external' || mode == 'netflix_handoff';
 }
 
 enum StreamingPremiumStage {
@@ -92,6 +96,9 @@ class StreamingPremiumUnavailableException implements Exception {
     switch (status) {
       case 'disabled':
         return 'La plataforma está deshabilitada temporalmente.';
+      case 'netflix_no_account':
+        return 'No hay accesos de Netflix disponibles ahora mismo. '
+            'Probá de nuevo en un rato.';
       case 'free_without_session':
       case 'no_session':
         return detail.isEmpty
@@ -278,12 +285,14 @@ class StreamingPremiumService {
     }
 
     final mode = data['mode']?.toString().trim().toLowerCase() ?? 'webview';
+    final isExternalHandoff =
+        mode == 'external' || mode == 'netflix_handoff';
+    final phoneUrl = data['phone_url']?.toString().trim() ?? '';
+    final tvUrl = data['tv_url']?.toString().trim() ?? '';
     var url = data['url']?.toString().trim() ?? '';
-    if (mode == 'external' && platform == 'netflix') {
-      final preferred = _androidTv
-          ? data['tv_url']?.toString().trim()
-          : data['phone_url']?.toString().trim();
-      if (preferred != null && preferred.isNotEmpty) {
+    if (isExternalHandoff && platform == 'netflix') {
+      final preferred = _androidTv ? tvUrl : phoneUrl;
+      if (preferred.isNotEmpty) {
         url = preferred;
       }
     }
@@ -292,7 +301,7 @@ class StreamingPremiumService {
     if (uri == null || uri.scheme != 'https' || uri.host.trim().isEmpty) {
       throw const FormatException('URL Streaming Premium inválida.');
     }
-    if (mode == 'external' &&
+    if (isExternalHandoff &&
         platform == 'netflix' &&
         !(uri.host == 'netflix.com' || uri.host.endsWith('.netflix.com'))) {
       throw const FormatException('Destino externo de Netflix inválido.');
@@ -314,14 +323,15 @@ class StreamingPremiumService {
       }
     }
 
-    if (mode != 'external' && cookies.isEmpty) {
+    if (!isExternalHandoff && cookies.isEmpty) {
       throw const FormatException(
         'La sesión compartida no contiene cookies válidas.',
       );
     }
 
-    final normalizedCookies =
-        mode == 'external' ? cookies : _normalizeFtCookies(platform, cookies);
+    final normalizedCookies = isExternalHandoff
+        ? cookies
+        : _normalizeFtCookies(platform, cookies);
 
     final session = StreamingPremiumSession(
       platform: data['platform']?.toString() ?? platform,
@@ -330,6 +340,8 @@ class StreamingPremiumService {
       cookies: List.unmodifiable(normalizedCookies),
       shared: data['shared'] == true,
       ref: data['ref']?.toString().trim() ?? '',
+      phoneUrl: phoneUrl,
+      tvUrl: tvUrl,
     );
 
     _sessionCache[platform] = _CachedPremiumSession(
@@ -337,6 +349,38 @@ class StreamingPremiumService {
       DateTime.now(),
     );
     return session;
+  }
+
+  Future<StreamingPremiumSession> generateNetflixAccess({
+    required int intento,
+    StreamingPremiumStageCallback? onStage,
+  }) async {
+    final session = await prepare(
+      'netflix',
+      intento: intento,
+      onStage: onStage,
+    );
+    if (!session.isExternal ||
+        session.phoneUrl.isEmpty ||
+        session.tvUrl.isEmpty) {
+      throw const StreamingPremiumUnavailableException(
+        'netflix_handoff_failed',
+      );
+    }
+    return session;
+  }
+
+  Future<void> openNetflixGeneratedUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        !(uri.host == 'netflix.com' || uri.host.endsWith('.netflix.com'))) {
+      throw const FormatException('Destino de Netflix inválido.');
+    }
+    await _webPlayback.invokeMethod<dynamic>('openExternalBrowser', {
+      'url': url,
+      'platform': 'netflix',
+    });
   }
 
   Future<void> open(
