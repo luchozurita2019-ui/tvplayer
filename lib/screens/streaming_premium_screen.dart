@@ -280,7 +280,8 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
   String get _selectedUrl {
     final access = _access;
     if (access == null) return '';
-    return _tvMode ? access.tvUrl : access.phoneUrl;
+    if (_tvMode && access.tvUrl.isNotEmpty) return access.tvUrl;
+    return access.phoneUrl;
   }
 
   Future<void> _generate() async {
@@ -411,7 +412,18 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
                           _NetflixTabs(
                             tvMode: _tvMode,
                             onPhone: () => setState(() => _tvMode = false),
-                            onTv: () => setState(() => _tvMode = true),
+                            onTv: () {
+                              final access = _access;
+                              if (access != null && access.tvUrl.isNotEmpty) {
+                                setState(() => _tvMode = true);
+                              } else {
+                                setState(() {
+                                  _tvMode = false;
+                                  _status =
+                                      'Este acceso sólo está disponible para navegador.';
+                                });
+                              }
+                            },
                           ),
                           const SizedBox(height: 14),
                           _NetflixGeneratedCard(
