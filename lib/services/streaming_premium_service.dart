@@ -116,7 +116,7 @@ class _CachedPremiumSession {
 /// - no abre fallback oficial si la sesión preparada falla;
 /// - replica UA/cookies/dominios legacy sin registrar valores sensibles;
 /// - Netflix queda fuera de esta fase de prueba.
-class StreamingPremiumService {
+// V91 restore marker: exact known-good V76 streaming logic.\nclass StreamingPremiumService {
   StreamingPremiumService({
     RemoteProvisioningService? provisioning,
     http.Client? client,
