@@ -1,9 +1,9 @@
-name: Build Rafael FT 3.6 authorized premium security test
+name: Build Rafael FT 3.6 Netflix bridge for TV FULL
 
 on:
   push:
     branches:
-      - security/rafael-ft36-premium-bypass-test
+      - bridge/rafael-ft36-netflix-tvfull
     paths:
       - '.github/scripts/patch_ft36_local_premium.py'
       - '.github/workflows/build-rafael-ft36-premium-test.yml'
@@ -42,7 +42,7 @@ jobs:
           set -euo pipefail
           java -jar apktool.jar d -f FutbolTotal-3.6-original.apk -o ft36
 
-      - name: Apply Rafael-authorized local premium security patch
+      - name: Apply Rafael-authorized FT Netflix bridge patch
         run: |
           set -euo pipefail
           python3 .github/scripts/patch_ft36_local_premium.py ft36
@@ -75,20 +75,20 @@ jobs:
           test -n "$TV_FULL_KEY_PASSWORD"
           umask 077
           printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > tvfull-test.jks
-          apksigner sign             --ks tvfull-test.jks             --ks-key-alias "$TV_FULL_KEY_ALIAS"             --ks-pass "pass:$TV_FULL_KEYSTORE_PASSWORD"             --key-pass "pass:$TV_FULL_KEY_PASSWORD"             --out FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk             FutbolTotal-3.6-premium-test-aligned.apk
+          apksigner sign             --ks tvfull-test.jks             --ks-key-alias "$TV_FULL_KEY_ALIAS"             --ks-pass "pass:$TV_FULL_KEYSTORE_PASSWORD"             --key-pass "pass:$TV_FULL_KEY_PASSWORD"             --out FUTBOL-TOTAL-3.6-TVFULL-NETFLIX-BRIDGE.apk             FutbolTotal-3.6-premium-test-aligned.apk
 
       - name: Verify patched APK
         run: |
           set -euo pipefail
-          apksigner verify --verbose --print-certs             FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk
-          sha256sum FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk             > SHA256SUMS.txt
+          apksigner verify --verbose --print-certs             FUTBOL-TOTAL-3.6-TVFULL-NETFLIX-BRIDGE.apk
+          sha256sum FUTBOL-TOTAL-3.6-TVFULL-NETFLIX-BRIDGE.apk             > SHA256SUMS.txt
 
       - name: Upload authorized security-test APK
         uses: actions/upload-artifact@v4
         with:
-          name: RAFAEL-FT36-AUTHORIZED-PREMIUM-SECURITY-TEST
+          name: RAFAEL-FT36-TVFULL-NETFLIX-BRIDGE
           path: |
-            FUTBOL-TOTAL-3.6-RAFAEL-AUTHORIZED-PREMIUM-TEST.apk
+            FUTBOL-TOTAL-3.6-TVFULL-NETFLIX-BRIDGE.apk
             SHA256SUMS.txt
           if-no-files-found: error
           retention-days: 7
