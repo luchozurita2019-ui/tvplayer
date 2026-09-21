@@ -7,6 +7,7 @@
 
     <queries>
         <package android:name="com.tvfull.pro.installer" />
+        <package android:name="com.byrafael.streamapp" />
     </queries>
 
     <application
