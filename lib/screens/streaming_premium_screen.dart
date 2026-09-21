@@ -189,19 +189,51 @@ class _PlatformGridState extends State<_PlatformGrid> {
     if (_opening != null) return;
 
     if (platform == StreamingPremiumPlatform.netflix) {
+      setState(() => _opening = platform);
       final messenger = ScaffoldMessenger.of(context);
       messenger
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(
-            duration: Duration(seconds: 3),
+            duration: Duration(seconds: 2),
             backgroundColor: Color(0xFF17140D),
-            content: Text(
-              'Netflix queda para la fase final. '
-              'Esta prueba corrige MAX, Prime y Crunchyroll.',
-            ),
+            content: Text('Abriendo generador de Netflix de Rafael…'),
           ),
         );
+
+      try {
+        final handoff = await _service.openRafaelPremiumHelper();
+        if (!mounted) return;
+        final installed = handoff['installed'] == true;
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 4),
+              backgroundColor: const Color(0xFF17140D),
+              content: Text(
+                installed
+                    ? 'Premium ID PRO abierto. Generá Netflix desde ahí y el acceso se abrirá en la app oficial.'
+                    : 'Premium ID PRO no estaba instalado. Se abrió la descarga oficial de Rafael.',
+              ),
+            ),
+          );
+      } on PlatformException catch (error) {
+        if (!mounted) return;
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 4),
+              backgroundColor: const Color(0xFF2A1712),
+              content: Text(
+                error.message ?? 'No se pudo abrir el generador de Rafael.',
+              ),
+            ),
+          );
+      } finally {
+        if (mounted) setState(() => _opening = null);
+      }
       return;
     }
 
