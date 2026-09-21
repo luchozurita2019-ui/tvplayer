@@ -387,19 +387,27 @@ class StreamingPremiumService {
       );
     }
 
+    // El generador original de FT devuelve W0.b (Teléfono) y W0.c (TV).
+    // Se conservan ambos strings tal como llegan; TV FULL no reconstruye nftoken.
     final phone = data['phone_url']?.toString().trim() ?? '';
     final tv = data['tv_url']?.toString().trim() ?? '';
-    if (!_isNetflixPhoneHandoff(phone) || !_isNetflixTvHandoff(tv)) {
+    if (!_isNetflixPhoneHandoff(phone)) {
+      throw const StreamingPremiumUnavailableException(
+        'netflix_handoff_failed',
+      );
+    }
+    // TV es opcional para no invalidar un acceso web correcto. Si FT lo
+    // entrega, debe conservar el formato /tv8?nftoken= original.
+    if (tv.isNotEmpty && !_isNetflixTvHandoff(tv)) {
       throw const StreamingPremiumUnavailableException(
         'netflix_handoff_failed',
       );
     }
 
-    final selected = _androidTv ? tv : phone;
     return StreamingPremiumSession(
       platform: 'netflix',
       mode: 'netflix_handoff',
-      url: selected,
+      url: phone,
       cookies: const <StreamingPremiumCookie>[],
       shared: true,
       ref: '',
