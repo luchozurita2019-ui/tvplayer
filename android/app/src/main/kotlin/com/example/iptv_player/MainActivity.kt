@@ -428,8 +428,13 @@ class MainActivity : FlutterActivity() {
 
                 val callback = pendingFtNetflixBridgeResult ?: return
                 val ok = intent.getBooleanExtra("ok", false)
-                val phone = intent.getStringExtra("phone_url")?.trim().orEmpty()
-                val tv = intent.getStringExtra("tv_url")?.trim().orEmpty()
+                // El resultado de FT ya contiene la URL web temporal final.
+                // Para Netflix TV FULL usa únicamente el enlace de navegador
+                // (/unsupported?nftoken=...) y nunca fuerza la app de Netflix.
+                val url = intent.getStringExtra("url")?.trim().orEmpty()
+                    .ifBlank {
+                        intent.getStringExtra("phone_url")?.trim().orEmpty()
+                    }
                 val expira = intent.getLongExtra("expira", 0L)
                 val status = intent.getStringExtra("status")
                     ?.trim()
@@ -443,8 +448,8 @@ class MainActivity : FlutterActivity() {
                     mapOf(
                         "ok" to ok,
                         "status" to status,
-                        "phone_url" to phone,
-                        "tv_url" to tv,
+                        "url" to url,
+                        "phone_url" to url,
                         "expira" to expira,
                     )
                 )
@@ -526,7 +531,7 @@ class MainActivity : FlutterActivity() {
         val token = uri.getQueryParameter("nftoken")?.trim().orEmpty()
         val exactNetflixHandoff = platform == "netflix" &&
             (host == "www.netflix.com" || host == "netflix.com") &&
-            (uri.path == "/unsupported" || uri.path == "/tv8") &&
+            uri.path == "/unsupported" &&
             token.isNotEmpty()
         if (!exactNetflixHandoff) {
             result.error(
