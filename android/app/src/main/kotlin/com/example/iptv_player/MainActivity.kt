@@ -258,6 +258,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "open" -> openWebPlayback(call, result)
                     "openExternal" -> openExternalUrl(call, result)
+                    "openExternalBrowser" -> openExternalBrowserUrl(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -362,6 +363,88 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 handlePlayerCall(flutterEngine, call, result)
             }
+    }
+
+    private fun openExternalBrowserUrl(
+        call: MethodCall,
+        result: MethodChannel.Result,
+    ) {
+        val rawUrl = call.argument<String>("url")?.trim().orEmpty()
+        val platform = call.argument<String>("platform")
+            ?.trim()
+            ?.lowercase(Locale.US)
+            .orEmpty()
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull()
+        if (uri == null || uri.scheme != "https" || uri.host.isNullOrBlank()) {
+            result.error("INVALID_EXTERNAL_URL", "URL externa inválida.", null)
+            return
+        }
+
+        val host = uri.host!!.lowercase(Locale.US)
+        val allowed = platform == "netflix" &&
+            (host == "netflix.com" || host.endsWith(".netflix.com"))
+        if (!allowed) {
+            result.error(
+                "EXTERNAL_HOST_BLOCKED",
+                "Destino externo no permitido.",
+                null,
+            )
+            return
+        }
+
+        // Resolver un navegador usando una URL web genérica para evitar
+        // que Android entregue el enlace temporal a la app de Netflix.
+        val browserProbe = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://example.com"),
+        ).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+
+        val defaultBrowser = runCatching {
+            packageManager.resolveActivity(
+                browserProbe,
+                android.content.pm.PackageManager.MATCH_DEFAULT_ONLY,
+            )?.activityInfo?.packageName
+        }.getOrNull()?.takeIf { pkg ->
+            pkg != packageName &&
+                !pkg.lowercase(Locale.US).contains("netflix")
+        }
+
+        val browserPackage = defaultBrowser ?: runCatching {
+            packageManager.queryIntentActivities(browserProbe, 0)
+                .mapNotNull { it.activityInfo?.packageName }
+                .firstOrNull { pkg ->
+                    pkg != packageName &&
+                        !pkg.lowercase(Locale.US).contains("netflix")
+                }
+        }.getOrNull()
+
+        if (browserPackage.isNullOrBlank()) {
+            result.error(
+                "BROWSER_NOT_FOUND",
+                "No hay un navegador disponible para abrir Netflix.",
+                null,
+            )
+            return
+        }
+
+        val intent = Intent(Intent.ACTION_VIEW, uri).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+            setPackage(browserPackage)
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        }
+
+        try {
+            startActivity(intent)
+            result.success(true)
+        } catch (error: Throwable) {
+            result.error(
+                "EXTERNAL_BROWSER_OPEN_FAILED",
+                error.message ?: "No se pudo abrir el navegador.",
+                null,
+            )
+        }
     }
 
     private fun openExternalUrl(
