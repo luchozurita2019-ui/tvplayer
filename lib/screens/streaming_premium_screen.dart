@@ -283,6 +283,113 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
     return _tvMode ? access.tvUrl : access.phoneUrl;
   }
 
+  Future<String?> _askAuthorizedFtToken() async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        barrierDismissible: false,
+        builder: (dialogContext) {
+          return AlertDialog(
+            backgroundColor: const Color(0xFF10151D),
+            title: const Text(
+              'ACTIVAR PRUEBA',
+              style: TextStyle(
+                color: Colors.white,
+                fontWeight: FontWeight.w900,
+              ),
+            ),
+            content: SizedBox(
+              width: 420,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Ingresá una sola vez el token de activación autorizado '
+                    'de Fútbol Total. Después de que el Worker confirme PRO, '
+                    'Netflix continuará sin anuncios ni registro.',
+                    style: TextStyle(color: Colors.white70, height: 1.4),
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    textCapitalization: TextCapitalization.characters,
+                    inputFormatters: [
+                      FilteringTextInputFormatter.allow(
+                        RegExp(r'[A-Za-z0-9-]'),
+                      ),
+                      LengthLimitingTextInputFormatter(14),
+                    ],
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: 1.0,
+                    ),
+                    decoration: const InputDecoration(
+                      labelText: 'Token FT',
+                      hintText: 'FT-XXXX-XXXX',
+                      labelStyle: TextStyle(color: streamingPremiumGoldSoft),
+                      hintStyle: TextStyle(color: Colors.white30),
+                      enabledBorder: OutlineInputBorder(
+                        borderSide: BorderSide(color: Colors.white24),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderSide: BorderSide(
+                          color: streamingPremiumGold,
+                          width: 2,
+                        ),
+                      ),
+                    ),
+                    onSubmitted: (value) {
+                      final token = value.trim();
+                      if (token.isNotEmpty) {
+                        Navigator.of(dialogContext).pop(token);
+                      }
+                    },
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('CANCELAR'),
+              ),
+              FilledButton(
+                onPressed: () {
+                  final token = controller.text.trim();
+                  if (token.isNotEmpty) {
+                    Navigator.of(dialogContext).pop(token);
+                  }
+                },
+                child: const Text('ACTIVAR'),
+              ),
+            ],
+          );
+        },
+      );
+    } finally {
+      controller.dispose();
+    }
+  }
+
+  Future<bool> _ensureAuthorizedFtPro() async {
+    final state = await widget.service.getFtProState();
+    if (state['pro'] == true) return true;
+
+    final token = await _askAuthorizedFtToken();
+    if (token == null || token.trim().isEmpty) return false;
+
+    await widget.service.activateFtProToken(token);
+    final confirmed = await widget.service.getFtProState();
+    if (confirmed['pro'] != true) {
+      throw const StreamingPremiumUnavailableException('pro_pending');
+    }
+    return true;
+  }
+
   Future<void> _generate() async {
     if (_generating) return;
     setState(() {
@@ -290,6 +397,9 @@ class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
       _status = '';
     });
     try {
+      final activated = await _ensureAuthorizedFtPro();
+      if (!activated) return;
+
       final access = await widget.service.generateNetflixAccess(
         intento: _attempt,
       );
