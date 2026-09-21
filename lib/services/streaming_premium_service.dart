@@ -355,19 +355,41 @@ class StreamingPremiumService {
     required int intento,
     StreamingPremiumStageCallback? onStage,
   }) async {
-    final session = await prepare(
-      'netflix',
-      intento: intento,
-      onStage: onStage,
+    onStage?.call(StreamingPremiumStage.requestingSession);
+    final raw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      'generateNetflixViaFt',
+      <String, dynamic>{'intento': intento},
     );
-    if (!session.isExternal ||
-        !_isNetflixPhoneHandoff(session.phoneUrl) ||
-        !_isNetflixTvHandoff(session.tvUrl)) {
+    if (raw is! Map) {
       throw const StreamingPremiumUnavailableException(
         'netflix_handoff_failed',
       );
     }
-    return session;
+
+    final data = Map<String, dynamic>.from(raw);
+    final phoneUrl = data['phone_url']?.toString().trim() ?? '';
+    final tvUrl = data['tv_url']?.toString().trim() ?? '';
+    final expira = (data['expira'] as num?)?.toInt() ?? 0;
+
+    if (data['available'] != true ||
+        !_isNetflixPhoneHandoff(phoneUrl) ||
+        !_isNetflixTvHandoff(tvUrl)) {
+      throw const StreamingPremiumUnavailableException(
+        'netflix_handoff_failed',
+      );
+    }
+
+    onStage?.call(StreamingPremiumStage.validatingSession);
+    return StreamingPremiumSession(
+      platform: 'netflix',
+      mode: 'netflix_handoff',
+      url: phoneUrl,
+      cookies: const <StreamingPremiumCookie>[],
+      shared: true,
+      ref: expira > 0 ? 'expira:$expira' : '',
+      phoneUrl: phoneUrl,
+      tvUrl: tvUrl,
+    );
   }
 
   bool _isNetflixPhoneHandoff(String url) {
