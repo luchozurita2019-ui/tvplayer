@@ -15,6 +15,7 @@ import java.net.URLDecoder
 import java.net.URLEncoder
 import java.nio.charset.StandardCharsets
 import java.security.MessageDigest
+import java.util.Locale
 import java.util.UUID
 
 internal class FtPremiumCompat(private val context: Context) {
@@ -330,6 +331,131 @@ internal class FtPremiumCompat(private val context: Context) {
         val detail: String = "",
     ) {
         val hasToken: Boolean get() = sessionToken.isNotBlank()
+    }
+
+    internal fun getProState(): Map<String, Any?> {
+        val id = getAnonId()
+        val sig = Guard.a.b("pro:ft:$FT_VERSION_CODE:$id")
+        if (sig.isBlank()) {
+            return mapOf(
+                "ok" to false,
+                "pro" to false,
+                "status" to "pro_sign_failed",
+            )
+        }
+
+        val body = JSONObject()
+            .put("id", id)
+            .put("vc", FT_VERSION_CODE)
+            .put("sig", sig)
+
+        val response = postProJson("/pro", body)
+            ?: return mapOf(
+                "ok" to false,
+                "pro" to false,
+                "status" to "pro_unavailable",
+            )
+
+        return mapOf(
+            "ok" to response.optBoolean("ok", false),
+            "pro" to (response.optInt("pro", 0) == 1),
+            "token" to response.optString("token", "").trim(),
+            "vence" to response.optLong("vence", 0L),
+            "status" to if (response.optBoolean("ok", false)) "ok" else "pro_rejected",
+        )
+    }
+
+    internal fun activateProToken(rawToken: String): Map<String, Any?> {
+        var token = rawToken
+            .trim()
+            .uppercase(Locale.ROOT)
+            .replace("-", "")
+            .replace(" ", "")
+
+        if (token.length == 10 && token.startsWith("FT")) {
+            token = token.substring(2)
+        }
+
+        val allowed = "23456789ABCDEFGHJKLMNPQRSTUVWXYZ"
+        if (token.length != 8 || token.any { it !in allowed }) {
+            return mapOf(
+                "ok" to false,
+                "activated" to false,
+                "status" to "invalid_pro_token",
+            )
+        }
+
+        val id = getAnonId()
+        val sig = Guard.a.b("pro:usar:ft:$FT_VERSION_CODE:$id")
+        if (sig.isBlank()) {
+            return mapOf(
+                "ok" to false,
+                "activated" to false,
+                "status" to "pro_use_sign_failed",
+            )
+        }
+
+        val body = JSONObject()
+            .put("id", id)
+            .put("vc", FT_VERSION_CODE)
+            .put("sig", sig)
+            .put("token", token)
+
+        val response = postProJson("/pro/usar", body)
+            ?: return mapOf(
+                "ok" to false,
+                "activated" to false,
+                "status" to "pro_use_unavailable",
+            )
+
+        if (!response.optBoolean("ok", false)) {
+            return mapOf(
+                "ok" to false,
+                "activated" to false,
+                "status" to "pro_token_rejected",
+            )
+        }
+
+        val session = runCatching { ensureFtSession(id, wantAd = false) }
+            .getOrNull()
+        val activated = session?.pro == true
+
+        return mapOf(
+            "ok" to true,
+            "activated" to activated,
+            "status" to if (activated) "pro_active" else "pro_pending",
+            "pro" to (session?.pro == true),
+            "queda" to (session?.queda ?: 0),
+            "libre" to (session?.libre ?: false),
+            "vence" to response.optLong("vence", 0L),
+        )
+    }
+
+    private fun postProJson(path: String, body: JSONObject): JSONObject? {
+        val connection = URL(PRIMARY + path).openConnection() as HttpURLConnection
+        return try {
+            connection.requestMethod = "POST"
+            connection.doOutput = true
+            connection.connectTimeout = 8000
+            connection.readTimeout = 8000
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("content-type", "application/json")
+            val bytes = body.toString().toByteArray(StandardCharsets.UTF_8)
+            connection.outputStream.use { it.write(bytes) }
+
+            val stream = if (connection.responseCode == 200) {
+                connection.inputStream
+            } else {
+                connection.errorStream
+            } ?: return null
+
+            val raw = stream.bufferedReader().use { it.readText() }
+            JSONObject(raw)
+        } catch (_: Throwable) {
+            null
+        } finally {
+            connection.disconnect()
+        }
     }
 
     private fun activateAuthorized(id: String): FtActivationResult {
