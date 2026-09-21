@@ -190,18 +190,40 @@ class _PlatformGridState extends State<_PlatformGrid> {
 
     if (platform == StreamingPremiumPlatform.netflix) {
       final messenger = ScaffoldMessenger.of(context);
-      messenger
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            duration: Duration(seconds: 3),
-            backgroundColor: Color(0xFF17140D),
-            content: Text(
-              'Netflix queda para la fase final. '
-              'Esta prueba corrige MAX, Prime y Crunchyroll.',
+      setState(() => _opening = platform);
+      try {
+        const deviceChannel = MethodChannel('tvfull/device_identity');
+        final result = await deviceChannel.invokeMethod<String>('openPremiumIdPro');
+        if (!mounted) return;
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 4),
+              backgroundColor: const Color(0xFF17140D),
+              content: Text(
+                result == 'opened'
+                    ? 'Netflix: abrí el generador oficial de Rafael.'
+                    : 'Premium ID PRO no estaba instalado. Abrí la descarga oficial.',
+              ),
             ),
-          ),
-        );
+          );
+      } on PlatformException catch (error) {
+        if (!mounted) return;
+        messenger
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              duration: const Duration(seconds: 4),
+              backgroundColor: const Color(0xFF2A1712),
+              content: Text(
+                error.message ?? 'No se pudo abrir Premium ID PRO.',
+              ),
+            ),
+          );
+      } finally {
+        if (mounted) setState(() => _opening = null);
+      }
       return;
     }
 
