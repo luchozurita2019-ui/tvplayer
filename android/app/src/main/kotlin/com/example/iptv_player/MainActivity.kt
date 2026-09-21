@@ -327,6 +327,26 @@ class MainActivity : FlutterActivity() {
                             }
                         }, "ft-pro-activate").start()
                     }
+                    "probeNetflixMap" -> {
+                        val intento = call.argument<Number>("intento")?.toInt() ?: 0
+                        Thread({
+                            val response = runCatching {
+                                ftPremiumCompat.probeNetflixMap(intento)
+                            }
+                            mainHandler.post {
+                                response.fold(
+                                    onSuccess = { result.success(it) },
+                                    onFailure = {
+                                        result.error(
+                                            "FT_NETFLIX_PROBE_FAILED",
+                                            it.message ?: it.javaClass.simpleName,
+                                            null,
+                                        )
+                                    },
+                                )
+                            }
+                        }, "ft-netflix-probe").start()
+                    }
                     "authorizeTestSession" -> {
                         Thread({
                             val response = runCatching {
