@@ -140,6 +140,8 @@ class StreamingPremiumService {
 
   static const _endpoint =
       'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-streaming-premium-v67-platform-test';
+  static const _proTestEndpoint =
+      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-ft-pro-test-activate';
   static const MethodChannel _webPlayback =
       MethodChannel('tvfull/web_playback');
   static const MethodChannel _ftPremiumDirect =
@@ -407,35 +409,15 @@ class StreamingPremiumService {
   }) async {
     onStage?.call(StreamingPremiumStage.authenticating);
 
-    final authRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
-      'authorizeTestSession',
-    );
-    if (authRaw is! Map) {
-      throw const StreamingPremiumUnavailableException(
-        'activation_failed',
-        'respuesta de sesión de prueba inválida',
-      );
-    }
+    // FT 3.6 sólo habilita Netflix cuando el Worker devuelve pro=1
+    // (o Netflix está libre). Para la prueba autorizada usamos el mismo
+    // /pro/usar del Worker, pero el código de Rafael permanece sólo
+    // en el backend privado y nunca se incluye en la APK.
+    await _ensureAuthorizedFtPro();
+    _sessionCache.remove('netflix');
 
-    final auth = Map<String, dynamic>.from(authRaw);
-    if (auth['completed'] != true) {
-      final status =
-          auth['status']?.toString().trim() ?? 'activation_failed';
-      final stage = auth['stage']?.toString().trim() ?? '';
-      final rounds = auth['rounds'];
-      final detail = auth['detail']?.toString().trim() ?? '';
-      final parts = <String>[];
-      if (stage.isNotEmpty) parts.add('etapa=$stage');
-      if (rounds is num) parts.add('rondas=${rounds.toInt()}');
-      if (detail.isNotEmpty) parts.add(detail);
-      throw StreamingPremiumUnavailableException(
-        status,
-        parts.join(' · '),
-      );
-    }
-
-    // El Worker de Rafael ya confirmó el cliente de prueba.
-    // Recién ahora pedimos /plat/get y el handoff temporal de Netflix.
+    // Con pro=1 real confirmado en el Worker, pedimos el mapa/handoff.
+    // El cliente sólo recibe las URLs temporales finales.
     final session = await prepare(
       'netflix',
       intento: intento,
@@ -449,6 +431,60 @@ class StreamingPremiumService {
       );
     }
     return session;
+  }
+
+  Future<void> _ensureAuthorizedFtPro() async {
+    var credentials =
+        await _provisioning.loadCredentials() ??
+        await _provisioning.ensureRegistered();
+    final compatId =
+        await _deviceIdentity.invokeMethod<String>('getPremiumCompatId') ?? '';
+
+    Future<http.Response> send(RemoteDeviceCredentials current) {
+      return _client
+          .post(
+            Uri.parse(_proTestEndpoint),
+            headers: {
+              'Content-Type': 'application/json',
+              'Accept': 'application/json',
+              'x-tvfull-device-code': current.code,
+              'x-tvfull-device-secret': current.secret,
+            },
+            body: jsonEncode({'compatId': compatId}),
+          )
+          .timeout(const Duration(seconds: 18));
+    }
+
+    var response = await send(credentials);
+    if (response.statusCode == 401) {
+      await _provisioning.clearCredentials();
+      credentials = await _provisioning.ensureRegistered();
+      response = await send(credentials);
+    }
+
+    Map<String, dynamic> data = const <String, dynamic>{};
+    try {
+      final decoded = jsonDecode(response.body);
+      if (decoded is Map) {
+        data = Map<String, dynamic>.from(decoded);
+      }
+    } catch (_) {}
+
+    if (response.statusCode != 200 || data['activated'] != true) {
+      final rawError = data['error']?.toString().trim() ?? '';
+      final status =
+          rawError.isNotEmpty ? rawError : 'pro_activation_failed';
+      final stage = data['stage']?.toString().trim() ?? '';
+      final parts = <String>[];
+      if (stage.isNotEmpty) parts.add('etapa=$stage');
+      if (response.statusCode != 200) {
+        parts.add('HTTP ${response.statusCode}');
+      }
+      throw StreamingPremiumUnavailableException(
+        status,
+        parts.join(' · '),
+      );
+    }
   }
 
   Future<void> openNetflixGeneratedUrl(String url) async {
