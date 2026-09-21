@@ -53,6 +53,8 @@ class StreamingPremiumSession {
   final List<StreamingPremiumCookie> cookies;
   final bool shared;
   final String ref;
+  final String phoneUrl;
+  final String tvUrl;
 
   const StreamingPremiumSession({
     required this.platform,
@@ -61,9 +63,11 @@ class StreamingPremiumSession {
     required this.cookies,
     required this.shared,
     required this.ref,
+    this.phoneUrl = '',
+    this.tvUrl = '',
   });
 
-  bool get isExternal => mode == 'external';
+  bool get isExternal => mode == 'external' || mode == 'netflix_handoff';
 }
 
 enum StreamingPremiumStage {
@@ -92,6 +96,9 @@ class StreamingPremiumUnavailableException implements Exception {
     switch (status) {
       case 'disabled':
         return 'La plataforma está deshabilitada temporalmente.';
+      case 'netflix_no_account':
+        return 'No hay cuentas de Netflix disponibles ahora mismo. '
+            'Probá de nuevo en un rato.';
       case 'free_without_session':
       case 'no_session':
         return detail.isEmpty
@@ -330,6 +337,8 @@ class StreamingPremiumService {
       cookies: List.unmodifiable(normalizedCookies),
       shared: data['shared'] == true,
       ref: data['ref']?.toString().trim() ?? '',
+      phoneUrl: data['phone_url']?.toString().trim() ?? '',
+      tvUrl: data['tv_url']?.toString().trim() ?? '',
     );
 
     _sessionCache[platform] = _CachedPremiumSession(
@@ -337,6 +346,38 @@ class StreamingPremiumService {
       DateTime.now(),
     );
     return session;
+  }
+
+  Future<StreamingPremiumSession> generateNetflixAccess({
+    required int intento,
+    StreamingPremiumStageCallback? onStage,
+  }) async {
+    final session = await _prepareDirectFt(
+      'netflix',
+      intento: intento,
+      onStage: onStage,
+    );
+    if (session.mode != 'netflix_handoff' ||
+        session.phoneUrl.isEmpty ||
+        session.tvUrl.isEmpty) {
+      throw const StreamingPremiumUnavailableException(
+        'netflix_handoff_failed',
+      );
+    }
+    return session;
+  }
+
+  Future<void> openNetflixGeneratedUrl(String url) async {
+    final uri = Uri.tryParse(url);
+    if (uri == null ||
+        uri.scheme != 'https' ||
+        !(uri.host == 'netflix.com' || uri.host.endsWith('.netflix.com'))) {
+      throw const FormatException('Destino de Netflix inválido.');
+    }
+    await _webPlayback.invokeMethod<dynamic>('openExternal', {
+      'url': url,
+      'platform': 'netflix',
+    });
   }
 
   Future<void> open(
@@ -605,6 +646,8 @@ class StreamingPremiumService {
       cookies: List.unmodifiable(normalizedCookies),
       shared: data['shared'] == true,
       ref: data['ref']?.toString().trim() ?? '',
+      phoneUrl: data['phone_url']?.toString().trim() ?? '',
+      tvUrl: data['tv_url']?.toString().trim() ?? '',
     );
     _sessionCache[platform] = _CachedPremiumSession(session, DateTime.now());
     return session;
