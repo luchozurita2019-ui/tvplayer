@@ -9,15 +9,18 @@ if len(sys.argv) != 2:
 root = Path(sys.argv[1])
 
 def find_class(descriptor: str) -> Path:
+    class_re = re.compile(
+        r"(?m)^\\.class\\s+[^\\n]*" + re.escape(descriptor) + r"\\s*$"
+    )
     for base in sorted(root.glob("smali*")):
         if not base.is_dir():
             continue
         for path in base.rglob("*.smali"):
             try:
-                head = path.read_text(encoding="utf-8", errors="ignore")[:1200]
+                head = path.read_text(encoding="utf-8", errors="ignore")[:2000]
             except Exception:
                 continue
-            if descriptor in head:
+            if class_re.search(head):
                 return path
     raise SystemExit(f"smali class not found: {descriptor}")
 
