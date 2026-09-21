@@ -10,7 +10,7 @@ root = Path(sys.argv[1])
 
 def find_class(descriptor: str) -> Path:
     class_re = re.compile(
-        r"(?m)^\\.class\\s+[^\\n]*" + re.escape(descriptor) + r"\\s*$"
+        r"(?m)^\.class\s+[^\n]*" + re.escape(descriptor) + r"\s*$"
     )
     for base in sorted(root.glob("smali*")):
         if not base.is_dir():
