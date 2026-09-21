@@ -53,6 +53,8 @@ class StreamingPremiumSession {
   final List<StreamingPremiumCookie> cookies;
   final bool shared;
   final String ref;
+  final String phoneUrl;
+  final String tvUrl;
 
   const StreamingPremiumSession({
     required this.platform,
@@ -61,9 +63,11 @@ class StreamingPremiumSession {
     required this.cookies,
     required this.shared,
     required this.ref,
+    this.phoneUrl = '',
+    this.tvUrl = '',
   });
 
-  bool get isExternal => mode == 'external';
+  bool get isExternal => mode == 'external' || mode == 'netflix_handoff';
 }
 
 enum StreamingPremiumStage {
@@ -92,6 +96,11 @@ class StreamingPremiumUnavailableException implements Exception {
     switch (status) {
       case 'disabled':
         return 'La plataforma está deshabilitada temporalmente.';
+      case 'netflix_no_account':
+        return 'No hay accesos de Netflix disponibles ahora mismo. '
+            'Probá de nuevo en un rato.';
+      case 'netflix_bridge_missing':
+        return 'Falta el puente autorizado de Fútbol Total 3.6.';
       case 'free_without_session':
       case 'no_session':
         return detail.isEmpty
@@ -337,6 +346,78 @@ class StreamingPremiumService {
       DateTime.now(),
     );
     return session;
+  }
+
+  bool _isNetflixPhoneHandoff(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    if (host != 'www.netflix.com' && host != 'netflix.com') return false;
+    if (uri.path != '/unsupported') return false;
+    return (uri.queryParameters['nftoken']?.trim() ?? '').isNotEmpty;
+  }
+
+  bool _isNetflixTvHandoff(String url) {
+    final uri = Uri.tryParse(url);
+    if (uri == null || uri.scheme != 'https') return false;
+    final host = uri.host.toLowerCase();
+    if (host != 'www.netflix.com' && host != 'netflix.com') return false;
+    if (uri.path != '/tv8') return false;
+    return (uri.queryParameters['nftoken']?.trim() ?? '').isNotEmpty;
+  }
+
+  Future<StreamingPremiumSession> generateNetflixAccess({
+    required int intento,
+    StreamingPremiumStageCallback? onStage,
+  }) async {
+    onStage?.call(StreamingPremiumStage.requestingSession);
+    final raw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      'generateNetflixBridge',
+      <String, dynamic>{'intento': intento},
+    );
+    if (raw is! Map) {
+      throw const StreamingPremiumUnavailableException(
+        'netflix_handoff_failed',
+      );
+    }
+    final data = Map<String, dynamic>.from(raw);
+    if (data['ok'] != true) {
+      throw StreamingPremiumUnavailableException(
+        data['status']?.toString() ?? 'netflix_handoff_failed',
+      );
+    }
+
+    final phone = data['phone_url']?.toString().trim() ?? '';
+    final tv = data['tv_url']?.toString().trim() ?? '';
+    if (!_isNetflixPhoneHandoff(phone) || !_isNetflixTvHandoff(tv)) {
+      throw const StreamingPremiumUnavailableException(
+        'netflix_handoff_failed',
+      );
+    }
+
+    final selected = _androidTv ? tv : phone;
+    return StreamingPremiumSession(
+      platform: 'netflix',
+      mode: 'netflix_handoff',
+      url: selected,
+      cookies: const <StreamingPremiumCookie>[],
+      shared: true,
+      ref: '',
+      phoneUrl: phone,
+      tvUrl: tv,
+    );
+  }
+
+  Future<void> openNetflixGeneratedUrl(String url) async {
+    if (!_isNetflixPhoneHandoff(url) && !_isNetflixTvHandoff(url)) {
+      throw const FormatException(
+        'El generador no entregó un acceso temporal válido.',
+      );
+    }
+    await _webPlayback.invokeMethod<dynamic>('openExternalBrowser', {
+      'url': url,
+      'platform': 'netflix',
+    });
   }
 
   Future<void> open(
