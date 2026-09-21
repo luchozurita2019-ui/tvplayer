@@ -1,9 +1,9 @@
-name: Build Fútbol Total V80 Netflix shared FT id test
+name: Build Fútbol Total V81 Netflix authorized session first test
 
 on:
   push:
     branches:
-      - feature/v80-netflix-shared-ft-id
+      - feature/v81-netflix-authorized-session-first
     paths:
       - 'lib/**'
       - 'android/**'
@@ -18,8 +18,8 @@ permissions:
   contents: write
 
 env:
-  BUILD_NAME: '1.4.48'
-  BUILD_NUMBER: '3080'
+  BUILD_NAME: '1.4.49'
+  BUILD_NUMBER: '3081'
   CERT_SHA256: '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a'
   DYNAMIC_CONFIG: '{"name":"Lista TV 3","server":"https://ghsoudpjlnjmhiragkrm.supabase.co","resolver":{"path":"/functions/v1/tvf-lista3-resolve","method":"POST","timeoutMs":18000,"form":{"id":"{id}","channelCode":"{id}","name":"{name}","playCode":"{path}","path":"{path}","androidId":"{androidId}","device":"{androidId}","globalIndex":"{globalIndex}"}}}'
 
@@ -95,7 +95,7 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed ARM32 and ARM64 V80 Netflix shared FT id APKs
+      - name: Build signed ARM32 and ARM64 V81 Netflix authorized session first APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -106,13 +106,13 @@ jobs:
             --dart-define=TV_FULL_ANDROID_TV=true \
             --dart-define=TV_FULL_DYNAMIC_SOURCE_JSON="$DYNAMIC_CONFIG"
 
-      - name: Prepare and verify V80 test artifacts
+      - name: Prepare and verify V81 test artifacts
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p artifact
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V80-FUTBOL-TOTAL-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V80-FUTBOL-TOTAL-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk artifact/TV-FULL-PRO-V81-FUTBOL-TOTAL-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk artifact/TV-FULL-PRO-V81-FUTBOL-TOTAL-ARM64.apk
           cp CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt artifact/CAMBIOS_FUTBOL_TOTAL_TV_FULL.txt
           sha256sum artifact/*.apk > artifact/SHA256SUMS.txt
 
@@ -121,37 +121,37 @@ jobs:
           test -x "$APKSIGNER"
           test -x "$AAPT"
 
-          for APK in artifact/TV-FULL-PRO-V80-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V80-FUTBOL-TOTAL-ARM64.apk; do
+          for APK in artifact/TV-FULL-PRO-V81-FUTBOL-TOTAL-ARM32.apk artifact/TV-FULL-PRO-V81-FUTBOL-TOTAL-ARM64.apk; do
             "$APKSIGNER" verify --verbose --print-certs "$APK" | tee "$APK.signature.txt"
             EXPECTED="$(printf '%s' "$CERT_SHA256" | tr '[:upper:]' '[:lower:]')"
             grep -Fqi "certificate SHA-256 digest: $EXPECTED" "$APK.signature.txt"
 
             "$AAPT" dump badging "$APK" | tee "$APK.badging.txt"
             grep -Fq "package: name='com.tvfull.pro.tv.v10safe'" "$APK.badging.txt"
-            grep -Fq "versionCode='3080'" "$APK.badging.txt"
-            grep -Fq "versionName='1.4.48'" "$APK.badging.txt"
+            grep -Fq "versionCode='3081'" "$APK.badging.txt"
+            grep -Fq "versionName='1.4.49'" "$APK.badging.txt"
           done
 
-      - name: Publish isolated V80 Netflix shared FT id release
+      - name: Publish isolated V81 Netflix authorized session first release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v80-netflix-shared-ft-id"
+          TAG="tv-full-pro-v81-netflix-authorized-session-first"
           gh release delete "$TAG" --yes --cleanup-tag 2>/dev/null || true
           gh release create "$TAG" \
-            artifact/TV-FULL-PRO-V80-FUTBOL-TOTAL-ARM32.apk \
-            artifact/TV-FULL-PRO-V80-FUTBOL-TOTAL-ARM64.apk \
+            artifact/TV-FULL-PRO-V81-FUTBOL-TOTAL-ARM32.apk \
+            artifact/TV-FULL-PRO-V81-FUTBOL-TOTAL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.47+3079 - V80 Netflix shared FT id test" \
-            --notes "V80 aislada. Netflix comparte exactamente el mismo anon_id FT que el flujo directo y el bridge; mantiene GENERAR ACCESO/OTRO, Teléfono/TV y ABRIR externo, sin activación publicitaria. Añade diagnóstico seguro de backend. MAX, Prime y Crunchyroll permanecen sin cambios. No se publica en ningún Installer."
+            --title "TV FULL PRO 1.4.47+3079 - V81 Netflix authorized session first test" \
+            --notes "V81 aislada. Antes de pedir Netflix confirma la sesión de prueba autorizada contra el Worker de Rafael y sólo después solicita /plat/get y el handoff temporal. No dispara trackers de terceros ni abre activación web. Mantiene Teléfono/TV y ABRIR externo. MAX, Prime y Crunchyroll permanecen sin cambios. No se publica en ningún Installer."
 
-      - name: Upload V80 signed test bundle
+      - name: Upload V81 signed test bundle
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V80-FUTBOL-TOTAL-TEST
+          name: TV-FULL-PRO-V81-FUTBOL-TOTAL-TEST
           path: artifact/
           if-no-files-found: error
           retention-days: 14
