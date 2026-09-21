@@ -47,6 +47,16 @@ jobs:
           set -euo pipefail
           grep -R -n "Lcom/byrafael/streamapp/Guard;->" ft36/smali* | head -n 80 || true
 
+      - name: Inspect FT Netflix generator layout
+        run: |
+          set -euo pipefail
+          echo "--- C0 ---"
+          grep -n -B 35 -A 55 -E "GENERAR OTRO|LQ1/W0;->b|No se pudo con esa cuenta" ft36/smali/Q1/C0.smali || true
+          echo "--- D0 ---"
+          grep -n -B 25 -A 30 "No hay cuentas disponibles" ft36/smali/Q1/D0.smali || true
+          echo "--- N ---"
+          grep -n -B 25 -A 35 "LQ1/i0;-><init>" ft36/smali/Q1/N.smali || true
+
       - name: Apply Rafael-authorized Netflix bridge patch
         run: |
           set -euo pipefail
