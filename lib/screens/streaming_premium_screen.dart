@@ -188,6 +188,15 @@ class _PlatformGridState extends State<_PlatformGrid> {
   ) async {
     if (_opening != null) return;
 
+    if (platform == StreamingPremiumPlatform.netflix) {
+      await Navigator.of(context).push<void>(
+        MaterialPageRoute<void>(
+          builder: (_) => NetflixAccessScreen(service: _service),
+        ),
+      );
+      return;
+    }
+
     setState(() => _opening = platform);
 
     final messenger = ScaffoldMessenger.of(context);
@@ -246,6 +255,417 @@ class _PlatformGridState extends State<_PlatformGrid> {
     } finally {
       if (mounted) setState(() => _opening = null);
     }
+  }
+}
+
+class NetflixAccessScreen extends StatefulWidget {
+  final StreamingPremiumService service;
+
+  const NetflixAccessScreen({
+    super.key,
+    required this.service,
+  });
+
+  @override
+  State<NetflixAccessScreen> createState() => _NetflixAccessScreenState();
+}
+
+class _NetflixAccessScreenState extends State<NetflixAccessScreen> {
+  StreamingPremiumSession? _access;
+  bool _generating = false;
+  bool _tvMode = false;
+  int _attempt = 0;
+  String _status = '';
+
+  String get _selectedUrl {
+    final access = _access;
+    if (access == null) return '';
+    return _tvMode ? access.tvUrl : access.phoneUrl;
+  }
+
+  Future<void> _generate() async {
+    if (_generating) return;
+    setState(() {
+      _generating = true;
+      _status = '';
+    });
+    try {
+      final access = await widget.service.generateNetflixAccess(
+        intento: _attempt,
+      );
+      if (!mounted) return;
+      setState(() {
+        _access = access;
+        _attempt += 1;
+      });
+    } on StreamingPremiumUnavailableException catch (error) {
+      if (!mounted) return;
+      setState(() => _status = error.toString());
+    } on PlatformException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _status = error.message ?? 'No se pudo generar el acceso de Netflix.';
+      });
+    } catch (_) {
+      if (!mounted) return;
+      setState(() {
+        _status = 'No se pudo generar el acceso de Netflix. '
+            'Probá nuevamente.';
+      });
+    } finally {
+      if (mounted) setState(() => _generating = false);
+    }
+  }
+
+  Future<void> _open() async {
+    final url = _selectedUrl;
+    if (url.isEmpty) return;
+    try {
+      await widget.service.openNetflixGeneratedUrl(url);
+    } catch (_) {
+      if (!mounted) return;
+      setState(() => _status = 'No se pudo abrir el navegador.');
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final generated = _access != null;
+    return Scaffold(
+      backgroundColor: const Color(0xFF070A0F),
+      body: SafeArea(
+        child: Column(
+          children: [
+            Container(
+              height: 70,
+              padding: const EdgeInsets.symmetric(horizontal: 28),
+              color: const Color(0xFF10151D),
+              child: Row(
+                children: [
+                  _GoldIconButton(
+                    icon: Icons.arrow_back_rounded,
+                    tooltip: 'Volver',
+                    onPressed: () => Navigator.of(context).maybePop(),
+                  ),
+                  const SizedBox(width: 14),
+                  Container(
+                    width: 3,
+                    height: 30,
+                    color: const Color(0xFFE50914),
+                  ),
+                  const SizedBox(width: 14),
+                  const Text(
+                    'NETFLIX',
+                    style: TextStyle(
+                      color: Colors.white,
+                      fontSize: 22,
+                      fontWeight: FontWeight.w900,
+                      letterSpacing: 1.2,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.fromLTRB(28, 24, 28, 34),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 760),
+                    child: Column(
+                      children: [
+                        const Text(
+                          'Generá tu acceso y entrá a Netflix. '
+                          'Cada acceso es de un solo uso: si uno no anda, '
+                          'generá otro.',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            color: Colors.white54,
+                            fontSize: 15,
+                            height: 1.45,
+                          ),
+                        ),
+                        const SizedBox(height: 28),
+                        _NetflixActionButton(
+                          autofocus: true,
+                          label: _generating
+                              ? 'GENERANDO…'
+                              : generated
+                                  ? 'GENERAR OTRO'
+                                  : 'GENERAR ACCESO',
+                          onTap: _generating ? null : _generate,
+                        ),
+                        if (_status.isNotEmpty) ...[
+                          const SizedBox(height: 14),
+                          Text(
+                            _status,
+                            textAlign: TextAlign.center,
+                            style: const TextStyle(
+                              color: Color(0xFFFFA39F),
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                        if (generated) ...[
+                          const SizedBox(height: 26),
+                          _NetflixTabs(
+                            tvMode: _tvMode,
+                            onPhone: () => setState(() => _tvMode = false),
+                            onTv: () => setState(() => _tvMode = true),
+                          ),
+                          const SizedBox(height: 14),
+                          _NetflixGeneratedCard(
+                            url: _selectedUrl,
+                            tvMode: _tvMode,
+                            onOpen: _open,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NetflixTabs extends StatelessWidget {
+  final bool tvMode;
+  final VoidCallback onPhone;
+  final VoidCallback onTv;
+
+  const _NetflixTabs({
+    required this.tvMode,
+    required this.onPhone,
+    required this.onTv,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      height: 54,
+      padding: const EdgeInsets.all(4),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141B26),
+        borderRadius: BorderRadius.circular(28),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: _NetflixTabButton(
+              selected: !tvMode,
+              label: '📱  Teléfono',
+              onTap: onPhone,
+            ),
+          ),
+          Expanded(
+            child: _NetflixTabButton(
+              selected: tvMode,
+              label: '📺  TV',
+              onTap: onTv,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NetflixTabButton extends StatefulWidget {
+  final bool selected;
+  final String label;
+  final VoidCallback onTap;
+
+  const _NetflixTabButton({
+    required this.selected,
+    required this.label,
+    required this.onTap,
+  });
+
+  @override
+  State<_NetflixTabButton> createState() => _NetflixTabButtonState();
+}
+
+class _NetflixTabButtonState extends State<_NetflixTabButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: widget.selected
+          ? const Color(0xFFE50914)
+          : _focused
+              ? Colors.white10
+              : Colors.transparent,
+      borderRadius: BorderRadius.circular(24),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(24),
+        onFocusChange: (value) => setState(() => _focused = value),
+        onTap: widget.onTap,
+        child: Center(
+          child: Text(
+            widget.label,
+            style: TextStyle(
+              color: widget.selected ? Colors.white : Colors.white54,
+              fontSize: 14,
+              fontWeight: FontWeight.w800,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NetflixGeneratedCard extends StatelessWidget {
+  final String url;
+  final bool tvMode;
+  final VoidCallback onOpen;
+
+  const _NetflixGeneratedCard({
+    required this.url,
+    required this.tvMode,
+    required this.onOpen,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final help = tvMode
+        ? '1 · En la TV: Netflix → Iniciar sesión → '
+            '"Iniciar sesión con código de acceso".\n'
+            '2 · La TV muestra un código.\n'
+            '3 · Acá tocá ABRIR y, en la página que se abre, '
+            'ingresá ese código.\n'
+            '4 · La TV entra sola.'
+        : '1 · Tocá ABRIR: se abre el navegador con la sesión ya cargada.\n'
+            '2 · Esperá a que cargue Netflix.\n'
+            '3 · Tocá "Abrir en la app" y Netflix pasa la sesión '
+            'a la app oficial.';
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(18),
+      decoration: BoxDecoration(
+        color: const Color(0xFF141B26),
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(color: Colors.white12),
+      ),
+      child: Column(
+        children: [
+          Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 11),
+            decoration: BoxDecoration(
+              color: const Color(0xFF0D121A),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(color: Colors.white10),
+            ),
+            child: Text(
+              url,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                color: Colors.white38,
+                fontSize: 12,
+              ),
+            ),
+          ),
+          const SizedBox(height: 18),
+          _NetflixActionButton(
+            label: 'ABRIR  →',
+            onTap: onOpen,
+          ),
+          const SizedBox(height: 18),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: ExpansionTile(
+              tilePadding: EdgeInsets.zero,
+              childrenPadding: EdgeInsets.zero,
+              iconColor: Colors.white38,
+              collapsedIconColor: Colors.white30,
+              title: const Text(
+                'Cómo se usa',
+                style: TextStyle(
+                  color: Colors.white54,
+                  fontSize: 12,
+                ),
+              ),
+              children: [
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      help,
+                      style: const TextStyle(
+                        color: Colors.white54,
+                        fontSize: 12,
+                        height: 1.45,
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _NetflixActionButton extends StatefulWidget {
+  final String label;
+  final VoidCallback? onTap;
+  final bool autofocus;
+
+  const _NetflixActionButton({
+    required this.label,
+    required this.onTap,
+    this.autofocus = false,
+  });
+
+  @override
+  State<_NetflixActionButton> createState() => _NetflixActionButtonState();
+}
+
+class _NetflixActionButtonState extends State<_NetflixActionButton> {
+  bool _focused = false;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: widget.onTap == null
+          ? const Color(0xFF722027)
+          : _focused
+              ? const Color(0xFFFF1824)
+              : const Color(0xFFE50914),
+      borderRadius: BorderRadius.circular(30),
+      child: InkWell(
+        autofocus: widget.autofocus,
+        borderRadius: BorderRadius.circular(30),
+        onFocusChange: (value) => setState(() => _focused = value),
+        onTap: widget.onTap,
+        child: Container(
+          constraints: const BoxConstraints(minWidth: 250),
+          padding: const EdgeInsets.symmetric(horizontal: 28, vertical: 16),
+          alignment: Alignment.center,
+          child: Text(
+            widget.label,
+            style: const TextStyle(
+              color: Colors.white,
+              fontSize: 15,
+              fontWeight: FontWeight.w900,
+              letterSpacing: .4,
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
