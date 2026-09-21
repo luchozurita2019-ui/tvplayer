@@ -193,7 +193,9 @@ class MainActivity : FlutterActivity() {
                         )
                     )
                     "getPremiumCompatId" -> {
-                        val prefs = getSharedPreferences("tvfull_ft_state", Context.MODE_PRIVATE)
+                        // Debe compartir exactamente el mismo anon_id que FtPremiumCompat
+                        // y que el bridge autorizado; de lo contrario /plat/get ve otro cliente.
+                        val prefs = getSharedPreferences("ft_state", Context.MODE_PRIVATE)
                         val existing = prefs.getString("anon_id", null)
                         if (!existing.isNullOrBlank()) {
                             result.success(existing)
