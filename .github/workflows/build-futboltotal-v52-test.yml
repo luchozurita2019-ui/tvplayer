@@ -106,7 +106,7 @@ jobs:
             --dart-define=TV_FULL_ANDROID_TV=true \
             --dart-define=TV_FULL_DYNAMIC_SOURCE_JSON="$DYNAMIC_CONFIG"
 
-      - name: Prepare and verify V78 test artifacts
+      - name: Prepare and verify V79 test artifacts
         shell: bash
         run: |
           set -euo pipefail
@@ -132,7 +132,7 @@ jobs:
             grep -Fq "versionName='1.4.47'" "$APK.badging.txt"
           done
 
-      - name: Publish isolated V78 Netflix generator parity release
+      - name: Publish isolated V79 Netflix server handoff release
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -145,7 +145,7 @@ jobs:
             artifact/TV-FULL-PRO-V79-FUTBOL-TOTAL-ARM64.apk \
             --prerelease \
             --target "$GITHUB_SHA" \
-            --title "TV FULL PRO 1.4.46+3078 - V79 Netflix server handoff test" \
+            --title "TV FULL PRO 1.4.47+3079 - V79 Netflix server handoff test" \
             --notes "V79 aislada. Netflix usa handoff temporal entregado por el backend: GENERAR ACCESO/OTRO, pestañas Teléfono/TV y ABRIR en navegador externo, sin abrir la activación publicitaria. MAX, Prime y Crunchyroll permanecen sin cambios. No se publica en ningún Installer."
 
       - name: Upload V79 signed test bundle
