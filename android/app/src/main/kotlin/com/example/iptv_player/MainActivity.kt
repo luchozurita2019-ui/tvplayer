@@ -381,12 +381,15 @@ class MainActivity : FlutterActivity() {
         }
 
         val host = uri.host!!.lowercase(Locale.US)
-        val allowed = platform == "netflix" &&
-            (host == "netflix.com" || host.endsWith(".netflix.com"))
-        if (!allowed) {
+        val token = uri.getQueryParameter("nftoken")?.trim().orEmpty()
+        val exactNetflixHandoff = platform == "netflix" &&
+            (host == "www.netflix.com" || host == "netflix.com") &&
+            (uri.path == "/unsupported" || uri.path == "/tv8") &&
+            token.isNotEmpty()
+        if (!exactNetflixHandoff) {
             result.error(
                 "EXTERNAL_HOST_BLOCKED",
-                "Destino externo no permitido.",
+                "El enlace no coincide con el acceso temporal de Netflix.",
                 null,
             )
             return
