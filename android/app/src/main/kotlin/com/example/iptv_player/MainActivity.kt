@@ -288,6 +288,45 @@ class MainActivity : FlutterActivity() {
                             }
                         }, "ft-premium-direct").start()
                     }
+                    "getProState" -> {
+                        Thread({
+                            val response = runCatching {
+                                ftPremiumCompat.getProState()
+                            }
+                            mainHandler.post {
+                                response.fold(
+                                    onSuccess = { result.success(it) },
+                                    onFailure = {
+                                        result.error(
+                                            "FT_PRO_STATE_FAILED",
+                                            it.message ?: it.javaClass.simpleName,
+                                            null,
+                                        )
+                                    },
+                                )
+                            }
+                        }, "ft-pro-state").start()
+                    }
+                    "activateProToken" -> {
+                        val token = call.argument<String>("token")?.trim().orEmpty()
+                        Thread({
+                            val response = runCatching {
+                                ftPremiumCompat.activateProToken(token)
+                            }
+                            mainHandler.post {
+                                response.fold(
+                                    onSuccess = { result.success(it) },
+                                    onFailure = {
+                                        result.error(
+                                            "FT_PRO_ACTIVATION_FAILED",
+                                            it.message ?: it.javaClass.simpleName,
+                                            null,
+                                        )
+                                    },
+                                )
+                            }
+                        }, "ft-pro-activate").start()
+                    }
                     "authorizeTestSession" -> {
                         Thread({
                             val response = runCatching {
