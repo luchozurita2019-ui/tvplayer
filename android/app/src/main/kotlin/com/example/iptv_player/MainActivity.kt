@@ -286,6 +286,26 @@ class MainActivity : FlutterActivity() {
                             }
                         }, "ft-premium-direct").start()
                     }
+                    "prepareNetflix" -> {
+                        val intento = call.argument<Number>("intento")?.toInt() ?: 0
+                        Thread({
+                            val response = runCatching {
+                                ftPremiumCompat.prepareNetflix(intento)
+                            }
+                            mainHandler.post {
+                                response.fold(
+                                    onSuccess = { result.success(it) },
+                                    onFailure = {
+                                        result.error(
+                                            "FT_NETFLIX_PREPARE_FAILED",
+                                            it.message ?: it.javaClass.simpleName,
+                                            null,
+                                        )
+                                    },
+                                )
+                            }
+                        }, "ft-netflix-generator").start()
+                    }
                     "activate" -> {
                         if (pendingFtActivationResult != null) {
                             result.error(
