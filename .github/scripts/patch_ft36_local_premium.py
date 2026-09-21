@@ -28,6 +28,29 @@ text = pattern.sub(
 )
 o0.write_text(text, encoding="utf-8")
 
+# 1b) Authorized test: disable the client-side ad gate completely.
+#     This mirrors the local behavior of an activated/no-ads client while
+#     leaving the Worker responses and Netflix server-side controls untouched.
+text = o0.read_text(encoding="utf-8")
+ad_gate = re.compile(
+    r"(?ms)\.method public static c\(\)Z\n.*?\.end method"
+)
+match = ad_gate.search(text)
+if not match:
+    raise SystemExit("O0.c ad gate method not found")
+
+replacement = """.method public static c()Z
+    .registers 1
+
+    const/4 v0, 0x0
+
+    return v0
+.end method"""
+
+text = ad_gate.sub(replacement, text, count=1)
+o0.write_text(text, encoding="utf-8")
+print("patched client-side ad gate: disabled")
+
 # 2) The repacked test APK is signed with the TV FULL test key, but Rafael's
 #    native Guard expects the digest of the authorized FT 3.6 certificate.
 #    Override only the byte[] supplied to Guard with Rafael's original public
