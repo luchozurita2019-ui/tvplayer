@@ -368,6 +368,36 @@ class StreamingPremiumService {
     required int intento,
     StreamingPremiumStageCallback? onStage,
   }) async {
+    onStage?.call(StreamingPremiumStage.authenticating);
+    final authRaw = await _ftPremiumDirect.invokeMethod<dynamic>(
+      'authorizeTestSession',
+    );
+
+    if (authRaw is! Map) {
+      throw const StreamingPremiumUnavailableException(
+        'activation_failed',
+        'respuesta de sesión inválida',
+      );
+    }
+
+    final auth = Map<String, dynamic>.from(authRaw);
+    if (auth['completed'] != true) {
+      final stage = auth['stage']?.toString().trim() ?? '';
+      final status = auth['status']?.toString().trim() ?? 'activation_failed';
+      final detail = auth['detail']?.toString().trim() ?? '';
+      final rounds = auth['rounds'];
+      final parts = <String>[];
+      if (stage.isNotEmpty) parts.add('etapa=$stage');
+      if (rounds is num) parts.add('rondas=${rounds.toInt()}');
+      if (detail.isNotEmpty) parts.add(detail);
+      throw StreamingPremiumUnavailableException(
+        status,
+        parts.join(' · '),
+      );
+    }
+
+    // Con la sesión autorizada confirmada recién pedimos /plat/get,
+    // igual que el orden observado en FT 3.6 antes del generador.
     final session = await prepare(
       'netflix',
       intento: intento,
