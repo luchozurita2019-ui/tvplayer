@@ -1,8 +1,10 @@
 package com.example.iptv_player
 
 import android.app.ActivityManager
+import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
+import android.content.IntentFilter
 import android.net.Uri
 import android.net.wifi.WifiManager
 import android.os.Build
@@ -60,6 +62,14 @@ class MainActivity : FlutterActivity() {
         private const val FT_PREMIUM_CHANNEL = "tvfull/ft_premium_direct"
         private const val FT_BRIDGE_ID_EXTRA = "ft_anon_id"
         private const val FT_BRIDGE_FLAG_EXTRA = "ft_bridge"
+        private const val FT_NETFLIX_RESULT_ACTION =
+            "com.tvfull.pro.tv.v10safe.FT_NETFLIX_RESULT"
+        private const val FT_NETFLIX_HELPER_PACKAGE = "com.byrafael.streamapp"
+        private const val FT_NETFLIX_HELPER_ACTIVITY =
+            "com.byrafael.streamapp.MainActivity"
+        private const val FT_NETFLIX_BRIDGE_EXTRA = "tvfull_netflix_bridge"
+        private const val FT_NETFLIX_NONCE_EXTRA = "tvfull_bridge_nonce"
+        private const val FT_NETFLIX_TIMEOUT_MS = 30_000L
         private const val WEB_PLAYBACK_REQUEST_CODE = 9041
         private const val FT_ACTIVATION_REQUEST_CODE = 9042
         private const val DEFAULT_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/96.0.4664.18 Safari/537.36"
@@ -85,6 +95,10 @@ class MainActivity : FlutterActivity() {
     private var eventSink: EventChannel.EventSink? = null
     private var pendingWebPlaybackResult: MethodChannel.Result? = null
     private var pendingFtActivationResult: MethodChannel.Result? = null
+    private var pendingFtNetflixBridgeResult: MethodChannel.Result? = null
+    private var pendingFtNetflixBridgeNonce: String? = null
+    private var ftNetflixBridgeReceiver: BroadcastReceiver? = null
+    private var ftNetflixBridgeTimeout: Runnable? = null
     private var currentUrl: String? = null
     private var currentAdaptiveProfileKey: String? = null
     private var currentHeaders: Map<String, String> = emptyMap()
@@ -258,6 +272,7 @@ class MainActivity : FlutterActivity() {
                 when (call.method) {
                     "open" -> openWebPlayback(call, result)
                     "openExternal" -> openExternalUrl(call, result)
+                    "openExternalBrowser" -> openExternalBrowserUrl(call, result)
                     else -> result.notImplemented()
                 }
             }
@@ -285,6 +300,9 @@ class MainActivity : FlutterActivity() {
                                 )
                             }
                         }, "ft-premium-direct").start()
+                    }
+                    "generateNetflixBridge" -> {
+                        startFtNetflixBridge(result)
                     }
                     "activate" -> {
                         if (pendingFtActivationResult != null) {
@@ -362,6 +380,202 @@ class MainActivity : FlutterActivity() {
             .setMethodCallHandler { call, result ->
                 handlePlayerCall(flutterEngine, call, result)
             }
+    }
+
+    private fun startFtNetflixBridge(result: MethodChannel.Result) {
+        if (pendingFtNetflixBridgeResult != null) {
+            result.error(
+                "FT_NETFLIX_ALREADY_RUNNING",
+                "El generador de Netflix ya está trabajando.",
+                null,
+            )
+            return
+        }
+
+        val helperLaunch = Intent(Intent.ACTION_MAIN).apply {
+            setClassName(
+                FT_NETFLIX_HELPER_PACKAGE,
+                FT_NETFLIX_HELPER_ACTIVITY,
+            )
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            addFlags(Intent.FLAG_ACTIVITY_SINGLE_TOP)
+        }
+        if (packageManager.resolveActivity(helperLaunch, 0) == null) {
+            result.success(
+                mapOf(
+                    "ok" to false,
+                    "status" to "netflix_bridge_missing",
+                )
+            )
+            return
+        }
+
+        val ftPrefs = getSharedPreferences("ft_state", Context.MODE_PRIVATE)
+        val ftId = ftPrefs.getString("anon_id", null)?.takeIf { it.isNotBlank() }
+            ?: UUID.randomUUID().toString().also {
+                ftPrefs.edit().putString("anon_id", it).apply()
+            }
+        val nonce = UUID.randomUUID().toString()
+
+        val receiver = object : BroadcastReceiver() {
+            override fun onReceive(context: Context?, intent: Intent?) {
+                if (intent?.action != FT_NETFLIX_RESULT_ACTION) return
+                if (intent.getStringExtra(FT_NETFLIX_NONCE_EXTRA) !=
+                    pendingFtNetflixBridgeNonce
+                ) {
+                    return
+                }
+
+                val callback = pendingFtNetflixBridgeResult ?: return
+                val ok = intent.getBooleanExtra("ok", false)
+                val phone = intent.getStringExtra("phone_url")?.trim().orEmpty()
+                val tv = intent.getStringExtra("tv_url")?.trim().orEmpty()
+                val expira = intent.getLongExtra("expira", 0L)
+                val status = intent.getStringExtra("status")
+                    ?.trim()
+                    .orEmpty()
+                    .ifBlank {
+                        if (ok) "ok" else "netflix_handoff_failed"
+                    }
+
+                clearFtNetflixBridgeWait()
+                callback.success(
+                    mapOf(
+                        "ok" to ok,
+                        "status" to status,
+                        "phone_url" to phone,
+                        "tv_url" to tv,
+                        "expira" to expira,
+                    )
+                )
+            }
+        }
+
+        pendingFtNetflixBridgeResult = result
+        pendingFtNetflixBridgeNonce = nonce
+        ftNetflixBridgeReceiver = receiver
+
+        val filter = IntentFilter(FT_NETFLIX_RESULT_ACTION)
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(receiver, filter, Context.RECEIVER_EXPORTED)
+        } else {
+            @Suppress("DEPRECATION")
+            registerReceiver(receiver, filter)
+        }
+
+        val timeout = Runnable {
+            val callback = pendingFtNetflixBridgeResult ?: return@Runnable
+            clearFtNetflixBridgeWait()
+            callback.success(
+                mapOf(
+                    "ok" to false,
+                    "status" to "netflix_bridge_timeout",
+                )
+            )
+        }
+        ftNetflixBridgeTimeout = timeout
+        mainHandler.postDelayed(timeout, FT_NETFLIX_TIMEOUT_MS)
+
+        try {
+            helperLaunch
+                .putExtra(FT_NETFLIX_BRIDGE_EXTRA, true)
+                .putExtra(FT_NETFLIX_NONCE_EXTRA, nonce)
+                .putExtra(FT_BRIDGE_ID_EXTRA, ftId)
+                .putExtra(FT_BRIDGE_FLAG_EXTRA, "1")
+            startActivity(helperLaunch)
+        } catch (error: Throwable) {
+            val callback = pendingFtNetflixBridgeResult
+            clearFtNetflixBridgeWait()
+            callback?.success(
+                mapOf(
+                    "ok" to false,
+                    "status" to "netflix_bridge_missing",
+                )
+            )
+        }
+    }
+
+    private fun clearFtNetflixBridgeWait() {
+        ftNetflixBridgeTimeout?.let(mainHandler::removeCallbacks)
+        ftNetflixBridgeTimeout = null
+
+        ftNetflixBridgeReceiver?.let { receiver ->
+            runCatching { unregisterReceiver(receiver) }
+        }
+        ftNetflixBridgeReceiver = null
+        pendingFtNetflixBridgeNonce = null
+        pendingFtNetflixBridgeResult = null
+    }
+
+    private fun openExternalBrowserUrl(
+        call: MethodCall,
+        result: MethodChannel.Result,
+    ) {
+        val rawUrl = call.argument<String>("url")?.trim().orEmpty()
+        val platform = call.argument<String>("platform")
+            ?.trim()
+            ?.lowercase(Locale.US)
+            .orEmpty()
+        val uri = runCatching { Uri.parse(rawUrl) }.getOrNull()
+        if (uri == null || uri.scheme != "https" || uri.host.isNullOrBlank()) {
+            result.error("INVALID_EXTERNAL_URL", "URL externa inválida.", null)
+            return
+        }
+
+        val host = uri.host!!.lowercase(Locale.US)
+        val token = uri.getQueryParameter("nftoken")?.trim().orEmpty()
+        val exactNetflixHandoff = platform == "netflix" &&
+            (host == "www.netflix.com" || host == "netflix.com") &&
+            (uri.path == "/unsupported" || uri.path == "/tv8") &&
+            token.isNotEmpty()
+        if (!exactNetflixHandoff) {
+            result.error(
+                "EXTERNAL_HOST_BLOCKED",
+                "El enlace no coincide con el acceso temporal de Netflix.",
+                null,
+            )
+            return
+        }
+
+        val probe = Intent(
+            Intent.ACTION_VIEW,
+            Uri.parse("https://example.com"),
+        ).apply {
+            addCategory(Intent.CATEGORY_BROWSABLE)
+        }
+        val browserPackage = packageManager
+            .queryIntentActivities(probe, 0)
+            .mapNotNull { it.activityInfo?.packageName }
+            .firstOrNull { pkg ->
+                pkg != packageName &&
+                    !pkg.lowercase(Locale.US).contains("netflix")
+            }
+
+        if (browserPackage.isNullOrBlank()) {
+            result.error(
+                "BROWSER_NOT_FOUND",
+                "No hay un navegador disponible.",
+                null,
+            )
+            return
+        }
+
+        try {
+            startActivity(
+                Intent(Intent.ACTION_VIEW, uri).apply {
+                    addCategory(Intent.CATEGORY_BROWSABLE)
+                    setPackage(browserPackage)
+                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+            )
+            result.success(true)
+        } catch (error: Throwable) {
+            result.error(
+                "EXTERNAL_BROWSER_OPEN_FAILED",
+                error.message ?: "No se pudo abrir el navegador.",
+                null,
+            )
+        }
     }
 
     private fun openExternalUrl(
@@ -1866,6 +2080,7 @@ class MainActivity : FlutterActivity() {
     }
 
     override fun onDestroy() {
+        clearFtNetflixBridgeWait()
         disposePlayer()
         super.onDestroy()
     }
