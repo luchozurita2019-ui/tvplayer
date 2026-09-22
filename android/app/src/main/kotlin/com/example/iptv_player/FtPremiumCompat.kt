@@ -87,27 +87,9 @@ internal class FtPremiumCompat(private val context: Context) {
                 )
             }
 
-        if (session.ok &&
-            session.queda <= 0 &&
-            !session.libre &&
-            !session.pro
-        ) {
-            // V89: never enter FT advertising/VAST activation from TV FULL.
-            // The server must already recognize this anon_id as authorized.
-            return mapOf(
-                "available" to false,
-                "status" to "authorized_session_required",
-                "stage" to "session",
-                "session_ok" to session.ok,
-                "session_http" to session.httpStatus,
-                "session_queda" to session.queda,
-                "session_libre" to session.libre,
-                "session_pro" to session.pro,
-                "session_token" to session.hasToken,
-                "ping_ok" to pingOk,
-                "detail" to session.detail.ifBlank { "sesion FT sin acceso autorizado" },
-            )
-        }
+        // V90 probe/fix: an inactive FT session must not be rejected locally.
+        // Continue to the signed platform map and let Rafael's server decide
+        // whether this anon_id may receive the requested platform payload.
 
         val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
         if (sig.isBlank()) {
