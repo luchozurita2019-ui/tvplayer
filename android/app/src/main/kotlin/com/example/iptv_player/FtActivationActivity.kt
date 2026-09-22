@@ -3,6 +3,7 @@ package com.example.iptv_player
 import android.app.Activity
 import android.content.Intent
 import android.graphics.Color
+import android.graphics.drawable.GradientDrawable
 import android.net.Uri
 import android.os.Bundle
 import android.view.Gravity
@@ -72,7 +73,14 @@ class FtActivationActivity : Activity() {
         // Capa visual de TV FULL. El WebView permanece cargado y activo debajo;
         // no se altera su navegación, temporizadores ni callbacks de activación.
         overlay = FrameLayout(this).apply {
-            setBackgroundColor(Color.rgb(5, 10, 20))
+            background = GradientDrawable(
+                GradientDrawable.Orientation.TL_BR,
+                intArrayOf(
+                    Color.rgb(2, 7, 18),
+                    Color.rgb(5, 18, 42),
+                    Color.rgb(2, 7, 18),
+                ),
+            )
             isClickable = false
             isFocusable = false
         }
@@ -85,24 +93,35 @@ class FtActivationActivity : Activity() {
         }
 
         val brand = TextView(this).apply {
-            setTextColor(Color.WHITE)
-            textSize = 30f
+            setTextColor(Color.rgb(64, 180, 255))
+            textSize = 34f
             gravity = Gravity.CENTER
-            text = "TV FULL"
+            text = "TV FULL PRO"
+            letterSpacing = 0.12f
+            setShadowLayer(18f, 0f, 0f, Color.rgb(0, 110, 255))
+        }
+        val premium = TextView(this).apply {
+            setTextColor(Color.rgb(180, 210, 235))
+            textSize = 13f
+            gravity = Gravity.CENTER
+            text = "STREAMING PREMIUM"
+            letterSpacing = 0.18f
+            setPadding(0, 8, 0, 34)
         }
         status = TextView(this).apply {
             setTextColor(Color.WHITE)
             textSize = 22f
             gravity = Gravity.CENTER
-            text = "BUSCANDO USUARIO..."
-            setPadding(0, 28, 0, 18)
+            text = "PREPARANDO TU ACCESO"
+            letterSpacing = 0.04f
+            setPadding(0, 0, 0, 12)
         }
         val detail = TextView(this).apply {
-            setTextColor(Color.LTGRAY)
-            textSize = 16f
+            setTextColor(Color.rgb(165, 178, 198))
+            textSize = 15f
             gravity = Gravity.CENTER
-            text = "Por favor espere"
-            setPadding(0, 0, 0, 24)
+            text = "Esto puede tardar unos segundos"
+            setPadding(0, 0, 0, 28)
         }
         val progress = ProgressBar(this).apply {
             isIndeterminate = true
@@ -111,6 +130,7 @@ class FtActivationActivity : Activity() {
         }
 
         panel.addView(brand)
+        panel.addView(premium)
         panel.addView(status)
         panel.addView(detail)
         panel.addView(progress)
@@ -182,7 +202,7 @@ class FtActivationActivity : Activity() {
             ) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
-                    status.text = "NO SE PUDO COMPLETAR LA BÚSQUEDA"
+                    status.text = "NO SE PUDO PREPARAR EL ACCESO"
                     overlay.visibility = View.VISIBLE
                 }
             }
