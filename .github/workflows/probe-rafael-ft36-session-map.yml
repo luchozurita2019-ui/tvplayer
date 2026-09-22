@@ -117,7 +117,16 @@ jobs:
           m0,mb0=get('/plat/get?'+urllib.parse.urlencode({
               'vc':26,'id':install_id,'sig':map_sig,'intento':0,
           }))
-          print(json.dumps({'label':'map_before','http':m0},sort_keys=True))
+          map_before={'label':'map_before','http':m0}
+          try:
+              mj=json.loads(mb0)
+              for bucket in ('codes','libres','apagadas'):
+                  obj=mj.get(bucket)
+                  if isinstance(obj,dict):
+                      map_before[bucket+'_keys']=sorted(k for k in obj.keys() if k in ('hbomax','prime','crunchyroll','netflix'))
+          except Exception:
+              pass
+          print(json.dumps(map_before,sort_keys=True))
 
           s1,b1=session(1)
           summarize_session('quiero1',s1,b1)
@@ -126,6 +135,15 @@ jobs:
               'vc':26,'id':install_id,'sig':map_sig,'intento':1,
           }))
           print(json.dumps({'label':'map_after_quiero1','http':m1},sort_keys=True))
+
+          import time
+          time.sleep(12)
+          sx,bx=session(0)
+          summarize_session('quiero0_after_wait',sx,bx)
+          mx,mbx=get('/plat/get?'+urllib.parse.urlencode({
+              'vc':26,'id':install_id,'sig':map_sig,'intento':2,
+          }))
+          print(json.dumps({'label':'map_after_wait','http':mx},sort_keys=True))
 
           # Query documented PRO state without attempting activation.
           p_sig=sign(f'pro:ft:26:{install_id}')
