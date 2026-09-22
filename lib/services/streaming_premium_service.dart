@@ -482,55 +482,7 @@ class StreamingPremiumService {
       throw const FormatException('Respuesta directa FT inválida.');
     }
 
-    var data = Map<String, dynamic>.from(raw);
-    if (data['available'] != true &&
-        data['status']?.toString() == 'activation_required' &&
-        data['activation_mode']?.toString() == 'web') {
-      onStage?.call(StreamingPremiumStage.validatingSession);
-      debugPrint(
-        '[StreamingPremium] $platform: abriendo activación web autorizada',
-      );
-
-      final activationRaw =
-          await _ftPremiumDirect.invokeMethod<dynamic>('activate');
-      if (activationRaw is! Map) {
-        throw const StreamingPremiumUnavailableException(
-          'activation_failed',
-          'respuesta de activación inválida',
-        );
-      }
-
-      final activation = Map<String, dynamic>.from(activationRaw);
-      final completed = activation['completed'] == true;
-      final queda = (activation['queda'] as num?)?.toInt() ?? 0;
-      final libre = activation['libre'] == true;
-      final pro = activation['pro'] == true;
-
-      if (!completed) {
-        final parts = <String>[
-          'etapa=activation',
-          'queda=${queda}s',
-          'libre=${libre ? 'sí' : 'no'}',
-          'pro=${pro ? 'sí' : 'no'}',
-        ];
-        throw StreamingPremiumUnavailableException(
-          'activation_pending',
-          parts.join(' · '),
-        );
-      }
-
-      onStage?.call(StreamingPremiumStage.requestingSession);
-      raw = await _ftPremiumDirect.invokeMethod<dynamic>('prepare', {
-        'platform': platform,
-        'intento': intento,
-      });
-      if (raw is! Map) {
-        throw const FormatException(
-          'Respuesta FT inválida después de la activación.',
-        );
-      }
-      data = Map<String, dynamic>.from(raw);
-    }
+    final data = Map<String, dynamic>.from(raw);
 
     if (data['available'] != true) {
       final status = data['status']?.toString() ?? 'no_session';
