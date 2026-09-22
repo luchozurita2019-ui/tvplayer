@@ -92,61 +92,20 @@ internal class FtPremiumCompat(private val context: Context) {
             !session.libre &&
             !session.pro
         ) {
-            val activationSession = runCatching {
-                ensureFtSession(id, wantAd = true)
-            }.getOrElse {
-                FtSessionState(
-                    ok = false,
-                    httpStatus = -1,
-                    queda = 0,
-                    libre = false,
-                    pro = false,
-                    sessionToken = "",
-                    vastUrl = "",
-                    fallbackAdUrl = "",
-                    detail = it.message.orEmpty(),
-                )
-            }
-            session = activationSession
-
-            if (session.queda <= 0 && !session.libre && !session.pro) {
-                val mode = when {
-                    session.fallbackAdUrl.isNotBlank() -> "web"
-                    session.vastUrl.isNotBlank() -> "vast"
-                    else -> "none"
-                }
-                return mapOf(
-                    "available" to false,
-                    "status" to "activation_required",
-                    "stage" to "activation",
-                    "activation_mode" to mode,
-                    "ping_ok" to pingOk,
-                    "session_ok" to session.ok,
-                    "session_http" to session.httpStatus,
-                    "session_queda" to session.queda,
-                    "session_libre" to session.libre,
-                    "session_pro" to session.pro,
-                    "session_token" to session.hasToken,
-                    "detail" to when (mode) {
-                        "web" -> "activación web disponible"
-                        "vast" -> "activación de video disponible"
-                        else -> session.detail.ifBlank { "sin método de activación" }
-                    },
-                )
-            }
-        }
-
-        val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
-        if (sig.isBlank()) {
+            // V89: never enter FT advertising/VAST activation from TV FULL.
+            // The server must already recognize this anon_id as authorized.
             return mapOf(
                 "available" to false,
-                "status" to "guard_failed",
-                "stage" to "sign",
-                "ping_ok" to pingOk,
+                "status" to "authorized_session_required",
+                "stage" to "session",
                 "session_ok" to session.ok,
                 "session_http" to session.httpStatus,
                 "session_queda" to session.queda,
+                "session_libre" to session.libre,
+                "session_pro" to session.pro,
                 "session_token" to session.hasToken,
+                "ping_ok" to pingOk,
+                "detail" to session.detail.ifBlank { "sesion FT sin acceso autorizado" },
             )
         }
 
