@@ -1,0 +1,142 @@
+name: Probe Rafael FT 3.6 session-map authorization
+
+on:
+  push:
+    branches:
+      - security/rafael-ft36-session-map-probe
+    paths:
+      - '.github/workflows/probe-rafael-ft36-session-map.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download official FT 3.6 and derive authorized signer
+        shell: bash
+        run: |
+          set -euo pipefail
+          curl -L --fail --retry 3 -o /tmp/FutbolTotal.apk \
+            https://github.com/ByRafaelSystem/futboltotal/releases/download/v3.6/FutbolTotal.apk
+          test "$(sha256sum /tmp/FutbolTotal.apk | cut -d' ' -f1)" = \
+            "96ce60bb4adf7bb42718f7c2c856f5b5232cef41596bc970824b82294a67939f"
+
+          mkdir -p /tmp/ft
+          unzip -q /tmp/FutbolTotal.apk 'META-INF/CERT.RSA' 'lib/x86_64/libguard.so' -d /tmp/ft
+          openssl pkcs7 -inform DER -in /tmp/ft/META-INF/CERT.RSA -print_certs -out /tmp/ft/cert.pem
+          openssl x509 -in /tmp/ft/cert.pem -outform DER -out /tmp/ft/cert.der
+
+          python3 - <<'PY'
+          import hashlib, hmac, json, urllib.request, urllib.error, urllib.parse, uuid, pathlib
+
+          cert = pathlib.Path('/tmp/ft/cert.der').read_bytes()
+          lib = pathlib.Path('/tmp/ft/lib/x86_64/libguard.so').read_bytes()
+          cert_hash = hashlib.sha256(cert).digest()
+
+          salt = bytes.fromhex('261734c048fcf64a0f0121fe56a351e7')
+          inner_a = bytes.fromhex('e7117953adac0953efc8774fa81573cf')
+          inner_b = bytes.fromhex('fabbe7d42b414318bbc0b144e8ae18e3')
+          for needle, name in [(salt,'salt'),(inner_a,'inner_a'),(inner_b,'inner_b')]:
+              if lib.find(needle) < 0:
+                  raise SystemExit(f'missing {name}')
+
+          derived = hashlib.sha256(cert_hash + salt).digest()
+          key = bytes(a ^ b ^ 0x36 for a,b in zip(derived[:16], inner_a))
+          key += bytes(a ^ b ^ 0x36 for a,b in zip(derived[16:], inner_b))
+
+          base='https://novax-online.iptvnovax.workers.dev'
+          install_id=str(uuid.uuid4())
+          hw=hashlib.sha256(('github-probe|' + install_id).encode()).hexdigest()
+
+          def sign(message):
+              return hmac.new(key,message.encode(),hashlib.sha256).hexdigest()
+
+          def post(path,payload):
+              data=json.dumps(payload,separators=(',',':')).encode()
+              req=urllib.request.Request(base+path,data=data,headers={
+                  'Content-Type':'application/json',
+                  'User-Agent':'Dalvik/2.1.0 (Linux; U; Android 12; TV Build/STT1.220616.001)',
+              },method='POST')
+              try:
+                  with urllib.request.urlopen(req,timeout=15) as r:
+                      return r.status,r.read().decode('utf-8','replace')
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read().decode('utf-8','replace')
+
+          def get(path):
+              req=urllib.request.Request(base+path,headers={
+                  'Accept':'application/json',
+                  'User-Agent':'Dalvik/2.1.0 (Linux; U; Android 12; TV Build/STT1.220616.001)',
+              },method='GET')
+              try:
+                  with urllib.request.urlopen(req,timeout=15) as r:
+                      return r.status,r.read().decode('utf-8','replace')
+              except urllib.error.HTTPError as e:
+                  return e.code,e.read().decode('utf-8','replace')
+
+          def summarize_session(label, status, body):
+              out={'label':label,'http':status}
+              try:
+                  j=json.loads(body)
+                  for k in ('ok','queda','libre','pro'):
+                      if k in j: out[k]=j[k]
+                  out['has_token']=bool(j.get('t'))
+                  out['has_vast']=bool(j.get('vast'))
+                  out['has_ad']=bool(j.get('ad'))
+              except Exception:
+                  out['body_prefix']=body[:80]
+              print(json.dumps(out,sort_keys=True))
+              return out
+
+          def session(want):
+              msg=f'sesion:ft:26:{install_id}:{hw}'
+              status,body=post('/sesion',{
+                  'id':install_id,'vc':26,'hw':hw,'sig':sign(msg),'quiero':want,
+              })
+              if status == 401:
+                  msg=f'sesion:ft:26:{install_id}'
+                  status,body=post('/sesion',{
+                      'id':install_id,'vc':26,'hw':'','sig':sign(msg),'quiero':want,
+                  })
+              return status,body
+
+          pstat,pbody=post('/ping',{'id':install_id,'app':'ft','vc':26})
+          print('ping_http=',pstat)
+
+          s0,b0=session(0)
+          summarize_session('quiero0_before',s0,b0)
+
+          map_sig=sign(f'plat:ft:26:{install_id}')
+          m0,mb0=get('/plat/get?'+urllib.parse.urlencode({
+              'vc':26,'id':install_id,'sig':map_sig,'intento':0,
+          }))
+          print(json.dumps({'label':'map_before','http':m0},sort_keys=True))
+
+          s1,b1=session(1)
+          summarize_session('quiero1',s1,b1)
+
+          m1,mb1=get('/plat/get?'+urllib.parse.urlencode({
+              'vc':26,'id':install_id,'sig':map_sig,'intento':1,
+          }))
+          print(json.dumps({'label':'map_after_quiero1','http':m1},sort_keys=True))
+
+          # Query documented PRO state without attempting activation.
+          p_sig=sign(f'pro:ft:26:{install_id}')
+          ps,pb=post('/pro',{'id':install_id,'vc':26,'sig':p_sig})
+          po={'label':'pro_state','http':ps}
+          try:
+              pj=json.loads(pb)
+              for k in ('ok','pro','vence'):
+                  if k in pj: po[k]=pj[k]
+              po['has_token']=bool(pj.get('token'))
+          except Exception:
+              po['body_prefix']=pb[:80]
+          print(json.dumps(po,sort_keys=True))
+          PY
