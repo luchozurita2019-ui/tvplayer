@@ -341,71 +341,171 @@ class WebPlaybackActivity : Activity() {
         webView.requestFocus()
     }
 
+    private var lastRemoteNavigationAt = 0L
+
     private fun installTvRemoteNavigation(view: WebView) {
+        val platformJs = platform.replace("\\", "\\\\").replace("'", "\\'")
         val script = """
             (function(){
-              if (window.__tvfullRemoteInstalled) return;
-              window.__tvfullRemoteInstalled = true;
+              var PLATFORM = '$platformJs';
 
               function visible(el) {
                 if (!el || !el.getBoundingClientRect) return false;
                 var r = el.getBoundingClientRect();
                 var s = window.getComputedStyle(el);
-                return r.width > 1 && r.height > 1 &&
-                  s.visibility !== 'hidden' && s.display !== 'none';
+                return r.width > 2 && r.height > 2 &&
+                  s.visibility !== 'hidden' && s.display !== 'none' &&
+                  Number(s.opacity || 1) > 0.02;
               }
 
+              var common = [
+                'a[href]', 'button', 'input:not([type="hidden"])', 'select',
+                'textarea', '[role="button"]', '[role="link"]', '[role="menuitem"]',
+                '[role="option"]', '[role="tab"]', '[role="slider"]',
+                '[tabindex]:not([tabindex="-1"])', 'video'
+              ];
+              var profiles = {
+                hbomax: [
+                  '[data-testid] button', '[data-testid][role="button"]',
+                  '[aria-label][role="button"]', 'input[type="range"]'
+                ],
+                prime: [
+                  '#dv-web-player button', '#dv-web-player input[type="range"]',
+                  '[data-testid] button', '[aria-label][role="button"]'
+                ],
+                crunchyroll: [
+                  '[data-testid="player-controls-root"] button',
+                  'input.timeline-slider', '[data-t] button',
+                  '[aria-label][role="button"]'
+                ]
+              };
+
               function candidates() {
-                var q = [
-                  'a[href]', 'button', 'input:not([type="hidden"])', 'select',
-                  'textarea', '[role="button"]', '[role="link"]',
-                  '[role="menuitem"]', '[role="option"]', '[role="tab"]',
-                  '[tabindex]:not([tabindex="-1"])', 'video'
-                ].join(',');
+                var q = common.concat(profiles[PLATFORM] || []).join(',');
+                var seen = new Set();
                 return Array.prototype.slice.call(document.querySelectorAll(q))
-                  .filter(visible);
+                  .filter(function(el){
+                    if (!visible(el) || seen.has(el)) return false;
+                    seen.add(el);
+                    return true;
+                  });
               }
 
               function center(el) {
                 var r = el.getBoundingClientRect();
-                return {x:r.left+r.width/2, y:r.top+r.height/2};
+                return {x:r.left+r.width/2, y:r.top+r.height/2, w:r.width, h:r.height};
               }
 
-              function move(dir) {
-                var items = candidates();
-                if (!items.length) return false;
-                var current = document.activeElement;
-                if (!visible(current) || items.indexOf(current) < 0) {
-                  items[0].focus({preventScroll:false});
-                  items[0].scrollIntoView({block:'center', inline:'center'});
+              function mark(el) {
+                if (!el) return false;
+                try {
+                  el.focus({preventScroll:true});
+                  el.scrollIntoView({behavior:'auto', block:'nearest', inline:'nearest'});
                   return true;
-                }
-                var a = center(current), best = null, score = Number.MAX_VALUE;
-                items.forEach(function(el) {
-                  if (el === current) return;
-                  var b=center(el), dx=b.x-a.x, dy=b.y-a.y;
-                  var primary, secondary;
-                  if (dir==='left' && dx<0) {primary=-dx;secondary=Math.abs(dy);}
-                  else if (dir==='right' && dx>0) {primary=dx;secondary=Math.abs(dy);}
-                  else if (dir==='up' && dy<0) {primary=-dy;secondary=Math.abs(dx);}
-                  else if (dir==='down' && dy>0) {primary=dy;secondary=Math.abs(dx);}
-                  else return;
-                  var s=primary + secondary*2.2;
-                  if (s<score) {score=s;best=el;}
+                } catch(e) { return false; }
+              }
+
+              function rows(items) {
+                var sorted = items.map(function(el){ return {el:el, p:center(el)}; })
+                  .sort(function(a,b){ return a.p.y-b.p.y || a.p.x-b.p.x; });
+                var out = [];
+                sorted.forEach(function(it){
+                  var tolerance = Math.max(22, Math.min(80, it.p.h * 0.65));
+                  var row = out.find(function(r){ return Math.abs(r.y-it.p.y) <= tolerance; });
+                  if (!row) { row={y:it.p.y, items:[]}; out.push(row); }
+                  row.items.push(it);
+                  row.y = row.items.reduce(function(s,x){return s+x.p.y;},0)/row.items.length;
                 });
-                if (!best) return false;
-                best.focus({preventScroll:false});
-                best.scrollIntoView({behavior:'auto',block:'center',inline:'center'});
+                out.forEach(function(r){ r.items.sort(function(a,b){return a.p.x-b.p.x;}); });
+                return out.sort(function(a,b){return a.y-b.y;});
+              }
+
+              function adjustSlider(el, dir) {
+                if (!el || (el.tagName !== 'INPUT' && el.getAttribute('role') !== 'slider')) return false;
+                var type=(el.getAttribute('type')||'').toLowerCase();
+                if (type !== 'range' && el.getAttribute('role') !== 'slider') return false;
+                if (dir !== 'left' && dir !== 'right') return false;
+                var min=parseFloat(el.min || el.getAttribute('aria-valuemin') || '0');
+                var max=parseFloat(el.max || el.getAttribute('aria-valuemax') || '100');
+                var value=parseFloat(el.value || el.getAttribute('aria-valuenow') || '0');
+                var step=parseFloat(el.step || '0');
+                if (!isFinite(step) || step<=0) step=Math.max(1,(max-min)/50);
+                value=Math.max(min,Math.min(max,value+(dir==='right'?step:-step)));
+                if ('value' in el) el.value=String(value);
+                el.setAttribute('aria-valuenow',String(value));
+                el.dispatchEvent(new Event('input',{bubbles:true}));
+                el.dispatchEvent(new Event('change',{bubbles:true}));
                 return true;
               }
 
-              window.__tvfullMove = move;
-              window.__tvfullEnsureFocus = function(){
-                var a=document.activeElement, items=candidates();
-                if ((!a || a===document.body || a===document.documentElement) && items.length) {
-                  items[0].focus({preventScroll:false});
+              function move(dir) {
+                var items=candidates();
+                if (!items.length) return false;
+                var current=document.activeElement;
+                if (!visible(current) || items.indexOf(current)<0) return mark(items[0]);
+                if (adjustSlider(current,dir)) return true;
+
+                var rs=rows(items), pos=center(current), rowIndex=-1, itemIndex=-1;
+                rs.some(function(r,ri){
+                  var ii=r.items.findIndex(function(x){return x.el===current;});
+                  if(ii>=0){rowIndex=ri;itemIndex=ii;return true;} return false;
+                });
+
+                if(rowIndex>=0 && (dir==='left'||dir==='right')){
+                  var next=itemIndex+(dir==='right'?1:-1);
+                  if(next>=0 && next<rs[rowIndex].items.length) return mark(rs[rowIndex].items[next].el);
                 }
-              };
+                if(rowIndex>=0 && (dir==='up'||dir==='down')){
+                  var targetRow=rowIndex+(dir==='down'?1:-1);
+                  if(targetRow>=0 && targetRow<rs.length){
+                    var best=rs[targetRow].items.reduce(function(a,b){
+                      return Math.abs(a.p.x-pos.x)<=Math.abs(b.p.x-pos.x)?a:b;
+                    });
+                    if(best) return mark(best.el);
+                  }
+                }
+
+                var best=null, score=Number.MAX_VALUE;
+                items.forEach(function(el){
+                  if(el===current) return;
+                  var p=center(el), dx=p.x-pos.x, dy=p.y-pos.y, primary, secondary;
+                  if(dir==='left'&&dx<0){primary=-dx;secondary=Math.abs(dy);}
+                  else if(dir==='right'&&dx>0){primary=dx;secondary=Math.abs(dy);}
+                  else if(dir==='up'&&dy<0){primary=-dy;secondary=Math.abs(dx);}
+                  else if(dir==='down'&&dy>0){primary=dy;secondary=Math.abs(dx);}
+                  else return;
+                  var s=primary+secondary*2.4;
+                  if(s<score){score=s;best=el;}
+                });
+                return best ? mark(best) : false;
+              }
+
+              function activate() {
+                var el=document.activeElement;
+                if(!visible(el) || el===document.body || el===document.documentElement) return false;
+                try {
+                  el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:window}));
+                  el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:window}));
+                  el.click();
+                  return true;
+                } catch(e) { return false; }
+              }
+
+              function ensure() {
+                var a=document.activeElement, items=candidates();
+                if((!a || a===document.body || a===document.documentElement || !visible(a)) && items.length)
+                  return mark(items[0]);
+                return !!a;
+              }
+
+              window.__tvfullNav={move:move,activate:activate,ensure:ensure};
+              if(!document.getElementById('__tvfull_focus_css')){
+                var st=document.createElement('style');
+                st.id='__tvfull_focus_css';
+                st.textContent='*:focus{outline:3px solid rgba(0,229,255,.95)!important;outline-offset:3px!important;}';
+                (document.head||document.documentElement).appendChild(st);
+              }
+              ensure();
             })();
         """.trimIndent()
         runCatching { view.evaluateJavascript(script, null) }
@@ -415,7 +515,7 @@ class WebPlaybackActivity : Activity() {
         view.requestFocus()
         runCatching {
             view.evaluateJavascript(
-                "try{window.__tvfullEnsureFocus&&window.__tvfullEnsureFocus();}catch(e){}",
+                "try{window.__tvfullNav&&window.__tvfullNav.ensure();}catch(e){}",
                 null,
             )
         }
@@ -425,7 +525,17 @@ class WebPlaybackActivity : Activity() {
         if (!::webView.isInitialized || !streamingPremium) return
         runCatching {
             webView.evaluateJavascript(
-                "try{window.__tvfullMove&&window.__tvfullMove('$direction');}catch(e){}",
+                "try{window.__tvfullNav&&window.__tvfullNav.move('$direction');}catch(e){}",
+                null,
+            )
+        }
+    }
+
+    private fun activateTvFocus() {
+        if (!::webView.isInitialized || !streamingPremium) return
+        runCatching {
+            webView.evaluateJavascript(
+                "try{window.__tvfullNav&&window.__tvfullNav.activate();}catch(e){}",
                 null,
             )
         }
@@ -436,31 +546,31 @@ class WebPlaybackActivity : Activity() {
             return super.dispatchKeyEvent(event)
         }
 
-        if (event.action == KeyEvent.ACTION_DOWN) {
-            when (event.keyCode) {
-                KeyEvent.KEYCODE_DPAD_LEFT -> {
-                    moveTvFocus("left")
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_RIGHT -> {
-                    moveTvFocus("right")
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_UP -> {
-                    moveTvFocus("up")
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_DOWN -> {
-                    moveTvFocus("down")
-                    return true
-                }
-                KeyEvent.KEYCODE_DPAD_CENTER,
-                KeyEvent.KEYCODE_ENTER,
-                KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                    // Dejamos que WebView entregue OK/Enter al elemento actualmente enfocado.
-                    ensureTvFocus(webView)
-                    return super.dispatchKeyEvent(event)
-                }
+        if (event.action != KeyEvent.ACTION_DOWN) {
+            return super.dispatchKeyEvent(event)
+        }
+
+        val isDirection = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
+            event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
+            event.keyCode == KeyEvent.KEYCODE_DPAD_UP ||
+            event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
+        if (isDirection) {
+            val now = android.os.SystemClock.uptimeMillis()
+            if (now - lastRemoteNavigationAt < 85L) return true
+            lastRemoteNavigationAt = now
+        }
+
+        when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> { moveTvFocus("left"); return true }
+            KeyEvent.KEYCODE_DPAD_RIGHT -> { moveTvFocus("right"); return true }
+            KeyEvent.KEYCODE_DPAD_UP -> { moveTvFocus("up"); return true }
+            KeyEvent.KEYCODE_DPAD_DOWN -> { moveTvFocus("down"); return true }
+            KeyEvent.KEYCODE_DPAD_CENTER,
+            KeyEvent.KEYCODE_ENTER,
+            KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                ensureTvFocus(webView)
+                activateTvFocus()
+                return true
             }
         }
         return super.dispatchKeyEvent(event)
