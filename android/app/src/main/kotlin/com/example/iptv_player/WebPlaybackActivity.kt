@@ -8,6 +8,7 @@ import android.graphics.Color
 import android.os.Build
 import android.os.Bundle
 import android.util.Log
+import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
 import android.view.WindowManager
@@ -217,6 +218,10 @@ class WebPlaybackActivity : Activity() {
                     }
                 }
                 CookieManager.getInstance().flush()
+                if (streamingPremium && view != null) {
+                    installTvRemoteNavigation(view)
+                    view.postDelayed({ ensureTvFocus(view) }, 120L)
+                }
                 if (!deadDetected && isLoginOrAuthPage(url)) {
                     deadDetected = true
                     Log.w(
@@ -334,6 +339,131 @@ class WebPlaybackActivity : Activity() {
 
         webView.loadUrl(rawUrl, headers)
         webView.requestFocus()
+    }
+
+    private fun installTvRemoteNavigation(view: WebView) {
+        val script = """
+            (function(){
+              if (window.__tvfullRemoteInstalled) return;
+              window.__tvfullRemoteInstalled = true;
+
+              function visible(el) {
+                if (!el || !el.getBoundingClientRect) return false;
+                var r = el.getBoundingClientRect();
+                var s = window.getComputedStyle(el);
+                return r.width > 1 && r.height > 1 &&
+                  s.visibility !== 'hidden' && s.display !== 'none';
+              }
+
+              function candidates() {
+                var q = [
+                  'a[href]', 'button', 'input:not([type="hidden"])', 'select',
+                  'textarea', '[role="button"]', '[role="link"]',
+                  '[role="menuitem"]', '[role="option"]', '[role="tab"]',
+                  '[tabindex]:not([tabindex="-1"])', 'video'
+                ].join(',');
+                return Array.prototype.slice.call(document.querySelectorAll(q))
+                  .filter(visible);
+              }
+
+              function center(el) {
+                var r = el.getBoundingClientRect();
+                return {x:r.left+r.width/2, y:r.top+r.height/2};
+              }
+
+              function move(dir) {
+                var items = candidates();
+                if (!items.length) return false;
+                var current = document.activeElement;
+                if (!visible(current) || items.indexOf(current) < 0) {
+                  items[0].focus({preventScroll:false});
+                  items[0].scrollIntoView({block:'center', inline:'center'});
+                  return true;
+                }
+                var a = center(current), best = null, score = Number.MAX_VALUE;
+                items.forEach(function(el) {
+                  if (el === current) return;
+                  var b=center(el), dx=b.x-a.x, dy=b.y-a.y;
+                  var primary, secondary;
+                  if (dir==='left' && dx<0) {primary=-dx;secondary=Math.abs(dy);}
+                  else if (dir==='right' && dx>0) {primary=dx;secondary=Math.abs(dy);}
+                  else if (dir==='up' && dy<0) {primary=-dy;secondary=Math.abs(dx);}
+                  else if (dir==='down' && dy>0) {primary=dy;secondary=Math.abs(dx);}
+                  else return;
+                  var s=primary + secondary*2.2;
+                  if (s<score) {score=s;best=el;}
+                });
+                if (!best) return false;
+                best.focus({preventScroll:false});
+                best.scrollIntoView({behavior:'auto',block:'center',inline:'center'});
+                return true;
+              }
+
+              window.__tvfullMove = move;
+              window.__tvfullEnsureFocus = function(){
+                var a=document.activeElement, items=candidates();
+                if ((!a || a===document.body || a===document.documentElement) && items.length) {
+                  items[0].focus({preventScroll:false});
+                }
+              };
+            })();
+        """.trimIndent()
+        runCatching { view.evaluateJavascript(script, null) }
+    }
+
+    private fun ensureTvFocus(view: WebView) {
+        view.requestFocus()
+        runCatching {
+            view.evaluateJavascript(
+                "try{window.__tvfullEnsureFocus&&window.__tvfullEnsureFocus();}catch(e){}",
+                null,
+            )
+        }
+    }
+
+    private fun moveTvFocus(direction: String) {
+        if (!::webView.isInitialized || !streamingPremium) return
+        runCatching {
+            webView.evaluateJavascript(
+                "try{window.__tvfullMove&&window.__tvfullMove('$direction');}catch(e){}",
+                null,
+            )
+        }
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (!streamingPremium || !::webView.isInitialized) {
+            return super.dispatchKeyEvent(event)
+        }
+
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            when (event.keyCode) {
+                KeyEvent.KEYCODE_DPAD_LEFT -> {
+                    moveTvFocus("left")
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_RIGHT -> {
+                    moveTvFocus("right")
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_UP -> {
+                    moveTvFocus("up")
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_DOWN -> {
+                    moveTvFocus("down")
+                    return true
+                }
+                KeyEvent.KEYCODE_DPAD_CENTER,
+                KeyEvent.KEYCODE_ENTER,
+                KeyEvent.KEYCODE_NUMPAD_ENTER -> {
+                    // Dejamos que WebView entregue OK/Enter al elemento actualmente enfocado.
+                    ensureTvFocus(webView)
+                    return super.dispatchKeyEvent(event)
+                }
+            }
+        }
+        return super.dispatchKeyEvent(event)
     }
 
     private fun injectFtBrowserCompat(view: WebView) {
@@ -576,7 +706,15 @@ class WebPlaybackActivity : Activity() {
 
     override fun onResume() {
         super.onResume()
-        if (::webView.isInitialized) webView.onResume()
+        if (::webView.isInitialized) {
+            webView.onResume()
+            if (streamingPremium) {
+                webView.postDelayed({
+                    installTvRemoteNavigation(webView)
+                    ensureTvFocus(webView)
+                }, 150L)
+            }
+        }
         applyImmersiveMode()
     }
 
