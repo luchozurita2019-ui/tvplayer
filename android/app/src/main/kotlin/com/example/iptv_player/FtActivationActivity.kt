@@ -17,6 +17,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.LinearLayout
+import android.widget.ProgressBar
 import android.widget.TextView
 
 class FtActivationActivity : Activity() {
@@ -29,6 +31,7 @@ class FtActivationActivity : Activity() {
     private lateinit var root: FrameLayout
     private lateinit var webView: WebView
     private lateinit var status: TextView
+    private lateinit var overlay: FrameLayout
     private var initialHost = ""
     private var finished = false
 
@@ -66,18 +69,65 @@ class FtActivationActivity : Activity() {
             ),
         )
 
+        // Capa visual de TV FULL. El WebView permanece cargado y activo debajo;
+        // no se altera su navegación, temporizadores ni callbacks de activación.
+        overlay = FrameLayout(this).apply {
+            setBackgroundColor(Color.rgb(5, 10, 20))
+            isClickable = false
+            isFocusable = false
+        }
+
+        val panel = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            gravity = Gravity.CENTER
+            isClickable = false
+            isFocusable = false
+        }
+
+        val brand = TextView(this).apply {
+            setTextColor(Color.WHITE)
+            textSize = 30f
+            gravity = Gravity.CENTER
+            text = "TV FULL"
+        }
         status = TextView(this).apply {
             setTextColor(Color.WHITE)
-            textSize = 15f
+            textSize = 22f
             gravity = Gravity.CENTER
-            text = "CARGANDO ACTIVACIÓN…"
+            text = "BUSCANDO USUARIO..."
+            setPadding(0, 28, 0, 18)
         }
-        root.addView(
-            status,
+        val detail = TextView(this).apply {
+            setTextColor(Color.LTGRAY)
+            textSize = 16f
+            gravity = Gravity.CENTER
+            text = "Por favor espere"
+            setPadding(0, 0, 0, 24)
+        }
+        val progress = ProgressBar(this).apply {
+            isIndeterminate = true
+            isClickable = false
+            isFocusable = false
+        }
+
+        panel.addView(brand)
+        panel.addView(status)
+        panel.addView(detail)
+        panel.addView(progress)
+
+        overlay.addView(
+            panel,
             FrameLayout.LayoutParams(
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 ViewGroup.LayoutParams.WRAP_CONTENT,
                 Gravity.CENTER,
+            ),
+        )
+        root.addView(
+            overlay,
+            FrameLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT,
+                ViewGroup.LayoutParams.MATCH_PARENT,
             ),
         )
         setContentView(root)
@@ -95,7 +145,8 @@ class FtActivationActivity : Activity() {
         webView.webViewClient = object : WebViewClient() {
             override fun onPageFinished(view: WebView?, url: String?) {
                 super.onPageFinished(view, url)
-                status.visibility = View.GONE
+                // La capa permanece visible hasta que FT confirme la activación.
+                // El WebView continúa procesando la página debajo.
                 view?.requestFocus()
             }
 
@@ -131,8 +182,8 @@ class FtActivationActivity : Activity() {
             ) {
                 super.onReceivedError(view, request, error)
                 if (request?.isForMainFrame == true) {
-                    status.text = "NO SE PUDO CARGAR LA ACTIVACIÓN"
-                    status.visibility = View.VISIBLE
+                    status.text = "NO SE PUDO COMPLETAR LA BÚSQUEDA"
+                    overlay.visibility = View.VISIBLE
                 }
             }
         }
