@@ -109,6 +109,16 @@ internal class FtPremiumCompat(private val context: Context) {
             )
         }
 
+        val sig = Guard.a.b("plat:ft:$FT_VERSION_CODE:$id")
+        if (sig.isBlank()) {
+            return mapOf(
+                "available" to false,
+                "status" to "map_sign_failed",
+                "stage" to "map",
+                "ping_ok" to pingOk,
+            )
+        }
+
         val map = runCatching { fetchMap(id, sig, intento) }.getOrElse { error ->
             return mapOf(
                 "available" to false,
