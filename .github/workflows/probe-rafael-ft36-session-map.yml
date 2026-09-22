@@ -120,6 +120,20 @@ jobs:
           map_before={'label':'map_before','http':m0}
           try:
               mj=json.loads(mb0)
+              map_before['top_keys']=sorted(mj.keys())
+              found=[]
+              def walk(obj,path=''):
+                  if isinstance(obj,dict):
+                      for k,v in obj.items():
+                          np=(path+'.'+str(k)).strip('.')
+                          if str(k).lower() in ('hbomax','prime','crunchyroll','netflix'):
+                              found.append(np)
+                          walk(v,np)
+                  elif isinstance(obj,list):
+                      for i,v in enumerate(obj[:20]):
+                          walk(v,f'{path}[{i}]')
+              walk(mj)
+              map_before['platform_paths']=sorted(found)
               for bucket in ('codes','libres','apagadas'):
                   obj=mj.get(bucket)
                   if isinstance(obj,dict):
