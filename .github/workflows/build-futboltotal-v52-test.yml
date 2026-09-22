@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/v76-protected-media-permission
+      - feature/v76-tvfull-search-overlay
     paths:
       - 'lib/**'
       - 'android/**'
