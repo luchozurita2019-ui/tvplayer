@@ -149,6 +149,10 @@ class WebPlaybackActivity : Activity() {
             }
         }
 
+        if (streamingPremium) {
+            webView.addJavascriptInterface(TvNavBridge(), "TVFullNavBridge")
+        }
+
         val headerBundle = intent.getBundleExtra(EXTRA_HEADERS)
         val headers = mutableMapOf<String, String>()
         headerBundle?.keySet()?.forEach { key ->
@@ -220,7 +224,6 @@ class WebPlaybackActivity : Activity() {
                 CookieManager.getInstance().flush()
                 if (streamingPremium && view != null) {
                     installTvRemoteNavigation(view)
-                    view.postDelayed({ ensureTvFocus(view) }, 120L)
                 }
                 if (!deadDetected && isLoginOrAuthPage(url)) {
                     deadDetected = true
@@ -341,203 +344,96 @@ class WebPlaybackActivity : Activity() {
         webView.requestFocus()
     }
 
+    @Volatile private var tvNavTextMode = false
+    @Volatile private var tvNavNativeVideoMode = false
     private var lastRemoteNavigationAt = 0L
+    private var centerLongPressTriggered = false
+    private val centerLongPress = Runnable {
+        centerLongPressTriggered = true
+        evaluateTvNav("pointer")
+    }
+
+    private inner class TvNavBridge {
+        @android.webkit.JavascriptInterface
+        fun log(message: String) {
+            Log.i("TVFULL_NAV", message.take(500))
+        }
+
+        @android.webkit.JavascriptInterface
+        fun modoTexto(enabled: Boolean) {
+            tvNavTextMode = enabled
+            Log.d("TVFULL_NAV", "text_mode=$enabled")
+        }
+
+        @android.webkit.JavascriptInterface
+        fun modoVideo(enabled: Boolean) {
+            tvNavNativeVideoMode = enabled
+            Log.d("TVFULL_NAV", "native_video_mode=$enabled")
+        }
+    }
+
+    private fun tvNavScript(): String =
+        runCatching {
+            assets.open("tvnav_v2.js").bufferedReader(Charsets.UTF_8).use { it.readText() }
+        }.onFailure {
+            Log.e("TVFULL_NAV", "asset_read_failed", it)
+        }.getOrDefault("")
 
     private fun installTvRemoteNavigation(view: WebView) {
-        val platformJs = platform.replace("\\", "\\\\").replace("'", "\\'")
-        val script = """
-            (function(){
-              var PLATFORM = '$platformJs';
-
-              function visible(el) {
-                if (!el || !el.getBoundingClientRect) return false;
-                var r = el.getBoundingClientRect();
-                var s = window.getComputedStyle(el);
-                return r.width > 2 && r.height > 2 &&
-                  s.visibility !== 'hidden' && s.display !== 'none' &&
-                  Number(s.opacity || 1) > 0.02;
-              }
-
-              var common = [
-                'a[href]', 'button', 'input:not([type="hidden"])', 'select',
-                'textarea', '[role="button"]', '[role="link"]', '[role="menuitem"]',
-                '[role="option"]', '[role="tab"]', '[role="slider"]',
-                '[tabindex]:not([tabindex="-1"])', 'video'
-              ];
-              var profiles = {
-                hbomax: [
-                  '[data-testid] button', '[data-testid][role="button"]',
-                  '[aria-label][role="button"]', 'input[type="range"]'
-                ],
-                prime: [
-                  '#dv-web-player button', '#dv-web-player input[type="range"]',
-                  '[data-testid] button', '[aria-label][role="button"]'
-                ],
-                crunchyroll: [
-                  '[data-testid="player-controls-root"] button',
-                  'input.timeline-slider', '[data-t] button',
-                  '[aria-label][role="button"]'
-                ]
-              };
-
-              function candidates() {
-                var q = common.concat(profiles[PLATFORM] || []).join(',');
-                var seen = new Set();
-                return Array.prototype.slice.call(document.querySelectorAll(q))
-                  .filter(function(el){
-                    if (!visible(el) || seen.has(el)) return false;
-                    seen.add(el);
-                    return true;
-                  });
-              }
-
-              function center(el) {
-                var r = el.getBoundingClientRect();
-                return {x:r.left+r.width/2, y:r.top+r.height/2, w:r.width, h:r.height};
-              }
-
-              function mark(el) {
-                if (!el) return false;
-                try {
-                  el.focus({preventScroll:true});
-                  el.scrollIntoView({behavior:'auto', block:'nearest', inline:'nearest'});
-                  return true;
-                } catch(e) { return false; }
-              }
-
-              function rows(items) {
-                var sorted = items.map(function(el){ return {el:el, p:center(el)}; })
-                  .sort(function(a,b){ return a.p.y-b.p.y || a.p.x-b.p.x; });
-                var out = [];
-                sorted.forEach(function(it){
-                  var tolerance = Math.max(22, Math.min(80, it.p.h * 0.65));
-                  var row = out.find(function(r){ return Math.abs(r.y-it.p.y) <= tolerance; });
-                  if (!row) { row={y:it.p.y, items:[]}; out.push(row); }
-                  row.items.push(it);
-                  row.y = row.items.reduce(function(s,x){return s+x.p.y;},0)/row.items.length;
-                });
-                out.forEach(function(r){ r.items.sort(function(a,b){return a.p.x-b.p.x;}); });
-                return out.sort(function(a,b){return a.y-b.y;});
-              }
-
-              function adjustSlider(el, dir) {
-                if (!el || (el.tagName !== 'INPUT' && el.getAttribute('role') !== 'slider')) return false;
-                var type=(el.getAttribute('type')||'').toLowerCase();
-                if (type !== 'range' && el.getAttribute('role') !== 'slider') return false;
-                if (dir !== 'left' && dir !== 'right') return false;
-                var min=parseFloat(el.min || el.getAttribute('aria-valuemin') || '0');
-                var max=parseFloat(el.max || el.getAttribute('aria-valuemax') || '100');
-                var value=parseFloat(el.value || el.getAttribute('aria-valuenow') || '0');
-                var step=parseFloat(el.step || '0');
-                if (!isFinite(step) || step<=0) step=Math.max(1,(max-min)/50);
-                value=Math.max(min,Math.min(max,value+(dir==='right'?step:-step)));
-                if ('value' in el) el.value=String(value);
-                el.setAttribute('aria-valuenow',String(value));
-                el.dispatchEvent(new Event('input',{bubbles:true}));
-                el.dispatchEvent(new Event('change',{bubbles:true}));
-                return true;
-              }
-
-              function move(dir) {
-                var items=candidates();
-                if (!items.length) return false;
-                var current=document.activeElement;
-                if (!visible(current) || items.indexOf(current)<0) return mark(items[0]);
-                if (adjustSlider(current,dir)) return true;
-
-                var rs=rows(items), pos=center(current), rowIndex=-1, itemIndex=-1;
-                rs.some(function(r,ri){
-                  var ii=r.items.findIndex(function(x){return x.el===current;});
-                  if(ii>=0){rowIndex=ri;itemIndex=ii;return true;} return false;
-                });
-
-                if(rowIndex>=0 && (dir==='left'||dir==='right')){
-                  var next=itemIndex+(dir==='right'?1:-1);
-                  if(next>=0 && next<rs[rowIndex].items.length) return mark(rs[rowIndex].items[next].el);
-                }
-                if(rowIndex>=0 && (dir==='up'||dir==='down')){
-                  var targetRow=rowIndex+(dir==='down'?1:-1);
-                  if(targetRow>=0 && targetRow<rs.length){
-                    var best=rs[targetRow].items.reduce(function(a,b){
-                      return Math.abs(a.p.x-pos.x)<=Math.abs(b.p.x-pos.x)?a:b;
-                    });
-                    if(best) return mark(best.el);
-                  }
-                }
-
-                var best=null, score=Number.MAX_VALUE;
-                items.forEach(function(el){
-                  if(el===current) return;
-                  var p=center(el), dx=p.x-pos.x, dy=p.y-pos.y, primary, secondary;
-                  if(dir==='left'&&dx<0){primary=-dx;secondary=Math.abs(dy);}
-                  else if(dir==='right'&&dx>0){primary=dx;secondary=Math.abs(dy);}
-                  else if(dir==='up'&&dy<0){primary=-dy;secondary=Math.abs(dx);}
-                  else if(dir==='down'&&dy>0){primary=dy;secondary=Math.abs(dx);}
-                  else return;
-                  var s=primary+secondary*2.4;
-                  if(s<score){score=s;best=el;}
-                });
-                return best ? mark(best) : false;
-              }
-
-              function activate() {
-                var el=document.activeElement;
-                if(!visible(el) || el===document.body || el===document.documentElement) return false;
-                try {
-                  el.dispatchEvent(new MouseEvent('mousedown',{bubbles:true,cancelable:true,view:window}));
-                  el.dispatchEvent(new MouseEvent('mouseup',{bubbles:true,cancelable:true,view:window}));
-                  el.click();
-                  return true;
-                } catch(e) { return false; }
-              }
-
-              function ensure() {
-                var a=document.activeElement, items=candidates();
-                if((!a || a===document.body || a===document.documentElement || !visible(a)) && items.length)
-                  return mark(items[0]);
-                return !!a;
-              }
-
-              window.__tvfullNav={move:move,activate:activate,ensure:ensure};
-              if(!document.getElementById('__tvfull_focus_css')){
-                var st=document.createElement('style');
-                st.id='__tvfull_focus_css';
-                st.textContent='*:focus{outline:3px solid rgba(0,229,255,.95)!important;outline-offset:3px!important;}';
-                (document.head||document.documentElement).appendChild(st);
-              }
-              ensure();
-            })();
-        """.trimIndent()
+        if (!streamingPremium) return
+        val script = tvNavScript()
+        if (script.isBlank()) return
         runCatching { view.evaluateJavascript(script, null) }
+            .onFailure { Log.e("TVFULL_NAV", "install_failed", it) }
     }
 
-    private fun ensureTvFocus(view: WebView) {
-        view.requestFocus()
+    private fun evaluateTvNav(
+        action: String,
+        direction: String? = null,
+        fallbackKeyCode: Int? = null,
+    ) {
+        if (!::webView.isInitialized || !streamingPremium) return
+        val expression = when (action) {
+            "move" -> "window.__tvfullNavV2&&window.__tvfullNavV2.move('${direction.orEmpty()}')"
+            "activate" -> "window.__tvfullNavV2&&window.__tvfullNavV2.activate()"
+            "back" -> "window.__tvfullNavV2&&window.__tvfullNavV2.back()"
+            "pointer" -> "window.__tvfullNavV2&&window.__tvfullNavV2.pointer()"
+            "rearm" -> "window.__tvfullNavV2&&window.__tvfullNavV2.rearm()"
+            else -> "null"
+        }
         runCatching {
-            view.evaluateJavascript(
-                "try{window.__tvfullNav&&window.__tvfullNav.ensure();}catch(e){}",
-                null,
-            )
+            webView.evaluateJavascript(
+                "(function(){try{return $expression||'pass:no-engine';}catch(e){return 'pass:error';}})()",
+            ) { raw ->
+                val result = raw?.trim()?.trim('"')?.replace("\\"", """).orEmpty()
+                Log.d("TVFULL_NAV", "action=$action dir=${direction.orEmpty()} result=$result")
+                if (result.startsWith("pass:") && fallbackKeyCode != null) {
+                    webView.post {
+                        val down = KeyEvent(KeyEvent.ACTION_DOWN, fallbackKeyCode)
+                        val up = KeyEvent(KeyEvent.ACTION_UP, fallbackKeyCode)
+                        webView.dispatchKeyEvent(down)
+                        webView.dispatchKeyEvent(up)
+                    }
+                } else if (action == "back" && result.startsWith("pass:")) {
+                    webView.post { performNativeBack() }
+                }
+            }
+        }.onFailure {
+            Log.e("TVFULL_NAV", "evaluate_failed action=$action", it)
+            if (fallbackKeyCode != null) {
+                webView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_DOWN, fallbackKeyCode))
+                webView.dispatchKeyEvent(KeyEvent(KeyEvent.ACTION_UP, fallbackKeyCode))
+            }
         }
     }
 
-    private fun moveTvFocus(direction: String) {
-        if (!::webView.isInitialized || !streamingPremium) return
-        runCatching {
-            webView.evaluateJavascript(
-                "try{window.__tvfullNav&&window.__tvfullNav.move('$direction');}catch(e){}",
-                null,
-            )
-        }
-    }
-
-    private fun activateTvFocus() {
-        if (!::webView.isInitialized || !streamingPremium) return
-        runCatching {
-            webView.evaluateJavascript(
-                "try{window.__tvfullNav&&window.__tvfullNav.activate();}catch(e){}",
-                null,
-            )
+    private fun performNativeBack() {
+        if (customView != null) {
+            hideCustomView()
+        } else if (::webView.isInitialized && webView.canGoBack()) {
+            webView.goBack()
+        } else {
+            super.onBackPressed()
         }
     }
 
@@ -546,33 +442,55 @@ class WebPlaybackActivity : Activity() {
             return super.dispatchKeyEvent(event)
         }
 
-        if (event.action != KeyEvent.ACTION_DOWN) {
+        if (tvNavTextMode || tvNavNativeVideoMode) {
             return super.dispatchKeyEvent(event)
         }
 
-        val isDirection = event.keyCode == KeyEvent.KEYCODE_DPAD_LEFT ||
-            event.keyCode == KeyEvent.KEYCODE_DPAD_RIGHT ||
-            event.keyCode == KeyEvent.KEYCODE_DPAD_UP ||
-            event.keyCode == KeyEvent.KEYCODE_DPAD_DOWN
-        if (isDirection) {
+        val direction = when (event.keyCode) {
+            KeyEvent.KEYCODE_DPAD_LEFT -> "left"
+            KeyEvent.KEYCODE_DPAD_RIGHT -> "right"
+            KeyEvent.KEYCODE_DPAD_UP -> "up"
+            KeyEvent.KEYCODE_DPAD_DOWN -> "down"
+            else -> null
+        }
+
+        if (direction != null) {
+            if (event.action != KeyEvent.ACTION_DOWN) return true
             val now = android.os.SystemClock.uptimeMillis()
-            if (now - lastRemoteNavigationAt < 85L) return true
+            if (now - lastRemoteNavigationAt < 90L) return true
             lastRemoteNavigationAt = now
+            evaluateTvNav("move", direction, event.keyCode)
+            return true
         }
 
         when (event.keyCode) {
-            KeyEvent.KEYCODE_DPAD_LEFT -> { moveTvFocus("left"); return true }
-            KeyEvent.KEYCODE_DPAD_RIGHT -> { moveTvFocus("right"); return true }
-            KeyEvent.KEYCODE_DPAD_UP -> { moveTvFocus("up"); return true }
-            KeyEvent.KEYCODE_DPAD_DOWN -> { moveTvFocus("down"); return true }
             KeyEvent.KEYCODE_DPAD_CENTER,
             KeyEvent.KEYCODE_ENTER,
             KeyEvent.KEYCODE_NUMPAD_ENTER -> {
-                ensureTvFocus(webView)
-                activateTvFocus()
+                if (event.action == KeyEvent.ACTION_DOWN && event.repeatCount == 0) {
+                    centerLongPressTriggered = false
+                    webView.removeCallbacks(centerLongPress)
+                    webView.postDelayed(centerLongPress, 700L)
+                } else if (event.action == KeyEvent.ACTION_UP) {
+                    webView.removeCallbacks(centerLongPress)
+                    if (!centerLongPressTriggered) evaluateTvNav("activate")
+                }
+                return true
+            }
+
+            KeyEvent.KEYCODE_BACK -> {
+                if (event.action == KeyEvent.ACTION_DOWN) {
+                    evaluateTvNav("back")
+                }
+                return true
+            }
+
+            KeyEvent.KEYCODE_MENU -> {
+                if (event.action == KeyEvent.ACTION_DOWN) evaluateTvNav("pointer")
                 return true
             }
         }
+
         return super.dispatchKeyEvent(event)
     }
 
@@ -803,25 +721,22 @@ class WebPlaybackActivity : Activity() {
 
     @Suppress("DEPRECATION")
     override fun onBackPressed() {
-        if (customView != null) {
-            hideCustomView()
+        if (streamingPremium && ::webView.isInitialized && !tvNavTextMode && !tvNavNativeVideoMode) {
+            evaluateTvNav("back")
             return
         }
-        if (::webView.isInitialized && webView.canGoBack()) {
-            webView.goBack()
-            return
-        }
-        super.onBackPressed()
+        performNativeBack()
     }
 
     override fun onResume() {
         super.onResume()
         if (::webView.isInitialized) {
             webView.onResume()
+            webView.resumeTimers()
             if (streamingPremium) {
                 webView.postDelayed({
                     installTvRemoteNavigation(webView)
-                    ensureTvFocus(webView)
+                    evaluateTvNav("rearm")
                 }, 150L)
             }
         }
