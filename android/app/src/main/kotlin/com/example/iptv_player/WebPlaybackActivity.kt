@@ -405,7 +405,7 @@ class WebPlaybackActivity : Activity() {
             webView.evaluateJavascript(
                 "(function(){try{return $expression||'pass:no-engine';}catch(e){return 'pass:error';}})()",
             ) { raw ->
-                val result = raw?.trim()?.trim('"')?.replace("\\"", """).orEmpty()
+                val result = raw?.trim()?.trim('"').orEmpty()
                 Log.d("TVFULL_NAV", "action=$action dir=${direction.orEmpty()} result=$result")
                 if (result.startsWith("pass:") && fallbackKeyCode != null) {
                     webView.post {
