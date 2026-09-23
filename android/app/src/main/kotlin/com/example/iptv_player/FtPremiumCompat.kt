@@ -587,7 +587,7 @@ internal class FtPremiumCompat(private val context: Context) {
             val libre = json.optInt("libre", 0) == 1
             val token = json.optString("t", "").trim()
             FtSessionState(
-                ok = json.optBoolean("ok", false) && (token.isNotBlank() || libre),
+                ok = json.optBoolean("ok", false) && (token.isNotBlank() || libre || json.optInt("pro", 0) == 1 || json.optInt("queda", 0) > 0),
                 httpStatus = status,
                 queda = json.optInt("queda", 0),
                 libre = libre,
@@ -597,7 +597,7 @@ internal class FtPremiumCompat(private val context: Context) {
                 fallbackAdUrl = json.optString("ad", "").trim(),
                 detail = when {
                     !json.optBoolean("ok", false) -> "sesion ok=false"
-                    token.isBlank() && !libre -> "sesion sin token activo"
+                    token.isBlank() && !libre && json.optInt("pro", 0) != 1 && json.optInt("queda", 0) <= 0 -> "sesion sin autorizacion activa"
                     else -> ""
                 },
             )
