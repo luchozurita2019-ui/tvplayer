@@ -17,11 +17,11 @@ import java.util.UUID
 
 internal class FtPremiumCompat(private val context: Context) {
     companion object {
-        private const val FT_VERSION_CODE = 26
+        private const val FT_VERSION_CODE = 27
         private const val FT_UA = "FT-PRO/1.0"
         private const val PRIMARY = "https://novax-online.iptvnovax.workers.dev"
 
-        // SHA-256 del certificado público de la APK FT 3.6 autorizada por Rafael.
+        // SHA-256 del certificado público de la APK FT de pruebas autorizada por Rafael.
         // No es una clave privada ni una credencial de usuario.
         private const val FT_CERT_SHA256 =
             "51718e3d28348acf72fc57a395bcb9f1b1a9fe63bc1fcfa3f41b8e8b403cadbe"
@@ -216,7 +216,7 @@ internal class FtPremiumCompat(private val context: Context) {
             "ref" to ref,
             "intento" to intento,
             "ping_ok" to pingOk,
-            "source" to "ft36-direct-web-activation-parity",
+            "source" to "ft37-direct-web-activation-parity",
         )
     }
 
