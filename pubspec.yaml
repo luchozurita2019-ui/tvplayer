@@ -66,3 +66,5 @@ flutter:
 
 # TV FULL PRO 1.4.4+36 Android TV BACK is route-owned so one press closes only the player grid.
 # Validation trigger v36: verify Android TV integration after removing duplicate Back ownership.
+
+# Installer TV validation trigger 3080
