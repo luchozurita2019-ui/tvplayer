@@ -17,7 +17,7 @@ import java.util.UUID
 
 internal class FtPremiumCompat(private val context: Context) {
     companion object {
-        private const val FT_VERSION_CODE = 27
+        private const val FT_VERSION_CODE = 28
         private const val FT_UA = "FT-PRO/1.0"
         private const val PRIMARY = "https://novax-online.iptvnovax.workers.dev"
 
