@@ -684,6 +684,12 @@ internal class FtPremiumCompat(private val context: Context) {
                     val upgrade = connection.getHeaderField("Upgrade").orEmpty()
                     val required = connection.getHeaderField("X-Required-Version").orEmpty()
                     val server = connection.getHeaderField("Server").orEmpty()
+                    val contentType = connection.getHeaderField("Content-Type").orEmpty()
+                    val location = connection.getHeaderField("Location").orEmpty()
+                    val allow = connection.getHeaderField("Allow").orEmpty()
+                    val cfRay = connection.getHeaderField("CF-Ray").orEmpty()
+                    val cfCacheStatus = connection.getHeaderField("CF-Cache-Status").orEmpty()
+                    val date = connection.getHeaderField("Date").orEmpty()
                     val safeDetail = readSafeError(connection)
 
                     val detail = buildString {
@@ -691,6 +697,12 @@ internal class FtPremiumCompat(private val context: Context) {
                         if (upgrade.isNotBlank()) append(" · Upgrade=$upgrade")
                         if (required.isNotBlank()) append(" · Required-Version=$required")
                         if (server.isNotBlank()) append(" · Server=$server")
+                        if (contentType.isNotBlank()) append(" · Content-Type=$contentType")
+                        if (location.isNotBlank()) append(" · Location=$location")
+                        if (allow.isNotBlank()) append(" · Allow=$allow")
+                        if (cfRay.isNotBlank()) append(" · CF-Ray=$cfRay")
+                        if (cfCacheStatus.isNotBlank()) append(" · CF-Cache-Status=$cfCacheStatus")
+                        if (date.isNotBlank()) append(" · Date=$date")
                         if (safeDetail.isNotBlank()) append(" · $safeDetail")
                     }
                     error(detail)
