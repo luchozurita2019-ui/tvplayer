@@ -667,76 +667,35 @@ internal class FtPremiumCompat(private val context: Context) {
             }
         }
 
-        fun executeRequest(): JSONObject {
-            val connection = URL(url).openConnection() as HttpURLConnection
-            return try {
-                connection.requestMethod = "GET"
-                connection.connectTimeout = 8000
-                connection.readTimeout = 8000
-                connection.instanceFollowRedirects = true
-                connection.setRequestProperty("User-Agent", FT_UA)
-                connection.setRequestProperty("Accept", "application/json")
-                connection.setRequestProperty("Cache-Control", "no-cache")
-                connection.setRequestProperty("Pragma", "no-cache")
-
-                val status = connection.responseCode
-                if (status != 200) {
-                    val upgrade = connection.getHeaderField("Upgrade").orEmpty()
-                    val required = connection.getHeaderField("X-Required-Version").orEmpty()
-                    val server = connection.getHeaderField("Server").orEmpty()
-                    val contentType = connection.getHeaderField("Content-Type").orEmpty()
-                    val location = connection.getHeaderField("Location").orEmpty()
-                    val allow = connection.getHeaderField("Allow").orEmpty()
-                    val cfRay = connection.getHeaderField("CF-Ray").orEmpty()
-                    val cfCacheStatus = connection.getHeaderField("CF-Cache-Status").orEmpty()
-                    val date = connection.getHeaderField("Date").orEmpty()
-                    val safeDetail = readSafeError(connection)
-
-                    val detail = buildString {
-                        append("HTTP $status")
-                        if (upgrade.isNotBlank()) append(" · Upgrade=$upgrade")
-                        if (required.isNotBlank()) append(" · Required-Version=$required")
-                        if (server.isNotBlank()) append(" · Server=$server")
-                        if (contentType.isNotBlank()) append(" · Content-Type=$contentType")
-                        if (location.isNotBlank()) append(" · Location=$location")
-                        if (allow.isNotBlank()) append(" · Allow=$allow")
-                        if (cfRay.isNotBlank()) append(" · CF-Ray=$cfRay")
-                        if (cfCacheStatus.isNotBlank()) append(" · CF-Cache-Status=$cfCacheStatus")
-                        if (date.isNotBlank()) append(" · Date=$date")
-                        if (safeDetail.isNotBlank()) append(" · $safeDetail")
-                    }
-                    error(detail)
-                }
-
-                val body = connection.inputStream.bufferedReader().use { it.readText() }
-                if (body.isBlank()) error("plat/get respondió vacío")
-                JSONObject(body)
-            } finally {
-                connection.disconnect()
-            }
-        }
-
+        // Paridad con Fútbol Total v3.8: /plat/get se consulta como GET
+        // con el mismo User-Agent y sin cabeceras/reintentos adicionales.
+        val connection = URL(url).openConnection() as HttpURLConnection
         return try {
-            executeRequest()
-        } catch (firstError: Throwable) {
-            val message = firstError.message.orEmpty()
-            if (!message.contains("HTTP 426", ignoreCase = true)) {
-                throw firstError
-            }
+            connection.requestMethod = "GET"
+            connection.connectTimeout = 6000
+            connection.readTimeout = 6000
+            connection.instanceFollowRedirects = true
+            connection.setRequestProperty("User-Agent", FT_UA)
 
-            Thread.sleep(250L)
-
-            runCatching { executeRequest() }.getOrElse { secondError ->
+            val status = connection.responseCode
+            if (status != 200) {
+                val detail = readSafeError(connection)
                 error(
                     buildString {
-                        append("HTTP 426 · reintento fallido")
-                        secondError.message?.takeIf { it.isNotBlank() }?.let {
+                        append("HTTP $status")
+                        if (detail.isNotBlank()) {
                             append(" · ")
-                            append(it)
+                            append(detail)
                         }
                     }
                 )
             }
+
+            val body = connection.inputStream.bufferedReader().use { it.readText() }
+            if (body.isBlank()) error("plat/get respondió vacío")
+            JSONObject(body)
+        } finally {
+            connection.disconnect()
         }
     }
     private fun decodePremiumCode(
