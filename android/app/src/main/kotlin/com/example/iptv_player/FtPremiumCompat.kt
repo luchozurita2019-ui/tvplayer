@@ -667,25 +667,66 @@ internal class FtPremiumCompat(private val context: Context) {
             }
         }
 
-        val connection = URL(url).openConnection() as HttpURLConnection
-        return try {
-            connection.requestMethod = "GET"
-            connection.connectTimeout = 6000
-            connection.readTimeout = 6000
-            connection.instanceFollowRedirects = true
-            connection.setRequestProperty("User-Agent", FT_UA)
-            val status = connection.responseCode
-            if (status != 200) {
-                val safeDetail = readSafeError(connection)
-                error(if (safeDetail.isBlank()) "HTTP $status" else "HTTP $status · $safeDetail")
+        fun executeRequest(): JSONObject {
+            val connection = URL(url).openConnection() as HttpURLConnection
+            return try {
+                connection.requestMethod = "GET"
+                connection.connectTimeout = 8000
+                connection.readTimeout = 8000
+                connection.instanceFollowRedirects = true
+                connection.setRequestProperty("User-Agent", FT_UA)
+                connection.setRequestProperty("Accept", "application/json")
+                connection.setRequestProperty("Cache-Control", "no-cache")
+                connection.setRequestProperty("Pragma", "no-cache")
+
+                val status = connection.responseCode
+                if (status != 200) {
+                    val upgrade = connection.getHeaderField("Upgrade").orEmpty()
+                    val required = connection.getHeaderField("X-Required-Version").orEmpty()
+                    val server = connection.getHeaderField("Server").orEmpty()
+                    val safeDetail = readSafeError(connection)
+
+                    val detail = buildString {
+                        append("HTTP $status")
+                        if (upgrade.isNotBlank()) append(" · Upgrade=$upgrade")
+                        if (required.isNotBlank()) append(" · Required-Version=$required")
+                        if (server.isNotBlank()) append(" · Server=$server")
+                        if (safeDetail.isNotBlank()) append(" · $safeDetail")
+                    }
+                    error(detail)
+                }
+
+                val body = connection.inputStream.bufferedReader().use { it.readText() }
+                if (body.isBlank()) error("plat/get respondió vacío")
+                JSONObject(body)
+            } finally {
+                connection.disconnect()
             }
-            val body = connection.inputStream.bufferedReader().use { it.readText() }
-            JSONObject(body)
-        } finally {
-            connection.disconnect()
+        }
+
+        return try {
+            executeRequest()
+        } catch (firstError: Throwable) {
+            val message = firstError.message.orEmpty()
+            if (!message.contains("HTTP 426", ignoreCase = true)) {
+                throw firstError
+            }
+
+            Thread.sleep(250L)
+
+            runCatching { executeRequest() }.getOrElse { secondError ->
+                error(
+                    buildString {
+                        append("HTTP 426 · reintento fallido")
+                        secondError.message?.takeIf { it.isNotBlank() }?.let {
+                            append(" · ")
+                            append(it)
+                        }
+                    }
+                )
+            }
         }
     }
-
     private fun decodePremiumCode(
         rawCode: String,
         requested: String,
