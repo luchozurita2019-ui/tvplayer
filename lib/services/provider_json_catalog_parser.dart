@@ -28,7 +28,9 @@ class ProviderJsonCatalogParser {
   static const maxIconBytes = 2 * 1024 * 1024;
   static const dynamicStreamPrefix = 'tvfull-dynamic://stream/';
 
-  const ProviderJsonCatalogParser();
+  final String? playbackProfile;
+
+  const ProviderJsonCatalogParser({this.playbackProfile});
 
   Future<ProviderJsonCatalog> parseFile(File file) async {
     try {
@@ -393,6 +395,7 @@ class ProviderJsonCatalogParser {
       drmKeyId: drm?.keyId,
       drmKey: drm?.key,
       streamMimeType: mime,
+      playbackProfile: playbackProfile,
     );
   }
 
