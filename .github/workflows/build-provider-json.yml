@@ -6,6 +6,7 @@ on:
       - feature/local-provider-json-clearkey
       - fix/lista2-json-adapter-v50
       - fix/lista2-visible-v50
+      - fix/lista2-playback-v50
   workflow_dispatch:
 
 permissions:
