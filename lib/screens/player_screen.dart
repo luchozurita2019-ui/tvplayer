@@ -75,6 +75,8 @@ class _PlayerScreenState extends State<PlayerScreen> {
         return AndroidMedia3TexturePlayerScreen(
           playlist: widget.playlist,
           initialIndex: widget.initialIndex,
+          allowProvider2ClearKeyHls:
+              widget.channel.playbackProfile == 'tvf_builtin_provider_2',
         );
       }
       // Android TV usa Media3 también para VOD: evita el cierre nativo observado
