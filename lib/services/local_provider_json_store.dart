@@ -39,7 +39,7 @@ class LocalProviderJsonStore {
       () => normalizeProviderJsonDocument(content),
     );
     final catalog = await Isolate.run(
-      () => const ProviderJsonCatalogParser().parse(normalized),
+      () => ProviderJsonCatalogParser(playbackProfile: serviceId).parse(normalized),
     );
     // Validar antes de escribir: un JSON inválido conserva la copia anterior.
     final directory = await _directory(serviceId);
@@ -62,7 +62,7 @@ class LocalProviderJsonStore {
     final directory = await _directory(serviceId);
     final path = directory.path + '/catalog.private.json';
     return Isolate.run(
-      () => const ProviderJsonCatalogParser().parseFile(File(path)),
+      () => ProviderJsonCatalogParser(playbackProfile: serviceId).parseFile(File(path)),
     );
   }
 
