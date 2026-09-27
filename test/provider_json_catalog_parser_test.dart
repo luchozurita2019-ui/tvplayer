@@ -86,6 +86,40 @@ void main() {
     );
   }
 
+  test('convierte ClearKey JWK histórico del proveedor a kid/k', () {
+    final result = parser.parse(
+      jsonEncode({
+        'groups': [
+          {
+            'name': 'Deportes',
+            'stations': [
+              {
+                'name': 'Canal DRM',
+                'url': 'https://provider.example.test/live.mpd',
+                'license_type': 'clearkey',
+                'license_key': jsonEncode({
+                  'keys': [
+                    {
+                      'kty': 'oct',
+                      'kid': '00112233445566778899aabbccddeeff',
+                      'k': 'ffeeddccbbaa99887766554433221100',
+                    },
+                  ],
+                  'type': 'temporary',
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(result.channels.length, 1);
+    expect(result.channels.single.drmKeyId, testKeyId);
+    expect(result.channels.single.drmKey, testKey);
+    expect(result.channels.single.streamMimeType, 'application/dash+xml');
+    expect(result.warnings, isEmpty);
+  });
+
   test('normaliza mayúsculas, espacios y orden de campos ClearKey', () {
     final sample = providerSample()
       ..['type'] = 'DASH'
