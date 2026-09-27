@@ -10,7 +10,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: tvfull-proveedor-2-${{ github.ref }
+  group: tvfull-proveedor-2-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -46,10 +46,10 @@ jobs:
       - name: Configure persistent release signing
         shell: bash
         env:
-          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }
-          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }
-          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }
-          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
         run: |
           set -euo pipefail
           test -n "$TV_FULL_KEYSTORE_BASE64" || { echo 'Missing TV_FULL_KEYSTORE_BASE64 secret'; exit 1; }
