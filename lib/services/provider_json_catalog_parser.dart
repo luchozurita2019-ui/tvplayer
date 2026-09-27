@@ -60,9 +60,12 @@ class ProviderJsonCatalogParser {
         'JSON inválido. Revisá comas, comillas y llaves.',
       );
     }
+    if (root is Map && root['categories'] is! List && root['groups'] is List) {
+      root = _legacyGroupsToCategories(root);
+    }
     if (root is! Map || root['categories'] is! List) {
       throw const FormatException(
-        'El JSON debe contener una lista categories.',
+        'El JSON debe contener una lista categories o groups.',
       );
     }
 
