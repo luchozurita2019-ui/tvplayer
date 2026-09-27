@@ -22,11 +22,13 @@ const String _media3DefaultUserAgent =
 
 class AndroidMedia3TexturePlayerScreen extends StatefulWidget {
   final List<Channel> playlist;
+  final bool allowProvider2ClearKeyHls;
   final int initialIndex;
 
   const AndroidMedia3TexturePlayerScreen({
     super.key,
     required this.playlist,
+    this.allowProvider2ClearKeyHls = false,
     required this.initialIndex,
   });
 
@@ -191,6 +193,7 @@ class _AndroidMedia3TexturePlayerScreenState
         'url': playbackUrl,
         'requestGeneration': generation,
         'headers': headers,
+        'allowClearKeyHls': widget.allowProvider2ClearKeyHls,
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
         if (_channel.streamMimeType != null)
