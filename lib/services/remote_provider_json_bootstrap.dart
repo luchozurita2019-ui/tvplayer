@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import 'local_provider_json_store.dart';
@@ -14,6 +16,9 @@ class RemoteProviderJsonBootstrap {
 
   static const playlistId = 'tvf_builtin_provider_json';
   static const playlistName = 'TV FULL · Proveedor';
+  static const playlist2Id = 'tvf_builtin_provider_2';
+  static const playlist2Name = 'TV Full · Proveedor 2';
+  static const playlist2Asset = 'assets/playlists/tvfull_proveedor_2.json';
 
   Future<void> prepare() async {
     try {
@@ -49,6 +54,32 @@ class RemoteProviderJsonBootstrap {
         next[index] = playlist.copyWith(
           name: previous.name.trim().isEmpty ? playlistName : previous.name,
         );
+      }
+      // Lista 2 es independiente. Usa exactamente el mismo parser categories -> samples
+      // y el mismo Channel/player que la Lista 1; sólo cambia la fuente del JSON.
+      try {
+        final content2 = await rootBundle.loadString(playlist2Asset);
+        final imported2 = await LocalProviderJsonStore.instance.importContent(
+          playlist2Id,
+          content2,
+        );
+        final index2 = next.indexWhere((item) => item.id == playlist2Id);
+        final playlist2 = Playlist(
+          id: playlist2Id,
+          name: playlist2Name,
+          source: imported2.path,
+          isRemote: false,
+          channels: const [],
+          lastUpdated: DateTime.now(),
+          sourceType: PlaylistSourceType.localProviderJson,
+        );
+        if (index2 < 0) {
+          next.add(playlist2);
+        } else {
+          next[index2] = playlist2;
+        }
+      } catch (_) {
+        // Nunca afecta ni reemplaza la Lista 1.
       }
       await store.saveServices(next);
     } catch (_) {
