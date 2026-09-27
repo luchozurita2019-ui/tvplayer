@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/local-provider-json-clearkey
+      - fix/lista2-clean-v50
   workflow_dispatch:
 
 permissions:
