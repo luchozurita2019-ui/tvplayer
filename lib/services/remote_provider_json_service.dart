@@ -90,7 +90,17 @@ class RemoteProviderJsonService {
           'El catálogo remoto no contiene JSON compatible.',
         );
       }
-      if (decoded is! Map || decoded['categories'] is! List) {
+      if (decoded is! Map) {
+        throw const FormatException(
+          'El catálogo remoto no contiene un objeto raíz válido.',
+        );
+      }
+
+      // Normalizamos aquí, antes de calcular métricas y persistir. Esto es
+      // imprescindible para que el formato legacy groups -> stations ->
+      // options pueda llegar al mismo pipeline V50 que categories -> samples.
+      decoded = const ProviderJsonCatalogParser().normalizeRoot(decoded);
+      if (decoded['categories'] is! List) {
         throw const FormatException(
           'El catálogo remoto no contiene categories válidas.',
         );
