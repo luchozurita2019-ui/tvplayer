@@ -250,7 +250,7 @@ class MainActivity : FlutterActivity() {
                         url, headers, userAgent, position, requestGeneration,
                         call.argument<String>("clearKeyJwk"),
                         call.argument<String>("mimeType"),
-                            call.argument<Boolean>("allowClearKeyHls") ?: false,
+                        call.argument<Boolean>("allowClearKeyHls") ?: false,
                     )
                     result.success(null)
                 }
@@ -595,7 +595,7 @@ class MainActivity : FlutterActivity() {
         val jwk = currentClearKeyJwk
         if (jwk != null) {
             LocalClearKeyDrm.validate(jwk)
-            if (!allowClearKeyHls && (useHlsMime || (currentStreamMimeType == null && looksLikeHls(url))) ) {
+            if (!allowClearKeyHls && (useHlsMime || (currentStreamMimeType == null && looksLikeHls(url)))) {
                 throw LocalClearKeyDrm.ConfigurationException(
                     "ClearKey con HLS no está habilitado para esta fuente."
                 )
