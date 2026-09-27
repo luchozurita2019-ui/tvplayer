@@ -196,4 +196,37 @@ void main() {
     expect(result.channels.single.streamMimeType, isNull);
   });
 
+  test('preserva ClearKey cuando el JSON ya viene normalizado en categories/samples', () {
+    final result = parser.parse(
+      jsonEncode({
+        'categories': [
+          {
+            'name': 'Deportes',
+            'samples': [
+              {
+                'name': 'Canal DASH',
+                'original_url': 'https://example.test/live.mpd',
+                'license_type': 'clearkey',
+                'license_key': jsonEncode({
+                  'keys': [
+                    {
+                      'kty': 'oct',
+                      'kid': 'EjRWeJCrze8SNFZ4kKvN7w',
+                      'k': '3q2-7_8A9QABEiM0RVZneA',
+                    },
+                  ],
+                  'type': 'temporary',
+                }),
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    final channel = result.channels.single;
+    expect(channel.drmKeyId, '1234567890abcdef1234567890abcdef');
+    expect(channel.drmKey, 'deadbeefff00f5000112233445566778');
+    expect(channel.streamMimeType, 'application/dash+xml');
+  });
+
 }
