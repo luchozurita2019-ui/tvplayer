@@ -224,11 +224,8 @@ class ProviderJsonCatalogParser {
 
           // V50 no tiene una representación Widevine en Channel. No
           // convertimos Widevine a ClearKey de forma incorrecta.
-          if (licenseType?.toLowerCase() == 'widevine') {
-            warnings.add(
-              '$groupName.$name: Widevine no está soportado por el pipeline V50.',
-            );
-          }
+          // Widevine no se convierte a ClearKey: el pipeline V50 no lo representa.
+          // La entrada se conserva sin DRM para no inventar credenciales incompatibles.
 
           samples.add(sample);
         }
