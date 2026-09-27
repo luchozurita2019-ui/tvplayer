@@ -174,6 +174,11 @@ class ProviderJsonCatalogParser {
   }
 
   String? _legacyClearKeyToPair(String value) {
+    // La fuente histórica usa dos variantes:
+    // 1) JWK JSON: {"keys":[{"kid":"...","k":"..."}]}
+    // 2) par compacto: kid:key
+    // ClearKeyDrmConfig.parse(), en cambio, exige "kid:...,k:...".
+    // La conversión debe hacerse aquí para no perder todos los canales DRM.
     try {
       final decoded = value.startsWith('{') ? jsonDecode(value) : null;
       if (decoded is Map && decoded['keys'] is List) {
@@ -181,13 +186,28 @@ class ProviderJsonCatalogParser {
         if (keys.isNotEmpty && keys.first is Map) {
           final kid = keys.first['kid']?.toString().trim();
           final key = keys.first['k']?.toString().trim();
-          if (kid != null && kid.isNotEmpty && key != null && key.isNotEmpty) return '$kid:$key';
+          if (kid != null &&
+              kid.isNotEmpty &&
+              key != null &&
+              key.isNotEmpty) {
+            return 'kid:$kid,k:$key';
+          }
         }
       }
     } catch (_) {}
+
+    // No confundir una URL de licencia (https://...) con el formato compacto.
+    if (value.startsWith('http://') || value.startsWith('https://')) {
+      return null;
+    }
+
     final separator = value.indexOf(':');
     if (separator > 0 && separator < value.length - 1) {
-      return value;
+      final left = value.substring(0, separator).trim();
+      final right = value.substring(separator + 1).trim();
+      if (left.isNotEmpty && right.isNotEmpty) {
+        return 'kid:$left,k:$right';
+      }
     }
     return null;
   }
