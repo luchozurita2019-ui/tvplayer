@@ -249,6 +249,7 @@ class MainActivity : FlutterActivity() {
                         url, headers, userAgent, position, requestGeneration,
                         call.argument<String>("clearKeyJwk"),
                         call.argument<String>("mimeType"),
+                        call.argument<Boolean>("allowClearKeyHls") ?: false,
                     )
                     result.success(null)
                 }
@@ -527,6 +528,7 @@ class MainActivity : FlutterActivity() {
         requestGeneration: Long,
         clearKeyJwk: String? = null,
         streamMimeType: String? = null,
+        allowClearKeyHls: Boolean = false,
     ) {
         // Cada fuente recibe listeners que capturan su propia generación. Si
         // queda un callback antiguo en cola, conserva la generación vieja y
@@ -569,7 +571,7 @@ class MainActivity : FlutterActivity() {
         resetStartupProgress()
         dnsFallbackActive = false
         emitAdaptiveProfile("loaded")
-        prepareSource(url, headers, userAgent, positionMs, useFallbackDns = false)
+        prepareSource(url, headers, userAgent, positionMs, useFallbackDns = false, allowClearKeyHls = allowClearKeyHls)
         if (isLive) scheduleStartupDeadline(generation, LIVE_STARTUP_MAX_WAIT_MS)
     }
 
@@ -580,6 +582,7 @@ class MainActivity : FlutterActivity() {
         positionMs: Long,
         useFallbackDns: Boolean,
         forceHls: Boolean = false,
+        allowClearKeyHls: Boolean = false,
     ) {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
         applyPlaybackGuards()
@@ -590,9 +593,9 @@ class MainActivity : FlutterActivity() {
         val jwk = currentClearKeyJwk
         if (jwk != null) {
             LocalClearKeyDrm.validate(jwk)
-            if (useHlsMime || (currentStreamMimeType == null && looksLikeHls(url))) {
+            if (!allowClearKeyHls && (useHlsMime || (currentStreamMimeType == null && looksLikeHls(url)))) {
                 throw LocalClearKeyDrm.ConfigurationException(
-                    "ClearKey con HLS no está soportado. Pedí al proveedor un stream DASH/CENC compatible."
+                    "ClearKey con HLS no está habilitado para esta fuente."
                 )
             }
         }
