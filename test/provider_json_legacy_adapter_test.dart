@@ -50,7 +50,7 @@ void main() {
     expect(channel.url, 'https://example.test/espn.mpd');
     expect(channel.logoUrl, 'https://example.test/espn.png');
     expect(channel.drmKeyId, '1234567890abcdef1234567890abcdef');
-    expect(channel.drmKey, 'deafbeeffc00f5000112345674456778');
+    expect(channel.drmKey, 'deadbeefff00f5000112233445566778');
     expect(channel.streamMimeType, 'application/dash+xml');
     expect(channel.resolvedHttpHeaders('Default')['Origin'],
         'https://example.test');
