@@ -28,7 +28,9 @@ class ProviderJsonCatalogParser {
   static const maxIconBytes = 2 * 1024 * 1024;
   static const dynamicStreamPrefix = 'tvfull-dynamic://stream/';
 
-  const ProviderJsonCatalogParser();
+  final String? playbackProfile;
+
+  const ProviderJsonCatalogParser({this.playbackProfile});
 
   Future<ProviderJsonCatalog> parseFile(File file) async {
     try {
@@ -126,6 +128,87 @@ class ProviderJsonCatalogParser {
     final value = rawBase.trim();
     final normalized = value.endsWith('/') ? value : '$value/';
     return Uri.parse(normalized);
+  }
+
+  Map<String, dynamic> _legacyGroupsToCategories(Map root) {
+    final categories = <Map<String, dynamic>>[];
+    final groups = root['groups'];
+    if (groups is! List) return {'categories': categories};
+    for (final rawGroup in groups) {
+      if (rawGroup is! Map) continue;
+      final groupName = rawGroup['name']?.toString().trim();
+      if (groupName == null || groupName.isEmpty) continue;
+      final samples = <Map<String, dynamic>>[];
+      final stations = rawGroup['stations'];
+      if (stations is List) {
+        for (final rawStation in stations) {
+          if (rawStation is! Map) continue;
+          final options = rawStation['options'];
+          if (options is List && options.isNotEmpty) {
+            for (final rawOption in options) {
+              final sample = _legacySample(rawOption, fallbackName: rawStation['name']);
+              if (sample != null) samples.add(sample);
+            }
+          } else {
+            final sample = _legacySample(rawStation);
+            if (sample != null) samples.add(sample);
+          }
+        }
+      }
+      categories.add({'name': groupName, 'samples': samples});
+    }
+    return {'categories': categories};
+  }
+
+  Map<String, dynamic>? _legacySample(dynamic raw, {dynamic fallbackName}) {
+    if (raw is! Map) return null;
+    final url = raw['original_url'] ?? raw['url'];
+    if (url is! String || url.trim().isEmpty) return null;
+    final name = raw['name']?.toString().trim();
+    final resolvedName = (name == null || name.isEmpty)
+        ? fallbackName?.toString().trim()
+        : name;
+    if (resolvedName == null || resolvedName.isEmpty) return null;
+    final sample = <String, dynamic>{
+      'name': resolvedName,
+      'original_url': url.trim(),
+    };
+    final image = raw['icono'] ?? raw['image'];
+    if (image is String && image.trim().isNotEmpty) sample['icono'] = image.trim();
+    final headers = raw['headers'];
+    if (headers is Map) sample['headers'] = Map<String, dynamic>.from(headers);
+    final licenseType = raw['license_type']?.toString().trim().toLowerCase();
+    final licenseKey = raw['license_key'];
+    if (licenseType == 'clearkey' && licenseKey is String) {
+      final pair = _legacyClearKeyToPair(licenseKey.trim());
+      if (pair != null) sample['drm_license_uri'] = pair;
+    }
+    if (url.contains('{token}') || raw['token'] != null) sample['resolver_required'] = true;
+    return sample;
+  }
+
+  String? _legacyClearKeyToPair(String value) {
+    try {
+      final decoded = value.startsWith('{') ? jsonDecode(value) : null;
+      if (decoded is Map && decoded['keys'] is List) {
+        final keys = decoded['keys'] as List;
+        if (keys.isNotEmpty && keys.first is Map) {
+          final kid = keys.first['kid']?.toString().trim();
+          final key = keys.first['k']?.toString().trim();
+          if (kid != null && kid.isNotEmpty && key != null && key.isNotEmpty) {
+            return 'kid:$kid,k:$key';
+          }
+        }
+      }
+    } catch (_) {}
+    if (value.startsWith('http://') || value.startsWith('https://')) return null;
+    final separator = value.indexOf(':');
+    if (separator > 0 && separator < value.length - 1) {
+      final left = value.substring(0, separator).trim();
+      final right = value.substring(separator + 1).trim();
+      if (left.isNotEmpty && right.isNotEmpty) return 'kid:$left,k:$right';
+    }
+    return null;
   }
 
   Channel _sample(
@@ -248,19 +331,7 @@ class ProviderJsonCatalogParser {
       warnings.add('$path.icono: debe ser texto; se omitió el logo.');
     }
 
-    final uriPath = Uri.tryParse(originalUrl)?.path.toLowerCase() ?? '';
-    String? extensionMime = uriPath.endsWith('.mpd')
-        ? 'application/dash+xml'
-        : uriPath.endsWith('.m3u8')
-        ? 'application/x-mpegURL'
-        : null;
-    // En URLs generadoras la ruta multimedia puede estar dentro del query.
-    extensionMime ??= originalUrl.toLowerCase().contains('.mpd')
-        ? 'application/dash+xml'
-        : originalUrl.toLowerCase().contains('.m3u8')
-        ? 'application/x-mpegURL'
-        : null;
-
+    // Media3 debe poder inspeccionar la respuesta HTTP cuando el proveedor no declara type.
     final type = raw['type'];
     String? mime;
     if (type is String) {
@@ -268,10 +339,10 @@ class ProviderJsonCatalogParser {
         'HLS' || 'M3U8' => 'application/x-mpegURL',
         'DASH' || 'MPD' => 'application/dash+xml',
         // CLEARKEY describe DRM, no el contenedor: priorizamos la extensión.
-        'CLEARKEY' => extensionMime ?? 'application/dash+xml',
+        'CLEARKEY' => null,
         _ => null,
       };
-      if (mime == null) {
+      if (mime == null && type.trim().isNotEmpty && type.trim().toUpperCase() != 'CLEARKEY') {
         warnings.add('$path.type: formato a detectar al reproducir.');
       }
     } else if (type != null) {
@@ -279,7 +350,17 @@ class ProviderJsonCatalogParser {
         '$path.type: debe ser texto; formato a detectar al reproducir.',
       );
     }
-    mime ??= extensionMime;
+
+    if (mime == null &&
+        playbackProfile == 'tvf_builtin_provider_2' &&
+        type == null) {
+      final lowerUrl = originalUrl.toLowerCase();
+      if (RegExp(r'\.m3u8(?:$|[?#])').hasMatch(lowerUrl)) {
+        mime = 'application/x-mpegURL';
+      } else if (RegExp(r'\.mpd(?:$|[?#])').hasMatch(lowerUrl)) {
+        mime = 'application/dash+xml';
+      }
+    }
 
     return Channel(
       name: name.trim(),
@@ -294,6 +375,7 @@ class ProviderJsonCatalogParser {
       drmKeyId: drm?.keyId,
       drmKey: drm?.key,
       streamMimeType: mime,
+      playbackProfile: playbackProfile,
     );
   }
 
