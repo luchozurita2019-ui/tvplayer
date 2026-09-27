@@ -39,12 +39,52 @@ jobs:
       - name: Tests
         run: flutter test --no-pub --reporter expanded
 
-      - name: Build APK
-        run: flutter build apk --debug --dart-define=TV_FULL_ANDROID_TV=true
+      - name: Configure persistent release signing
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64" || { echo 'Missing TV_FULL_KEYSTORE_BASE64 secret'; exit 1; }
+          test -n "$TV_FULL_KEYSTORE_PASSWORD" || { echo 'Missing TV_FULL_KEYSTORE_PASSWORD secret'; exit 1; }
+          test -n "$TV_FULL_KEY_ALIAS" || { echo 'Missing TV_FULL_KEY_ALIAS secret'; exit 1; }
+          test -n "$TV_FULL_KEY_PASSWORD" || { echo 'Missing TV_FULL_KEY_PASSWORD secret'; exit 1; }
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > android/tvfull-release.jks
+          cat > android/key.properties <<EOF
+          storeFile=tvfull-release.jks
+          storePassword=$TV_FULL_KEYSTORE_PASSWORD
+          keyAlias=$TV_FULL_KEY_ALIAS
+          keyPassword=$TV_FULL_KEY_PASSWORD
+          EOF
 
-      - name: Upload APK
+      - name: Build signed release APK
+        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Prepare and verify APK
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifact
+          cp build/app/outputs/flutter-apk/app-release.apk artifact/TV-FULL-PRO-proveedor-2.apk
+          sha256sum artifact/TV-FULL-PRO-proveedor-2.apk | awk '{print $1}' > artifact/SHA256.txt
+          printf '%s
+' "$GITHUB_SHA" > artifact/COMMIT.txt
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER" || { echo 'apksigner not found'; exit 1; }
+          "$APKSIGNER" verify --verbose --print-certs artifact/TV-FULL-PRO-proveedor-2.apk > artifact/SIGNATURE.txt
+
+      - name: Remove signing material
+        if: always()
+        shell: bash
+        run: rm -f android/key.properties android/tvfull-release.jks
+
+      - name: Upload signed APK
         uses: actions/upload-artifact@v4
         with:
-          name: tvfull-proveedor-2-test-apk
-          path: build/app/outputs/flutter-apk/app-debug.apk
-          retention-days: 14
+          name: tvfull-proveedor-2-signed-apk
+          path: artifact/*
+          if-no-files-found: error
+          retention-days: 30
