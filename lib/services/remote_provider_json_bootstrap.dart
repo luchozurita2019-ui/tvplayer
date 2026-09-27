@@ -1,3 +1,5 @@
+import 'package:flutter/services.dart';
+
 import '../models/playlist.dart';
 import '../models/playlist_source_type.dart';
 import 'local_provider_json_store.dart';
@@ -14,6 +16,9 @@ class RemoteProviderJsonBootstrap {
 
   static const playlistId = 'tvf_builtin_provider_json';
   static const playlistName = 'TV FULL · Proveedor';
+  static const playlist2Id = 'tvf_builtin_provider_2';
+  static const playlist2Name = 'TV Full · Proveedor 2';
+  static const playlist2Asset = 'assets/playlists/tvfull_proveedor_2.json';
 
   Future<void> prepare() async {
     try {
@@ -49,6 +54,32 @@ class RemoteProviderJsonBootstrap {
         next[index] = playlist.copyWith(
           name: previous.name.trim().isEmpty ? playlistName : previous.name,
         );
+      }
+      // Lista 2 es independiente y viene dentro de la APK. Si su importación
+      // falla, no se toca ni se elimina la Lista 1 ya preparada.
+      try {
+        final content2 = await rootBundle.loadString(playlist2Asset);
+        final imported2 = await LocalProviderJsonStore.instance.importContent(
+          playlist2Id,
+          content2,
+        );
+        final index2 = next.indexWhere((item) => item.id == playlist2Id);
+        final playlist2 = Playlist(
+          id: playlist2Id,
+          name: playlist2Name,
+          source: imported2.path,
+          isRemote: false,
+          channels: const [],
+          lastUpdated: DateTime.now(),
+          sourceType: PlaylistSourceType.localProviderJson,
+        );
+        if (index2 < 0) {
+          next.add(playlist2);
+        } else {
+          next[index2] = playlist2;
+        }
+      } catch (_) {
+        // La Lista 1 sigue funcionando aunque el asset de Lista 2 falle.
       }
       await store.saveServices(next);
     } catch (_) {
