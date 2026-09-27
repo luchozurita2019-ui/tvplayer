@@ -56,7 +56,8 @@ void main() {
     expect(channel.dynamicStreamPath, contains('live/c3eds/Demo/'));
     expect(channel.providerGlobalIndex, '37');
     expect(channel.url, startsWith(DynamicStreamService.streamPrefix));
-    expect(channel.streamMimeType, 'application/dash+xml');
+    // Sin un type explícito HLS/DASH, Media3 detecta el contenedor por la respuesta HTTP.
+    expect(channel.streamMimeType, isNull);
     expect(channel.drmKeyId, '000102030405060708090a0b0c0d0e0f');
     expect(channel.drmKey, 'ffffffffffffffffffffffffffffffff');
   });
