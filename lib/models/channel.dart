@@ -10,6 +10,7 @@ class Channel {
   final String? drmKeyId;
   final String? drmKey;
   final String? streamMimeType;
+  final String? playbackProfile;
   final String? group; // categoría (ej: "Deportes", "Noticias")
   final String? tvgId; // id XMLTV/EPG del proveedor
   final String? xtreamStreamId; // stream_id real para APIs Xtream (EPG, etc.)
@@ -36,6 +37,7 @@ class Channel {
     this.drmKeyId,
     this.drmKey,
     this.streamMimeType,
+    this.playbackProfile,
     this.group,
     this.tvgId,
     this.xtreamStreamId,
@@ -127,6 +129,7 @@ class Channel {
     if (drmKeyId != null) 'drmKeyId': drmKeyId,
     if (drmKey != null) 'drmKey': drmKey,
     if (streamMimeType != null) 'streamMimeType': streamMimeType,
+    if (playbackProfile != null) 'playbackProfile': playbackProfile,
   };
 
   factory Channel.fromJson(Map<String, dynamic> json) {
@@ -173,6 +176,9 @@ class Channel {
       drmKey: key as String?,
       streamMimeType: json['streamMimeType'] is String
           ? json['streamMimeType'] as String
+          : null,
+      playbackProfile: json['playbackProfile'] is String
+          ? json['playbackProfile'] as String
           : null,
       group: json['group'] as String?,
       tvgId: json['tvgId'] as String?,
