@@ -58,7 +58,19 @@ class ProviderJsonCatalogParser {
         'JSON inválido. Revisá comas, comillas y llaves.',
       );
     }
-    if (root is! Map || root['categories'] is! List) {
+    if (root is! Map) {
+      throw const FormatException(
+        'El JSON debe contener un objeto raíz válido.',
+      );
+    }
+
+    // Algunos proveedores entregan el mismo catálogo con la estructura
+    // groups -> stations -> options. La convertimos únicamente en la capa de
+    // entrada para reutilizar, sin cambios, el pipeline V50 de categories ->
+    // samples -> Channel -> reproductor.
+    root = _normalizeLegacyGroups(root);
+
+    if (root['categories'] is! List) {
       throw const FormatException(
         'El JSON debe contener una lista categories.',
       );
@@ -111,6 +123,137 @@ class ProviderJsonCatalogParser {
       throw FormatException('El catálogo no contiene canales válidos.$detail');
     }
     return ProviderJsonCatalog(channels, warnings);
+  }
+
+  Map<String, dynamic> _normalizeLegacyGroups(Map root) {
+    if (root['categories'] is List || root['groups'] is! List) {
+      return Map<String, dynamic>.from(root);
+    }
+
+    final categories = <Map<String, dynamic>>[];
+
+    for (final rawGroup in root['groups'] as List) {
+      if (rawGroup is! Map) continue;
+
+      final rawGroupName = rawGroup['name'];
+      final groupName = rawGroupName is String &&
+              rawGroupName.trim().isNotEmpty
+          ? rawGroupName.trim()
+          : 'Sin categoría';
+
+      final samples = <Map<String, dynamic>>[];
+      final stations = rawGroup['stations'];
+      if (stations is! List) continue;
+
+      for (final rawStation in stations) {
+        if (rawStation is! Map) continue;
+
+        final options = rawStation['options'];
+        final entries = options is List && options.isNotEmpty
+            ? options
+            : [rawStation];
+
+        for (final rawEntry in entries) {
+          if (rawEntry is! Map) continue;
+
+          final sample = <String, dynamic>{};
+          final name = _legacyText(rawEntry['name']) ??
+              _legacyText(rawStation['name']);
+          final url = _legacyText(rawEntry['url']) ??
+              _legacyText(rawEntry['original_url']) ??
+              _legacyText(rawStation['url']);
+
+          if (name != null) sample['name'] = name;
+          if (url != null) {
+            sample['original_url'] = url;
+            // {token} es una instrucción del proveedor, no una URL HLS/DASH
+            // final. Se conserva como stream dinámico para el resolvedor V50.
+            if (url.contains('{token}')) {
+              sample['resolver_required'] = true;
+            }
+          }
+
+          final image = _legacyText(rawEntry['image']) ??
+              _legacyText(rawEntry['icono']) ??
+              _legacyText(rawStation['image']) ??
+              _legacyText(rawStation['icono']);
+          if (image != null) sample['icono'] = image;
+
+          final headers = rawEntry['headers'] ?? rawStation['headers'];
+          if (headers != null) sample['headers'] = headers;
+
+          final licenseType = _legacyText(rawEntry['license_type']) ??
+              _legacyText(rawStation['license_type']);
+          final licenseKey =
+              rawEntry.containsKey('license_key')
+                  ? rawEntry['license_key']
+                  : rawStation['license_key'];
+
+          if (licenseType?.toLowerCase() == 'clearkey' &&
+              licenseKey != null) {
+            final drm = _legacyClearKeyToPair(licenseKey);
+            if (drm != null) sample['drm_license_uri'] = drm;
+          }
+
+          if (sample.containsKey('name') && sample.containsKey('original_url')) {
+            samples.add(sample);
+          }
+        }
+      }
+
+      categories.add({
+        'name': groupName,
+        'samples': samples,
+      });
+    }
+
+    final normalized = Map<String, dynamic>.from(root);
+    normalized.remove('groups');
+    normalized['categories'] = categories;
+    return normalized;
+  }
+
+  String? _legacyText(dynamic value) {
+    if (value is! String) return null;
+    final text = value.trim();
+    return text.isEmpty ? null : text;
+  }
+
+  String? _legacyClearKeyToPair(dynamic value) {
+    if (value is Map) {
+      final keys = value['keys'];
+      if (keys is List && keys.isNotEmpty && keys.first is Map) {
+        final first = keys.first as Map;
+        final kid = _legacyText(first['kid']);
+        final key = _legacyText(first['k']);
+        if (kid != null && key != null) {
+          return 'kid:$kid,k:$key';
+        }
+      }
+      return null;
+    }
+
+    if (value is! String) return null;
+    final text = value.trim();
+    if (text.isEmpty) return null;
+
+    // Algunos proveedores serializan el JWK como string en vez de objeto.
+    if (text.startsWith('{')) {
+      try {
+        final decoded = jsonDecode(text);
+        return _legacyClearKeyToPair(decoded);
+      } on FormatException {
+        return null;
+      }
+    }
+
+    // También se acepta el formato interno que ya entiende V50.
+    if (text.toLowerCase().contains('kid:') &&
+        text.toLowerCase().contains('k:')) {
+      return text;
+    }
+
+    return null;
   }
 
   Uri? _catalogBaseUri(Map root) {
