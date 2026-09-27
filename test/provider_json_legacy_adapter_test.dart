@@ -136,4 +136,64 @@ void main() {
         'https://example.test/live/{token}/stream.mpd');
     expect(channel.url, startsWith('tvfull-dynamic://stream/'));
   });
+  test('hereda metadatos de station y permite override por option', () {
+    final result = parser.parse(
+      jsonEncode({
+        'groups': [
+          {
+            'name': 'Test',
+            'stations': [
+              {
+                'name': 'Canal',
+                'image': 'https://example.test/logo.png',
+                'type': 'DASH',
+                'tvg_id': 'canal.test',
+                'headers': {'Referer': 'https://station.test'},
+                'options': [
+                  {
+                    'name': 'Canal HD',
+                    'url': 'https://example.test/live.mpd',
+                    'headers': {
+                      'Origin': 'https://option.test',
+                    },
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    final channel = result.channels.single;
+    expect(channel.name, 'Canal HD');
+    expect(channel.logoUrl, 'https://example.test/logo.png');
+    expect(channel.tvgId, 'canal.test');
+    expect(channel.streamMimeType, 'application/dash+xml');
+    expect(channel.resolvedHttpHeaders('Default')['Referer'],
+        'https://station.test');
+    expect(channel.resolvedHttpHeaders('Default')['Origin'],
+        'https://option.test');
+  });
+
+  test('no convierte una entrada website en un stream de video', () {
+    final result = parser.parse(
+      jsonEncode({
+        'groups': [
+          {
+            'name': 'Extras',
+            'stations': [
+              {
+                'name': 'Más listas',
+                'url': 'https://example.test/',
+                'license_type': 'website',
+              },
+            ],
+          },
+        ],
+      }),
+    );
+    expect(result.channels.single.url, 'https://example.test/');
+    expect(result.channels.single.streamMimeType, isNull);
+  });
+
 }
