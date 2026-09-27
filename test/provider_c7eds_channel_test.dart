@@ -42,7 +42,8 @@ void main() {
       'live/c7eds/Ch10_Tucuman/SA_Live_dash_enc/Ch10_Tucuman.mpd',
     );
     expect(channel.url, startsWith(DynamicStreamService.streamPrefix));
-    expect(channel.streamMimeType, 'application/dash+xml');
+    // Sin un type explícito HLS/DASH, Media3 detecta el contenedor por la respuesta HTTP.
+    expect(channel.streamMimeType, isNull);
     expect(channel.hasDrmConfiguration, isTrue);
     expect(ProviderFlowStreamService.instance.handles(channel), isTrue);
   });
