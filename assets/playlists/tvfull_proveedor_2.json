@@ -1,0 +1,43 @@
+{
+  "name": "TV Full Proveedor 2",
+  "groups": [
+    {
+      "name": "INTERNACIONAL",
+      "stations": [
+        {
+          "name": "TVE",
+          "image": "https://upload.wikimedia.org/wikipedia/commons/e/e7/TVE.svg",
+          "url": "https://rtvelivestream-rtveplayplus.rtve.es/rtvesec/int/tvei_ame_main_1080.m3u8"
+        },
+        {
+          "name": "CLAN",
+          "image": "https://i.postimg.cc/cL8vJm6W/clan-2026-worldtv2.png",
+          "url": "https://rtvelivestream-rtveplayplus.rtve.es/rtvesec/int/clan_int_main_dvr_720.m3u8"
+        }
+      ]
+    },
+    {
+      "name": "BRASIL",
+      "stations": [
+        {
+          "name": "BAND",
+          "image": "https://i.pinimg.com/564x/61/d8/07/61d807daca7fb95995f174d67c6be4f9.jpg",
+          "url": "https://media.cdntvms.com.br/band_sat/tracks-v1a1/mono.m3u8"
+        },
+        {
+          "name": "BAND NEWS",
+          "url": "https://media.cdntvms.com.br/band_news/tracks-v1a1/mono.m3u8"
+        }
+      ]
+    },
+    {
+      "name": "TV FULL PROVEEDOR 2",
+      "stations": [
+        {
+          "name": "TVE Internacional",
+          "url": "https://rtvelivestream-rtveplayplus.rtve.es/rtvesec/int/tvei_ame_main_1080.m3u8"
+        }
+      ]
+    }
+  ]
+}
