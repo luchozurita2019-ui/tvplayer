@@ -119,8 +119,7 @@ class ProviderJsonCatalogParser {
   Map<String, dynamic> _legacyGroupsToCategories(Map root) {
     final categories = <Map<String, dynamic>>[];
     final groups = root['groups'];
-    if (groups is! List) return <String, dynamic>{'categories': categories};
-
+    if (groups is! List) return {'categories': categories};
     for (final rawGroup in groups) {
       if (rawGroup is! Map) continue;
       final groupName = rawGroup['name']?.toString().trim();
@@ -144,66 +143,39 @@ class ProviderJsonCatalogParser {
       }
       categories.add({'name': groupName, 'samples': samples});
     }
-
-    final output = <String, dynamic>{'categories': categories};
-    if (root['base_url'] != null) output['base_url'] = root['base_url'];
-    if (root['stream_base_url'] != null) output['stream_base_url'] = root['stream_base_url'];
-    if (root['resolver_mode'] != null) output['resolver_mode'] = root['resolver_mode'];
-    return output;
+    return {'categories': categories};
   }
 
   Map<String, dynamic>? _legacySample(Map raw, {Object? fallbackName}) {
     final rawUrl = raw['url'];
     if (rawUrl is! String || rawUrl.trim().isEmpty) return null;
     final name = raw['name']?.toString().trim();
-    final resolvedName = (name == null || name.isEmpty)
-        ? fallbackName?.toString().trim()
-        : name;
+    final resolvedName = (name == null || name.isEmpty) ? fallbackName?.toString().trim() : name;
     if (resolvedName == null || resolvedName.isEmpty) return null;
-
-    final sample = <String, dynamic>{
-      'name': resolvedName,
-      'original_url': rawUrl.trim(),
-    };
+    final sample = <String, dynamic>{'name': resolvedName, 'original_url': rawUrl.trim()};
     final image = raw['image'];
     if (image is String && image.trim().isNotEmpty) sample['icono'] = image.trim();
     final headers = raw['headers'];
     if (headers is Map) sample['headers'] = Map<String, dynamic>.from(headers);
-
-    final type = raw['type'];
-    if (type is String && type.trim().isNotEmpty) {
-      sample['type'] = type.trim();
-    } else if (rawUrl.toString().toLowerCase().contains('.m3u8')) {
-      sample['type'] = 'HLS';
-    } else if (rawUrl.toString().toLowerCase().contains('.mpd')) {
-      sample['type'] = 'DASH';
-    }
-
     final licenseType = raw['license_type']?.toString().trim().toLowerCase();
     final licenseKey = raw['license_key'];
     if (licenseType == 'clearkey' && licenseKey is String) {
       final pair = _legacyClearKeyToPair(licenseKey.trim());
       if (pair != null) sample['drm_license_uri'] = pair;
     }
-
-    if (rawUrl.contains('{token}') || raw['token'] != null) {
-      sample['resolver_required'] = true;
-    }
+    if (rawUrl.contains('{token}') || raw['token'] != null) sample['resolver_required'] = true;
     return sample;
   }
 
   String? _legacyClearKeyToPair(String value) {
     try {
-      dynamic decoded;
-      if (value.startsWith('{')) decoded = jsonDecode(value);
+      final decoded = value.startsWith('{') ? jsonDecode(value) : null;
       if (decoded is Map && decoded['keys'] is List) {
         final keys = decoded['keys'] as List;
         if (keys.isNotEmpty && keys.first is Map) {
           final kid = keys.first['kid']?.toString().trim();
           final key = keys.first['k']?.toString().trim();
-          if (kid != null && kid.isNotEmpty && key != null && key.isNotEmpty) {
-            return '$kid:$key';
-          }
+          if (kid != null && kid.isNotEmpty && key != null && key.isNotEmpty) return '$kid:$key';
         }
       }
     } catch (_) {}
