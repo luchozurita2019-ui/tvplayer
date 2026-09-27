@@ -164,8 +164,7 @@ class IptvProvider extends ChangeNotifier {
       if (index < 0) {
         next.add(playlist);
       } else {
-        next[index] =
-            playlist.copyWith(lastUpdated: _playlists[index].lastUpdated);
+        next[index] = playlist.copyWith(lastUpdated: _playlists[index].lastUpdated);
       }
       _playlists = next;
       await _localStore.saveServices(_playlists);
