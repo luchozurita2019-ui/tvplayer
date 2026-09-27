@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
@@ -28,6 +29,9 @@ class IptvProvider extends ChangeNotifier {
   static const _classicPlaylistName = 'Lista clásica';
   static const _classicPlaylistSource =
       'asset://assets/playlists/lista_clasica.m3u';
+  static const _provider2PlaylistId = 'tvf_builtin_provider_2';
+  static const _provider2PlaylistName = 'TV Full · Proveedor 2';
+  static const _provider2Asset = 'assets/playlists/tvfull_proveedor_2.json';
 
   List<Playlist> _playlists = const [];
   List<Channel> _favorites = const [];
@@ -96,6 +100,7 @@ class IptvProvider extends ChangeNotifier {
     }
 
     await _ensureClassicPlaylist();
+    await _ensureProvider2Playlist();
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
@@ -136,6 +141,38 @@ class IptvProvider extends ChangeNotifier {
     _playlists = next;
     await _localStore.clearServiceCatalogs(_classicPlaylistId);
     await _localStore.saveServices(_playlists);
+  }
+
+  Future<void> _ensureProvider2Playlist() async {
+    const id = _provider2PlaylistId;
+    final index = _playlists.indexWhere((item) => item.id == id);
+    try {
+      final content = await rootBundle.loadString(_provider2Asset);
+      final imported =
+          await LocalProviderJsonStore.instance.importContent(id, content);
+      final playlist = Playlist(
+        id: id,
+        name: _provider2PlaylistName,
+        source: imported.path,
+        isRemote: false,
+        channels: const <Channel>[],
+        lastUpdated: DateTime.now(),
+        sourceType: PlaylistSourceType.localProviderJson,
+      );
+
+      final next = List<Playlist>.from(_playlists);
+      if (index < 0) {
+        next.add(playlist);
+      } else {
+        next[index] =
+            playlist.copyWith(lastUpdated: _playlists[index].lastUpdated);
+      }
+      _playlists = next;
+      await _localStore.saveServices(_playlists);
+    } catch (_) {
+      // La lista original y el resto de servicios siguen intactos si el
+      // asset de proveedor 2 no está disponible en una instalación anterior.
+    }
   }
 
   Playlist? playlistById(String playlistId) {
