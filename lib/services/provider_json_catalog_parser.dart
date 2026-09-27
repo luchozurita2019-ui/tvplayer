@@ -382,6 +382,20 @@ class ProviderJsonCatalogParser {
       );
     }
 
+    // Proveedor 2 contiene URLs cuyo contenedor queda oculto por query strings,
+    // redirects o CDNs. Cuando no hay type explícito, ayudamos a Media3 a
+    // seleccionar DASH/HLS por la extensión, sin tocar la lista histórica.
+    if (mime == null &&
+        playbackProfile == 'tvf_builtin_provider_2' &&
+        type == null) {
+      final lowerUrl = originalUrl.toLowerCase();
+      if (RegExp(r'\.m3u8(?:$|[?#])').hasMatch(lowerUrl)) {
+        mime = 'application/x-mpegURL';
+      } else if (RegExp(r'\.mpd(?:$|[?#])').hasMatch(lowerUrl)) {
+        mime = 'application/dash+xml';
+      }
+    }
+
     return Channel(
       name: name.trim(),
       url: url,
