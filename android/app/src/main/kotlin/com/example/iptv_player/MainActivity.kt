@@ -584,6 +584,7 @@ class MainActivity : FlutterActivity() {
         positionMs: Long,
         useFallbackDns: Boolean,
         forceHls: Boolean = false,
+        allowClearKeyHls: Boolean = currentAllowClearKeyHls,
     ) {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
         applyPlaybackGuards()
