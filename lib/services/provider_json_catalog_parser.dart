@@ -363,6 +363,18 @@ class ProviderJsonCatalogParser {
         throw const FormatException('drm_license_uri debe ser texto.');
       }
       drm = ClearKeyDrmConfig.parse(rawDrm);
+    } else {
+      // Los catálogos ya normalizados pueden conservar license_type/license_key.
+      // Adaptarlos aquí evita perder ClearKey cuando la normalización ocurrió
+      // antes de entrar al parser (por ejemplo, en el asset de Proveedor 2).
+      final licenseType = _firstText(raw, const ['license_type']);
+      final licenseKey = raw['license_key'];
+      if (licenseType?.toLowerCase() == 'clearkey' && licenseKey != null) {
+        final pair = _legacyClearKeyToPair(licenseKey);
+        if (pair != null) {
+          drm = ClearKeyDrmConfig.parse(pair);
+        }
+      }
     }
 
     final headers = <String, String>{};
