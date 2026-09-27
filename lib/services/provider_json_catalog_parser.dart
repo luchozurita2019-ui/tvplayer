@@ -347,30 +347,31 @@ class ProviderJsonCatalogParser {
       warnings.add('$path.icono: debe ser texto; se omitió el logo.');
     }
 
-    final uriPath = Uri.tryParse(originalUrl)?.path.toLowerCase() ?? '';
-    String? extensionMime = uriPath.endsWith('.mpd')
-        ? 'application/dash+xml'
-        : uriPath.endsWith('.m3u8')
-        ? 'application/x-mpegURL'
-        : null;
-    // En URLs generadoras la ruta multimedia puede estar dentro del query.
-    extensionMime ??= originalUrl.toLowerCase().contains('.mpd')
-        ? 'application/dash+xml'
-        : originalUrl.toLowerCase().contains('.m3u8')
-        ? 'application/x-mpegURL'
-        : null;
-
+    // Importante: la lista M3U que ya funciona deja que Media3 detecte el
+    // contenedor a partir de la respuesta HTTP. No debemos convertir una
+    // extensión de la URL en una orden rígida de MIME: muchos proveedores
+    // entregan HLS/DASH detrás de PHP, query strings, redirects o CDN que
+    // responden con un Content-Type distinto.
+    //
+    // Sólo usamos "type" cuando el proveedor lo declara explícitamente.
+    // Si no está declarado, Media3 hace sniffing como en la lista original.
     final type = raw['type'];
     String? mime;
     if (type is String) {
       mime = switch (type.trim().toUpperCase()) {
         'HLS' || 'M3U8' => 'application/x-mpegURL',
         'DASH' || 'MPD' => 'application/dash+xml',
-        // CLEARKEY describe DRM, no el contenedor: priorizamos la extensión.
-        'CLEARKEY' => extensionMime ?? 'application/dash+xml',
+        'MP4' => 'video/mp4',
+        'TS' || 'MPEGTS' => 'video/mp2t',
+        'WEBM' => 'video/webm',
+        'AAC' => 'audio/aac',
+        'MP3' => 'audio/mpeg',
+        // CLEARKEY describe DRM, no el contenedor: se detecta al abrir.
+        'CLEARKEY' => null,
         _ => null,
       };
-      if (mime == null) {
+      if (mime == null && type.trim().isNotEmpty &&
+          type.trim().toUpperCase() != 'CLEARKEY') {
         warnings.add('$path.type: formato a detectar al reproducir.');
       }
     } else if (type != null) {
@@ -378,7 +379,6 @@ class ProviderJsonCatalogParser {
         '$path.type: debe ser texto; formato a detectar al reproducir.',
       );
     }
-    mime ??= extensionMime;
 
     return Channel(
       name: name.trim(),
