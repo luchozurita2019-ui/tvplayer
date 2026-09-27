@@ -158,38 +158,63 @@ class ProviderJsonCatalogParser {
         for (final rawEntry in entries) {
           if (rawEntry is! Map) continue;
 
+          // Herencia exacta station -> option: la opción sobrescribe sólo
+          // los campos que declara y conserva el resto de la estación.
           final sample = <String, dynamic>{};
-          final name = _legacyText(rawEntry['name']) ??
-              _legacyText(rawStation['name']);
-          final url = _legacyText(rawEntry['url']) ??
-              _legacyText(rawEntry['original_url']) ??
-              _legacyText(rawStation['url']);
+          dynamic inherited(String key) =>
+              rawEntry.containsKey(key) ? rawEntry[key] : rawStation[key];
 
-          if (name != null) sample['name'] = name;
-          if (url != null) {
-            sample['original_url'] = url;
-            // {token} es una instrucción del proveedor, no una URL HLS/DASH
-            // final. Se conserva como stream dinámico para el resolvedor V50.
-            if (url.contains('{token}')) {
-              sample['resolver_required'] = true;
-            }
-          }
+          final name = _legacyText(inherited('name'));
+          final url = _legacyText(inherited('url')) ??
+              _legacyText(inherited('original_url'));
+          if (name == null || url == null) continue;
 
-          final image = _legacyText(rawEntry['image']) ??
-              _legacyText(rawEntry['icono']) ??
-              _legacyText(rawStation['image']) ??
-              _legacyText(rawStation['icono']);
+          sample['name'] = name;
+          sample['original_url'] = url;
+
+          final image = _legacyText(inherited('image')) ??
+              _legacyText(inherited('icono'));
           if (image != null) sample['icono'] = image;
 
-          final headers = rawEntry['headers'] ?? rawStation['headers'];
-          if (headers != null) sample['headers'] = headers;
+          final stationHeaders = rawStation['headers'];
+          final entryHeaders = rawEntry['headers'];
+          if (stationHeaders is Map || entryHeaders is Map) {
+            final mergedHeaders = <String, dynamic>{};
+            if (stationHeaders is Map) {
+              mergedHeaders.addAll(Map<String, dynamic>.from(stationHeaders));
+            }
+            if (entryHeaders is Map) {
+              mergedHeaders.addAll(Map<String, dynamic>.from(entryHeaders));
+            }
+            sample['headers'] = mergedHeaders;
+          }
 
-          final licenseType = _legacyText(rawEntry['license_type']) ??
-              _legacyText(rawStation['license_type']);
-          final licenseKey =
-              rawEntry.containsKey('license_key')
-                  ? rawEntry['license_key']
-                  : rawStation['license_key'];
+          final type = _legacyText(inherited('type')) ??
+              _legacyText(inherited('stream_type')) ??
+              _legacyText(inherited('format'));
+          if (type != null) sample['type'] = type;
+
+          final tvgId = _legacyText(inherited('tvgId')) ??
+              _legacyText(inherited('tvg_id')) ??
+              _legacyText(inherited('tvg-id'));
+          if (tvgId != null) sample['tvgId'] = tvgId;
+
+          final resolverId = _legacyText(inherited('resolver_id')) ??
+              _legacyText(inherited('stream_id'));
+          if (resolverId != null) sample['resolver_id'] = resolverId;
+
+          final globalIndex = inherited('globalIndex');
+          if (globalIndex != null) sample['globalIndex'] = globalIndex;
+
+          final token = _legacyText(inherited('token'));
+          if (token != null) sample['token'] = token;
+
+          if (url.contains('{token}') || token != null) {
+            sample['resolver_required'] = true;
+          }
+
+          final licenseType = _legacyText(inherited('license_type'));
+          final licenseKey = inherited('license_key');
 
           if (licenseType?.toLowerCase() == 'clearkey' &&
               licenseKey != null) {
@@ -197,9 +222,15 @@ class ProviderJsonCatalogParser {
             if (drm != null) sample['drm_license_uri'] = drm;
           }
 
-          if (sample.containsKey('name') && sample.containsKey('original_url')) {
-            samples.add(sample);
+          // V50 no tiene una representación Widevine en Channel. No
+          // convertimos Widevine a ClearKey de forma incorrecta.
+          if (licenseType?.toLowerCase() == 'widevine') {
+            warnings.add(
+              '$path.$name: Widevine no está soportado por el pipeline V50.',
+            );
           }
+
+          samples.add(sample);
         }
       }
 
