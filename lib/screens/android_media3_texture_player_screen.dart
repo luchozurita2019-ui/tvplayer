@@ -6,10 +6,10 @@ import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
 import '../services/clearkey_drm_config.dart';
+import '../services/dynamic_stream_service.dart';
 import '../services/channel_health_service.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
-import '../services/dynamic_stream_service.dart';
 import '../services/live_channel_usage_service.dart';
 import '../services/live_playback_error_policy.dart';
 import '../widgets/channel_logo_image.dart';
@@ -86,10 +86,10 @@ class _AndroidMedia3TexturePlayerScreenState
         ? 0
         : widget.initialIndex.clamp(0, widget.playlist.length - 1);
     _eventSub = _events.receiveBroadcastStream().listen(
-      _onNativeEvent,
-      onError: (Object error) =>
-          _finishWithError('Problema de reproducción', error.toString()),
-    );
+          _onNativeEvent,
+          onError: (Object error) =>
+              _finishWithError('Problema de reproducción', error.toString()),
+        );
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) _rootFocus.requestFocus();
     });
@@ -100,17 +100,16 @@ class _AndroidMedia3TexturePlayerScreenState
     try {
       final healthReady = _health.ensureLoaded();
       unawaited(
-        ChannelLogoResolverService.instance.primeChannels(widget.playlist),
-      );
+          ChannelLogoResolverService.instance.primeChannels(widget.playlist));
       final lowRam = DevicePerformanceService.instance.lowRam;
       var adaptiveLevel = 0;
       if (widget.playlist.isNotEmpty) {
         try {
           adaptiveLevel =
               await _player.invokeMethod<int>('getLiveAdaptiveLevel', {
-                'url': _channel.url,
-              }) ??
-              0;
+                    'url': _channel.url,
+                  }) ??
+                  0;
         } on PlatformException {
           adaptiveLevel = 0;
         }
@@ -129,9 +128,8 @@ class _AndroidMedia3TexturePlayerScreenState
         'minBuffer': lowRam ? lowRamMin : normalMin,
         'maxBuffer': lowRam ? lowRamMax : normalMax,
         'bufferForPlayback': 1000,
-        'bufferForPlaybackAfterRebuffer': lowRam
-            ? lowRamRebuffer
-            : normalRebuffer,
+        'bufferForPlaybackAfterRebuffer':
+            lowRam ? lowRamRebuffer : normalRebuffer,
       });
       await healthReady;
       if (!mounted) return;
@@ -169,8 +167,8 @@ class _AndroidMedia3TexturePlayerScreenState
       });
     }
 
-    var playbackUrl = _channel.url;
     final headers = Map<String, String>.from(_headers);
+    var playbackUrl = _channel.url;
 
     try {
       final dynamicId = _channel.dynamicStreamId?.trim();
@@ -196,8 +194,7 @@ class _AndroidMedia3TexturePlayerScreenState
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
         'allowClearKeyHls': widget.allowProvider2ClearKeyHls,
-        if (_channel.streamMimeType != null)
-          'mimeType': _channel.streamMimeType,
+        if (_channel.streamMimeType != null) 'mimeType': _channel.streamMimeType,
         if (_channel.hasDrmConfiguration)
           'clearKeyJwk': ClearKeyDrmConfig.fromHex(
             _channel.drmKeyId ?? '',
@@ -212,13 +209,6 @@ class _AndroidMedia3TexturePlayerScreenState
       _finishWithError('Configuración ClearKey inválida', error.message);
     } on PlatformException catch (error) {
       if (!mounted || generation != _openGeneration) return;
-      if (error.code == 'TVFULL_DRM_CONFIG') {
-        _finishWithError(
-          error.message ?? 'Configuración ClearKey inválida',
-          error.code,
-        );
-        return;
-      }
       _handleTechnicalError(error.code, error.message ?? error.code);
     }
   }
@@ -226,8 +216,7 @@ class _AndroidMedia3TexturePlayerScreenState
   void _recordHealthySignal() {
     if (_healthRecordedGeneration == _openGeneration) return;
     final startedAt = _prepareStartedAt;
-    final slow =
-        startedAt != null &&
+    final slow = startedAt != null &&
         DateTime.now().difference(startedAt) >=
             const Duration(milliseconds: 5500);
     _health.markHealthy(_channel, slow: slow);
@@ -291,8 +280,7 @@ class _AndroidMedia3TexturePlayerScreenState
         }
         break;
       case 'videoError':
-        final codeName =
-            event['errorCodeName']?.toString() ??
+        final codeName = event['errorCodeName']?.toString() ??
             event['errorCode']?.toString() ??
             '';
         final detail = event['error']?.toString() ?? codeName;
@@ -453,11 +441,9 @@ class _AndroidMedia3TexturePlayerScreenState
                   title: Text(track.displayName(index + 1)),
                   subtitle: track.mimeType.isEmpty
                       ? null
-                      : Text(
-                          track.mimeType
-                              .replaceFirst('audio/', '')
-                              .toUpperCase(),
-                        ),
+                      : Text(track.mimeType
+                          .replaceFirst('audio/', '')
+                          .toUpperCase()),
                   trailing: track.selected
                       ? const Icon(
                           Icons.check_circle_rounded,
@@ -516,9 +502,8 @@ class _AndroidMedia3TexturePlayerScreenState
       }
       const rowExtent = 58.0;
       final max = _channelScrollController.position.maxScrollExtent;
-      final target = (_index * rowExtent - rowExtent * 2)
-          .clamp(0.0, max)
-          .toDouble();
+      final target =
+          (_index * rowExtent - rowExtent * 2).clamp(0.0, max).toDouble();
       _channelScrollController.jumpTo(target);
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (mounted &&
@@ -725,291 +710,302 @@ class _AndroidMedia3TexturePlayerScreenState
   }
 
   Widget _liveHud() => SafeArea(
-    child: Align(
-      alignment: Alignment.bottomCenter,
-      child: Container(
-        height: 108,
-        padding: const EdgeInsets.fromLTRB(22, 30, 22, 12),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0x00000000), Color(0x3502080F), Color(0xA802060B)],
-            stops: [0, .42, 1],
+        child: Align(
+          alignment: Alignment.bottomCenter,
+          child: Container(
+            height: 108,
+            padding: const EdgeInsets.fromLTRB(22, 30, 22, 12),
+            decoration: const BoxDecoration(
+              gradient: LinearGradient(
+                begin: Alignment.topCenter,
+                end: Alignment.bottomCenter,
+                colors: [
+                  Color(0x00000000),
+                  Color(0x3502080F),
+                  Color(0xA802060B),
+                ],
+                stops: [0, .42, 1],
+              ),
+            ),
+            child: Row(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: [
+                Container(
+                  width: 62,
+                  height: 62,
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: Colors.black.withValues(alpha: .24),
+                    borderRadius: BorderRadius.circular(14),
+                    border: Border.all(
+                      color: tvFullCyan.withValues(alpha: .40),
+                    ),
+                    boxShadow: [
+                      BoxShadow(
+                        color: tvFullCyan.withValues(alpha: .10),
+                        blurRadius: 12,
+                      ),
+                    ],
+                  ),
+                  child: ChannelLogoImage(
+                    channel: _channel,
+                    fit: BoxFit.contain,
+                    cacheWidth: 124,
+                    cacheHeight: 124,
+                    priority: 120,
+                    prefetchExtent: 0,
+                    fallback: const Icon(
+                      Icons.live_tv_rounded,
+                      size: 31,
+                      color: Colors.white70,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            Flexible(
+                              child: Text(
+                                _channel.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.w900,
+                                  shadows: [
+                                    Shadow(
+                                      color: Colors.black87,
+                                      blurRadius: 8,
+                                    ),
+                                  ],
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 10),
+                            const TvFullLiveBadge(),
+                          ],
+                        ),
+                        const SizedBox(height: 5),
+                        Text(
+                          (_channel.group ?? '').trim().isEmpty
+                              ? 'TV en vivo'
+                              : _channel.group!.trim(),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(
+                            color: Colors.white60,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w600,
+                            shadows: [
+                              Shadow(color: Colors.black87, blurRadius: 6),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                if (_hasMultipleAudioTracks)
+                  _LiveHudAction(
+                    icon: Icons.language_rounded,
+                    label: 'Audio',
+                    onTap: () => unawaited(_showAudioPicker()),
+                  ),
+                if (_hasMultipleAudioTracks) const SizedBox(width: 8),
+                _LiveHudAction(
+                  icon: Icons.grid_view_rounded,
+                  label: 'Canales',
+                  onTap: _openChannelList,
+                ),
+                const SizedBox(width: 12),
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 8),
+                  child: Text(
+                    '← → cambiar   ·   ↓ canales',
+                    style: TextStyle(
+                      color: Colors.white38,
+                      fontSize: 10,
+                      fontWeight: FontWeight.w600,
+                      shadows: [
+                        Shadow(color: Colors.black87, blurRadius: 6),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Container(
-              width: 62,
-              height: 62,
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: .24),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: tvFullCyan.withValues(alpha: .40)),
-                boxShadow: [
-                  BoxShadow(
-                    color: tvFullCyan.withValues(alpha: .10),
-                    blurRadius: 12,
+      );
+
+  Widget _channelDrawer() => Align(
+        alignment: Alignment.centerRight,
+        child: Material(
+          color: const Color(0xF20A1119),
+          elevation: 16,
+          child: SafeArea(
+            child: SizedBox(
+              width: 350,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
+                    child: Row(
+                      children: [
+                        const Expanded(
+                          child: Text(
+                            'Lista de canales',
+                            style: TextStyle(
+                              fontSize: 20,
+                              fontWeight: FontWeight.w900,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          onPressed: _closeChannelList,
+                          icon: const Icon(Icons.close_rounded),
+                        ),
+                      ],
+                    ),
+                  ),
+                  Expanded(
+                    child: ListView.builder(
+                      controller: _channelScrollController,
+                      padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
+                      scrollCacheExtent: const ScrollCacheExtent.pixels(70),
+                      itemCount: widget.playlist.length,
+                      itemBuilder: (context, index) {
+                        final item = widget.playlist[index];
+                        final selected = index == _index;
+                        final dead = _health.isTemporarilyDead(item);
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: Opacity(
+                            opacity: dead && !selected ? .48 : 1,
+                            child: ListTile(
+                              focusNode: selected ? _channelListFocus : null,
+                              autofocus: selected,
+                              selected: selected,
+                              minTileHeight: 54,
+                              selectedTileColor: const Color(0xFF1677FF)
+                                  .withValues(alpha: .18),
+                              shape: RoundedRectangleBorder(
+                                borderRadius: BorderRadius.circular(9),
+                              ),
+                              leading: SizedBox(
+                                width: 36,
+                                height: 36,
+                                child: ChannelLogoImage(
+                                  channel: item,
+                                  fit: BoxFit.contain,
+                                  cacheWidth: 72,
+                                  cacheHeight: 72,
+                                  prefetchExtent: 0,
+                                  fallback: const Icon(
+                                    Icons.live_tv_rounded,
+                                    size: 20,
+                                  ),
+                                ),
+                              ),
+                              title: Text(
+                                item.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: 14,
+                                  fontWeight: selected
+                                      ? FontWeight.w800
+                                      : FontWeight.w600,
+                                ),
+                              ),
+                              subtitle: dead
+                                  ? const Text(
+                                      'No disponible temporalmente',
+                                      style: TextStyle(
+                                        color: Colors.white38,
+                                        fontSize: 10,
+                                      ),
+                                    )
+                                  : null,
+                              trailing: dead
+                                  ? const Icon(
+                                      Icons.tv_off_rounded,
+                                      size: 18,
+                                      color: Colors.white38,
+                                    )
+                                  : null,
+                              onTap: () => _selectChannel(index),
+                            ),
+                          ),
+                        );
+                      },
+                    ),
                   ),
                 ],
               ),
-              child: ChannelLogoImage(
-                channel: _channel,
-                fit: BoxFit.contain,
-                cacheWidth: 124,
-                cacheHeight: 124,
-                priority: 120,
-                prefetchExtent: 0,
-                fallback: const Icon(
-                  Icons.live_tv_rounded,
-                  size: 31,
-                  color: Colors.white70,
-                ),
-              ),
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            _channel.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              shadows: [
-                                Shadow(color: Colors.black87, blurRadius: 8),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        const TvFullLiveBadge(),
-                      ],
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      (_channel.group ?? '').trim().isEmpty
-                          ? 'TV en vivo'
-                          : _channel.group!.trim(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (_hasMultipleAudioTracks)
-              _LiveHudAction(
-                icon: Icons.language_rounded,
-                label: 'Audio',
-                onTap: () => unawaited(_showAudioPicker()),
-              ),
-            if (_hasMultipleAudioTracks) const SizedBox(width: 8),
-            _LiveHudAction(
-              icon: Icons.grid_view_rounded,
-              label: 'Canales',
-              onTap: _openChannelList,
-            ),
-            const SizedBox(width: 12),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text(
-                '← → cambiar   ·   ↓ canales',
-                style: TextStyle(
-                  color: Colors.white38,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    ),
-  );
-
-  Widget _channelDrawer() => Align(
-    alignment: Alignment.centerRight,
-    child: Material(
-      color: const Color(0xF20A1119),
-      elevation: 16,
-      child: SafeArea(
-        child: SizedBox(
-          width: 350,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Padding(
-                padding: const EdgeInsets.fromLTRB(20, 20, 20, 10),
-                child: Row(
-                  children: [
-                    const Expanded(
-                      child: Text(
-                        'Lista de canales',
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w900,
-                        ),
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _closeChannelList,
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ],
-                ),
-              ),
-              Expanded(
-                child: ListView.builder(
-                  controller: _channelScrollController,
-                  padding: const EdgeInsets.fromLTRB(10, 0, 10, 18),
-                  scrollCacheExtent: const ScrollCacheExtent.pixels(70),
-                  itemCount: widget.playlist.length,
-                  itemBuilder: (context, index) {
-                    final item = widget.playlist[index];
-                    final selected = index == _index;
-                    final dead = _health.isTemporarilyDead(item);
-                    return Padding(
-                      padding: const EdgeInsets.symmetric(vertical: 2),
-                      child: Opacity(
-                        opacity: dead && !selected ? .48 : 1,
-                        child: ListTile(
-                          focusNode: selected ? _channelListFocus : null,
-                          autofocus: selected,
-                          selected: selected,
-                          minTileHeight: 54,
-                          selectedTileColor: const Color(0xFF1677FF)
-                              .withValues(alpha: .18),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(9),
-                          ),
-                          leading: SizedBox(
-                            width: 36,
-                            height: 36,
-                            child: ChannelLogoImage(
-                              channel: item,
-                              fit: BoxFit.contain,
-                              cacheWidth: 72,
-                              cacheHeight: 72,
-                              prefetchExtent: 0,
-                              fallback: const Icon(
-                                Icons.live_tv_rounded,
-                                size: 20,
-                              ),
-                            ),
-                          ),
-                          title: Text(
-                            item.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: selected
-                                  ? FontWeight.w800
-                                  : FontWeight.w600,
-                            ),
-                          ),
-                          subtitle: dead
-                              ? const Text(
-                                  'No disponible temporalmente',
-                                  style: TextStyle(
-                                    color: Colors.white38,
-                                    fontSize: 10,
-                                  ),
-                                )
-                              : null,
-                          trailing: dead
-                              ? const Icon(
-                                  Icons.tv_off_rounded,
-                                  size: 18,
-                                  color: Colors.white38,
-                                )
-                              : null,
-                          onTap: () => _selectChannel(index),
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-            ],
           ),
         ),
-      ),
-    ),
-  );
+      );
 
   Widget _errorCard() => Center(
-    child: Container(
-      constraints: const BoxConstraints(maxWidth: 520),
-      padding: const EdgeInsets.all(24),
-      decoration: BoxDecoration(
-        color: const Color(0xED10161D),
-        borderRadius: BorderRadius.circular(16),
-      ),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          const Icon(Icons.tv_off_rounded, size: 42, color: Colors.white54),
-          const SizedBox(height: 12),
-          Text(
-            _friendlyError!,
-            textAlign: TextAlign.center,
-            style: const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+        child: Container(
+          constraints: const BoxConstraints(maxWidth: 520),
+          padding: const EdgeInsets.all(24),
+          decoration: BoxDecoration(
+            color: const Color(0xED10161D),
+            borderRadius: BorderRadius.circular(16),
           ),
-          const SizedBox(height: 8),
-          const Text(
-            'Probá nuevamente o elegí otro canal.',
-            style: TextStyle(color: Colors.white54),
-          ),
-          const SizedBox(height: 18),
-          _LiveErrorButton(
-            focusNode: _retryFocus,
-            autofocus: true,
-            filled: true,
-            label: 'Reintentar',
-            icon: Icons.refresh_rounded,
-            onTap: () => unawaited(_prepareCurrent()),
-          ),
-          const SizedBox(height: 14),
-          const Row(
-            mainAxisAlignment: MainAxisAlignment.center,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
             children: [
-              Icon(
-                Icons.keyboard_arrow_down_rounded,
-                size: 20,
-                color: Colors.white54,
-              ),
-              SizedBox(width: 5),
+              const Icon(Icons.tv_off_rounded, size: 42, color: Colors.white54),
+              const SizedBox(height: 12),
               Text(
-                'Flecha abajo: lista de canales',
-                style: TextStyle(color: Colors.white54, fontSize: 12),
+                _friendlyError!,
+                textAlign: TextAlign.center,
+                style:
+                    const TextStyle(fontSize: 19, fontWeight: FontWeight.w900),
+              ),
+              const SizedBox(height: 8),
+              const Text(
+                'Probá nuevamente o elegí otro canal.',
+                style: TextStyle(color: Colors.white54),
+              ),
+              const SizedBox(height: 18),
+              _LiveErrorButton(
+                focusNode: _retryFocus,
+                autofocus: true,
+                filled: true,
+                label: 'Reintentar',
+                icon: Icons.refresh_rounded,
+                onTap: () => unawaited(_prepareCurrent()),
+              ),
+              const SizedBox(height: 14),
+              const Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  Icon(Icons.keyboard_arrow_down_rounded,
+                      size: 20, color: Colors.white54),
+                  SizedBox(width: 5),
+                  Text(
+                    'Flecha abajo: lista de canales',
+                    style: TextStyle(color: Colors.white54, fontSize: 12),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
-      ),
-    ),
-  );
+        ),
+      );
 }
 
 class _LiveHudAction extends StatelessWidget {
@@ -1109,11 +1105,8 @@ class _LiveErrorButtonState extends State<_LiveErrorButton> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  Icon(
-                    widget.icon,
-                    size: 19,
-                    color: _focused ? accent : Colors.white70,
-                  ),
+                  Icon(widget.icon,
+                      size: 19, color: _focused ? accent : Colors.white70),
                   const SizedBox(width: 8),
                   Text(
                     widget.label,
