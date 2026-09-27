@@ -226,7 +226,7 @@ class ProviderJsonCatalogParser {
           // convertimos Widevine a ClearKey de forma incorrecta.
           if (licenseType?.toLowerCase() == 'widevine') {
             warnings.add(
-              '$path.$name: Widevine no está soportado por el pipeline V50.',
+              '$groupName.$name: Widevine no está soportado por el pipeline V50.',
             );
           }
 
