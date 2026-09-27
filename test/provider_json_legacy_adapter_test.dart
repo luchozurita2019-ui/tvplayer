@@ -87,7 +87,7 @@ void main() {
     expect(result.channels.single.drmKeyId,
         '1234567890abcdef1234567890abcdef');
     expect(result.channels.single.drmKey,
-        'deafbeeffc00f5000112345674456778');
+        'deadbeefff00f5000112233445566778');
   });
 
   test('una station sin options se convierte en un sample', () {
