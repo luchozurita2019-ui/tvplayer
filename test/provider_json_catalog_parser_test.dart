@@ -116,7 +116,8 @@ void main() {
     expect(result.channels.length, 1);
     expect(result.channels.single.drmKeyId, testKeyId);
     expect(result.channels.single.drmKey, testKey);
-    expect(result.channels.single.streamMimeType, 'application/dash+xml');
+    // Sin un type explícito, Media3 detecta el contenedor por la respuesta HTTP.
+    expect(result.channels.single.streamMimeType, isNull);
     expect(result.warnings, isEmpty);
   });
 
