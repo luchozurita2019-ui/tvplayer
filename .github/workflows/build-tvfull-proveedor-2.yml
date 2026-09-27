@@ -40,11 +40,11 @@ jobs:
         run: flutter test --no-pub --reporter expanded
 
       - name: Build APK
-        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+        run: flutter build apk --debug --dart-define=TV_FULL_ANDROID_TV=true
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: tvfull-proveedor-2-test-apk
-          path: build/app/outputs/flutter-apk/app-release.apk
+          path: build/app/outputs/flutter-apk/app-debug.apk
           retention-days: 14
