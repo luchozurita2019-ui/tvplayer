@@ -68,7 +68,7 @@ class ProviderJsonCatalogParser {
     // groups -> stations -> options. La convertimos únicamente en la capa de
     // entrada para reutilizar, sin cambios, el pipeline V50 de categories ->
     // samples -> Channel -> reproductor.
-    root = _normalizeLegacyGroups(root);
+    root = normalizeRoot(root);
 
     if (root['categories'] is! List) {
       throw const FormatException(
@@ -125,7 +125,9 @@ class ProviderJsonCatalogParser {
     return ProviderJsonCatalog(channels, warnings);
   }
 
-  Map<String, dynamic> _normalizeLegacyGroups(Map root) {
+  /// Convierte el formato legacy groups -> stations -> options al formato
+  /// interno categories -> samples. No modifica el mapa recibido.
+  Map<String, dynamic> normalizeRoot(Map root) {
     if (root['categories'] is List || root['groups'] is! List) {
       return Map<String, dynamic>.from(root);
     }
