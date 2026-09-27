@@ -434,6 +434,8 @@ class ProviderJsonCatalogParser {
         ? 'application/x-mpegURL'
         : null;
 
+    final tvgId = _firstText(raw, const ['tvgId', 'tvg_id', 'tvg-id']);
+
     final type = raw['type'];
     String? mime;
     if (type is String) {
@@ -458,6 +460,7 @@ class ProviderJsonCatalogParser {
       name: name.trim(),
       url: url,
       group: group,
+      tvgId: tvgId,
       logoUrl: logoUrl,
       logoBytes: logoBytes,
       httpHeaders: headers.isEmpty ? null : Map.unmodifiable(headers),
