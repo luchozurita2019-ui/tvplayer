@@ -80,6 +80,7 @@ class MainActivity : FlutterActivity() {
     private var currentUserAgent: String = DEFAULT_UA
     private var currentClearKeyJwk: String? = null
     private var currentStreamMimeType: String? = null
+    private var currentAllowClearKeyHls = false
     private var isLive = false
     private var endedRecoveries = 0
     private var dnsFallbackActive = false
@@ -550,6 +551,7 @@ class MainActivity : FlutterActivity() {
             player?.clearMediaItems()
         }
         currentClearKeyJwk = clearKeyJwk
+        currentAllowClearKeyHls = allowClearKeyHls
         currentStreamMimeType = streamMimeType?.takeIf {
             it == MimeTypes.APPLICATION_M3U8 || it == MimeTypes.APPLICATION_MPD
         }
@@ -582,7 +584,7 @@ class MainActivity : FlutterActivity() {
         positionMs: Long,
         useFallbackDns: Boolean,
         forceHls: Boolean = false,
-        allowClearKeyHls: Boolean = false,
+        allowClearKeyHls: Boolean = currentAllowClearKeyHls,
     ) {
         val exo = player ?: throw IllegalStateException("Player no inicializado")
         applyPlaybackGuards()
@@ -1460,6 +1462,7 @@ class MainActivity : FlutterActivity() {
         currentUrl = null
         currentClearKeyJwk = null
         currentStreamMimeType = null
+        currentAllowClearKeyHls = false
         currentHeaders = emptyMap()
         currentUserAgent = DEFAULT_UA
         endedRecoveries = 0
