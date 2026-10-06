@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
 import '../models/playback_settings.dart';
@@ -31,7 +30,6 @@ class IptvProvider extends ChangeNotifier {
       'asset://assets/playlists/lista_clasica.m3u';
   static const _provider2PlaylistId = 'tvf_builtin_provider_2';
   static const _provider2PlaylistName = 'TV Full · Proveedor 2';
-  static const _provider2Asset = 'assets/playlists/tvfull_proveedor_2.json';
   static const _provider2LiveUrl =
       'https://ia800901.us.archive.org/7/items/prueba9_202607/prueba.9/prueba9.json';
 
