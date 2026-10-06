@@ -60,7 +60,7 @@ jobs:
           EOF
 
       - name: Build signed V50 APK
-        run: flutter build apk --release
+        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
 
       - name: Verify historical certificate
         shell: bash
