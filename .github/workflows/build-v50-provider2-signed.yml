@@ -62,14 +62,16 @@ jobs:
       - name: Build signed V51 APK
         run: flutter build apk --release --split-per-abi --dart-define=TV_FULL_ANDROID_TV=true
 
-      - name: Verify historical certificate
+      - name: Verify historical certificate on built V51 APKs
         shell: bash
         run: |
           set -euo pipefail
           APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
           test -x "$APKSIGNER"
-          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/app-release.apk > signature.txt
-          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature.txt
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk > signature-arm32-build.txt
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk > signature-arm64-build.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm32-build.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm64-build.txt
 
       - name: Prepare V51 release assets
         shell: bash
