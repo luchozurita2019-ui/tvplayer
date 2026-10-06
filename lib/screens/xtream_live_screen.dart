@@ -167,7 +167,28 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
       return _LiveData(fresh.channels, categories: fresh.categories);
     }
 
+    if (widget.playlist.sourceType == PlaylistSourceType.localProviderJson) {
+      return _loadLocalProviderJson();
+    }
+
     return _loadM3uFallback();
+  }
+
+  Future<_LiveData> _loadLocalProviderJson() async {
+    final service = SectionCatalogService.instance;
+    final cached = await service.loadCached(
+      widget.playlist,
+      TvSectionKind.live,
+    );
+    if (cached != null && cached.channels.isNotEmpty) {
+      unawaited(_refreshLocalProviderJson());
+      return _LiveData(cached.channels, categories: cached.categories);
+    }
+    final fresh = await service.loadOrRefresh(
+      widget.playlist,
+      TvSectionKind.live,
+    );
+    return _LiveData(fresh.channels, categories: fresh.categories);
   }
 
   Future<_LiveData> _loadM3uFallback() async {
@@ -246,6 +267,23 @@ class _XtreamLiveScreenState extends State<XtreamLiveScreen> {
         password: password,
       ),
     );
+  }
+
+  Future<void> _refreshLocalProviderJson() async {
+    try {
+      final all = await SectionCatalogService.instance.refreshIfStale(
+        widget.playlist,
+      );
+      if (all == null) return;
+      final fresh = all[TvSectionKind.live];
+      if (!mounted || fresh == null || fresh.channels.isEmpty) return;
+      final data = _LiveData(fresh.channels, categories: fresh.categories);
+      setState(() {
+        _visibleData = data;
+        _catalogIndex = null;
+        _indexedData = null;
+      });
+    } catch (_) {}
   }
 
   Future<void> _refreshM3u() async {
