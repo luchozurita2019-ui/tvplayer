@@ -32,6 +32,7 @@ class IptvProvider extends ChangeNotifier {
   static const _provider2PlaylistName = 'TV Full · Proveedor 2';
   static const _provider2LiveUrl =
       'https://ia800901.us.archive.org/7/items/prueba9_202607/prueba.9/prueba9.json';
+  static const _disabledProviderPlaylistId = 'tvf_builtin_provider_json';
 
   List<Playlist> _playlists = const [];
   List<Channel> _favorites = const [];
@@ -80,7 +81,9 @@ class IptvProvider extends ChangeNotifier {
       _playbackSettingsService.load(),
       _localStore.loadSelectedServiceId(),
     ]);
-    _playlists = results[0] as List<Playlist>;
+    _playlists = (results[0] as List<Playlist>)
+        .where((item) => item.id != _disabledProviderPlaylistId)
+        .toList(growable: false);
     _favorites = results[1] as List<Channel>;
     _playbackSettings = results[2] as PlaybackSettings;
     _selectedPlaylistId = results[3] as String?;
@@ -101,12 +104,8 @@ class IptvProvider extends ChangeNotifier {
 
     await _ensureClassicPlaylist();
 
-    // La verificación del panel debe arrancar independientemente del catálogo
-    // integrado. No dejamos que una descarga del proveedor bloquee el registro.
-    if (_remoteProvisioning.isSupported) {
-      unawaited(syncRemoteServices());
-    }
-
+    // El antiguo proveedor TV FULL queda desconectado. Xtream y M3U locales
+    // continúan usando exactamente sus fuentes y flujo de V50.
     await _ensureProvider2Playlist();
     _normalizeSelection();
     _initialized = true;
