@@ -149,22 +149,13 @@ class IptvProvider extends ChangeNotifier {
     const id = _provider2PlaylistId;
     final index = _playlists.indexWhere((item) => item.id == id);
     try {
-      // V50: primero usamos el JSON vivo del proveedor. Si temporalmente no
-      // responde, conservamos el asset histórico como respaldo.
-      ImportedProviderJson? imported;
-      try {
-        imported = await LocalProviderJsonStore.instance.importUrl(
-          id,
-          _provider2Url,
-        );
-      } catch (_) {
-        final content = await rootBundle.loadString(_provider2Asset);
-        imported = await LocalProviderJsonStore.instance.importContent(
-          id,
-          content,
-        );
-      }
-
+      // V50: el catálogo del proveedor se importa desde el asset preparado
+      // para esta rama. No tocar las listas M3U/Xtream existentes.
+      final content = await rootBundle.loadString(_provider2Asset);
+      final imported = await LocalProviderJsonStore.instance.importContent(
+        id,
+        content,
+      );
       final playlist = Playlist(
         id: id,
         name: _provider2PlaylistName,
@@ -174,7 +165,6 @@ class IptvProvider extends ChangeNotifier {
         lastUpdated: DateTime.now(),
         sourceType: PlaylistSourceType.localProviderJson,
       );
-
       final next = List<Playlist>.from(_playlists);
       if (index < 0) {
         next.add(playlist);
@@ -186,7 +176,7 @@ class IptvProvider extends ChangeNotifier {
       _playlists = next;
       await _localStore.saveServices(_playlists);
     } catch (_) {
-      // No tocar las listas existentes si proveedor y asset fallan.
+      // Si el asset no está disponible, conservar el estado anterior.
     }
   }
 
