@@ -31,6 +31,13 @@ class IptvProvider extends ChangeNotifier {
       'asset://assets/playlists/lista_clasica.m3u';
   static const _provider2PlaylistId = 'tvf_builtin_provider_2';
   static const _provider2PlaylistName = 'TV Full · Proveedor 2';
+
+  // Fuente viva del proveedor.
+  static const _provider2Url =
+      'https://archive.org/download/prueba9_202607/prueba.9/prueba9.json';
+
+  // Fallback para conservar una instalación funcional si el proveedor está
+  // temporalmente fuera de línea.
   static const _provider2Asset = 'assets/playlists/tvfull_proveedor_2.json';
 
   List<Playlist> _playlists = const [];
@@ -146,10 +153,13 @@ class IptvProvider extends ChangeNotifier {
   Future<void> _ensureProvider2Playlist() async {
     const id = _provider2PlaylistId;
     final index = _playlists.indexWhere((item) => item.id == id);
+
     try {
-      final content = await rootBundle.loadString(_provider2Asset);
-      final imported =
-          await LocalProviderJsonStore.instance.importContent(id, content);
+      // Primero usamos siempre la fuente viva del proveedor.
+      final imported = await LocalProviderJsonStore.instance.importUrl(
+        id,
+        _provider2Url,
+      );
       final playlist = Playlist(
         id: id,
         name: _provider2PlaylistName,
@@ -164,13 +174,42 @@ class IptvProvider extends ChangeNotifier {
       if (index < 0) {
         next.add(playlist);
       } else {
-        next[index] = playlist.copyWith(lastUpdated: _playlists[index].lastUpdated);
+        next[index] = playlist.copyWith(lastUpdated: DateTime.now());
       }
       _playlists = next;
       await _localStore.saveServices(_playlists);
+      return;
     } catch (_) {
-      // La lista original y el resto de servicios siguen intactos si el
-      // asset de proveedor 2 no está disponible en una instalación anterior.
+      // Si la URL no responde, usamos el catálogo empaquetado como respaldo.
+      // No se elimina la última copia válida del proveedor.
+      try {
+        final content = await rootBundle.loadString(_provider2Asset);
+        final imported =
+            await LocalProviderJsonStore.instance.importContent(id, content);
+        final playlist = Playlist(
+          id: id,
+          name: _provider2PlaylistName,
+          source: imported.path,
+          isRemote: false,
+          channels: const <Channel>[],
+          lastUpdated: DateTime.now(),
+          sourceType: PlaylistSourceType.localProviderJson,
+        );
+
+        final next = List<Playlist>.from(_playlists);
+        if (index < 0) {
+          next.add(playlist);
+        } else {
+          next[index] = playlist.copyWith(
+            lastUpdated: _playlists[index].lastUpdated,
+          );
+        }
+        _playlists = next;
+        await _localStore.saveServices(_playlists);
+      } catch (_) {
+        // La lista original y el resto de servicios siguen intactos si tampoco
+        // está disponible el fallback local.
+      }
     }
   }
 
