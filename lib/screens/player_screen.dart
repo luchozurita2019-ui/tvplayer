@@ -67,8 +67,7 @@ class _PlayerScreenState extends State<PlayerScreen> {
         defaultTargetPlatform == TargetPlatform.android;
     final androidDrm = !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android &&
-        (widget.channel.hasDrmConfiguration ||
-            widget.playlist.any((channel) => channel.hasDrmConfiguration));
+        widget.channel.hasDrmConfiguration;
 
     if (androidTv || androidDrm) {
       if (widget.isLiveContent) {
