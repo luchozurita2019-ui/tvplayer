@@ -32,6 +32,8 @@ class IptvProvider extends ChangeNotifier {
   static const _provider2PlaylistId = 'tvf_builtin_provider_2';
   static const _provider2PlaylistName = 'TV Full · Proveedor 2';
   static const _provider2Asset = 'assets/playlists/tvfull_proveedor_2.json';
+  static const _provider2LiveUrl =
+      'https://ia800901.us.archive.org/7/items/prueba9_202607/prueba.9/prueba9.json';
 
   List<Playlist> _playlists = const [];
   List<Channel> _favorites = const [];
