@@ -6,7 +6,6 @@ import 'package:provider/provider.dart';
 import '../providers/iptv_provider.dart';
 import '../services/app_update_service.dart';
 import '../services/remote_access_guard.dart';
-import '../services/remote_provider_json_bootstrap.dart';
 import '../widgets/app_version_badge.dart';
 import '../widgets/tv_full_premium_ui.dart';
 import 'source_content_screen.dart';
@@ -33,7 +32,6 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   Future<void> _initializeProvider(IptvProvider provider) async {
-    await RemoteProviderJsonBootstrap.instance.prepare();
     await provider.init();
   }
 
