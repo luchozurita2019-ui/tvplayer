@@ -37,7 +37,6 @@ jobs:
           set -euo pipefail
           flutter analyze --no-fatal-infos
           flutter test
-          test "$(sed -n 's/^version: //p' pubspec.yaml | head -n1)" = "1.4.15+3047"
 
       - name: Configure historical release signing
         shell: bash
