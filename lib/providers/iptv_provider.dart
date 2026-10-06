@@ -100,14 +100,17 @@ class IptvProvider extends ChangeNotifier {
     }
 
     await _ensureClassicPlaylist();
+
+    // La verificación del panel debe arrancar independientemente del catálogo
+    // integrado. No dejamos que una descarga del proveedor bloquee el registro.
+    if (_remoteProvisioning.isSupported) {
+      unawaited(syncRemoteServices());
+    }
+
     await _ensureProvider2Playlist();
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
-
-    if (_remoteProvisioning.isSupported) {
-      unawaited(syncRemoteServices());
-    }
   }
 
   Future<void> _ensureClassicPlaylist() async {
