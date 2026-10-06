@@ -1,6 +1,8 @@
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:http/http.dart' as http;
+
 import 'package:path_provider/path_provider.dart';
 
 import 'provider_json_catalog_parser.dart';
@@ -56,6 +58,38 @@ class LocalProviderJsonStore {
       if (await temporary.exists()) await temporary.delete();
     }
     return ImportedProviderJson(target.path, catalog);
+  }
+
+  /// Descarga el JSON vivo del proveedor y lo pasa por el mismo pipeline de
+  /// normalización/validación que una importación local. La copia anterior
+  /// sólo se reemplaza si la descarga y el parseo terminan correctamente.
+  Future<ImportedProviderJson> importUrl(
+    String serviceId,
+    String url, {
+    Duration timeout = const Duration(seconds: 25),
+  }) async {
+    final uri = Uri.tryParse(url.trim());
+    if (uri == null || !uri.hasScheme || uri.host.isEmpty) {
+      throw const FormatException('URL del catálogo del proveedor inválida.');
+    }
+    final response = await http.get(
+      uri,
+      headers: const {
+        'Accept': 'application/json, text/plain, */*',
+        'User-Agent': 'TV-FULL-PRO/1.0',
+      },
+    ).timeout(timeout);
+    if (response.statusCode < 200 || response.statusCode >= 300) {
+      throw HttpException(
+        'El catálogo del proveedor respondió HTTP ${response.statusCode}.',
+        uri: uri,
+      );
+    }
+    final content = utf8.decode(response.bodyBytes, allowMalformed: false);
+    if (content.trim().isEmpty) {
+      throw const FormatException('El catálogo del proveedor está vacío.');
+    }
+    return importContent(serviceId, content);
   }
 
   Future<ProviderJsonCatalog> load(String serviceId) async {
