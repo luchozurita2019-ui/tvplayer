@@ -41,15 +41,12 @@ class LocalProviderJsonStore {
     final catalog = await Isolate.run(
       () => ProviderJsonCatalogParser(playbackProfile: serviceId).parse(normalized),
     );
-    // Validar antes de escribir: un JSON inválido conserva la copia anterior.
     final directory = await _directory(serviceId);
     await directory.create(recursive: true);
     final target = File(directory.path + '/catalog.private.json');
     final stamp = DateTime.now().microsecondsSinceEpoch;
     final temporary = File(directory.path + '/$stamp.private.json');
     try {
-      // Guardamos la versión JSON estricta ya normalizada. Así una lectura
-      // posterior no depende de volver a reparar la sintaxis del proveedor.
       await temporary.writeAsString(normalized, flush: true);
       await temporary.rename(target.path);
     } finally {
@@ -75,7 +72,8 @@ class LocalProviderJsonStore {
         );
       }
       final content = await response.transform(SystemEncoding().decoder).join();
-      return await importContent(serviceId, content);
+      final imported = await importContent(serviceId, content);
+      return imported;
     } finally {
       client.close(force: true);
     }
