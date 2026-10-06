@@ -58,6 +58,29 @@ class LocalProviderJsonStore {
     return ImportedProviderJson(target.path, catalog);
   }
 
+  Future<ImportedProviderJson> importUrl(
+    String serviceId,
+    String url, {
+    Map<String, String>? headers,
+  }) async {
+    final client = HttpClient();
+    try {
+      final request = await client.getUrl(Uri.parse(url));
+      headers?.forEach(request.headers.set);
+      final response = await request.close();
+      if (response.statusCode < 200 || response.statusCode >= 300) {
+        throw HttpException(
+          'HTTP ${response.statusCode} al descargar el catálogo.',
+          uri: Uri.parse(url),
+        );
+      }
+      final content = await response.transform(SystemEncoding().decoder).join();
+      return importContent(serviceId, content);
+    } finally {
+      client.close(force: true);
+    }
+  }
+
   Future<ProviderJsonCatalog> load(String serviceId) async {
     final directory = await _directory(serviceId);
     final path = directory.path + '/catalog.private.json';
