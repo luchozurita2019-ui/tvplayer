@@ -5,6 +5,8 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
+import '../services/clearkey_drm_config.dart';
+import '../services/dynamic_stream_service.dart';
 import '../services/channel_health_service.dart';
 import '../services/channel_logo_resolver_service.dart';
 import '../services/device_performance_service.dart';
@@ -21,11 +23,13 @@ const String _media3DefaultUserAgent =
 class AndroidMedia3TexturePlayerScreen extends StatefulWidget {
   final List<Channel> playlist;
   final int initialIndex;
+  final bool allowProvider2ClearKeyHls;
 
   const AndroidMedia3TexturePlayerScreen({
     super.key,
     required this.playlist,
     required this.initialIndex,
+    this.allowProvider2ClearKeyHls = false,
   });
 
   @override
@@ -164,22 +168,45 @@ class _AndroidMedia3TexturePlayerScreenState
     }
 
     final headers = Map<String, String>.from(_headers);
-    String? userAgent;
-    for (final key in headers.keys.toList()) {
-      if (key.toLowerCase() == 'user-agent') {
-        userAgent = headers.remove(key);
-        break;
-      }
-    }
+    var playbackUrl = _channel.url;
 
     try {
+      final dynamicId = _channel.dynamicStreamId?.trim();
+      if (dynamicId != null && dynamicId.isNotEmpty) {
+        final resolved = await DynamicStreamService.instance.resolve(_channel);
+        if (!mounted || generation != _openGeneration) return;
+        playbackUrl = resolved.url;
+        headers.addAll(resolved.headers);
+      }
+
+      String? userAgent;
+      for (final key in headers.keys.toList()) {
+        if (key.toLowerCase() == 'user-agent') {
+          userAgent = headers.remove(key);
+          break;
+        }
+      }
+
       await _player.invokeMethod<void>('prepare', {
-        'url': _channel.url,
+        'url': playbackUrl,
         'requestGeneration': generation,
         'headers': headers,
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
+        'allowClearKeyHls': widget.allowProvider2ClearKeyHls,
+        if (_channel.streamMimeType != null) 'mimeType': _channel.streamMimeType,
+        if (_channel.hasDrmConfiguration)
+          'clearKeyJwk': ClearKeyDrmConfig.fromHex(
+            _channel.drmKeyId ?? '',
+            _channel.drmKey ?? '',
+          ).toJwkSet(),
       });
+    } on DynamicStreamException catch (error) {
+      if (!mounted || generation != _openGeneration) return;
+      _finishWithError('No se pudo abrir el canal', error.message);
+    } on FormatException catch (error) {
+      if (!mounted || generation != _openGeneration) return;
+      _finishWithError('Configuración ClearKey inválida', error.message);
     } on PlatformException catch (error) {
       if (!mounted || generation != _openGeneration) return;
       _handleTechnicalError(error.code, error.message ?? error.code);
