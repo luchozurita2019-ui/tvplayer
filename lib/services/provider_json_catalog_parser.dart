@@ -390,8 +390,8 @@ class ProviderJsonCatalogParser {
       // realmente DASH. La extensión real tiene prioridad para evitar MIME
       // incorrecto y el error de Media3 "formato de señal no compatible".
       final lowerUrl = originalUrl.toLowerCase();
-      final isM3u8 = RegExp(r'\\.m3u8(?:$|[?#])').hasMatch(lowerUrl);
-      final isMpd = RegExp(r'\\.mpd(?:$|[?#])').hasMatch(lowerUrl);
+      final isM3u8 = RegExp(r'\.m3u8(?:$|[?#])').hasMatch(lowerUrl);
+      final isMpd = RegExp(r'\.mpd(?:$|[?#])').hasMatch(lowerUrl);
       if (isMpd) {
         mime = 'application/dash+xml';
       } else if (isM3u8) {
