@@ -385,14 +385,16 @@ class ProviderJsonCatalogParser {
     // Proveedor 2 contiene URLs cuyo contenedor queda oculto por query strings,
     // redirects o CDNs. Cuando no hay type explícito, ayudamos a Media3 a
     // seleccionar DASH/HLS por la extensión, sin tocar la lista histórica.
-    if (mime == null &&
-        playbackProfile == 'tvf_builtin_provider_2' &&
-        type == null) {
+    if (playbackProfile == 'tvf_builtin_provider_2') {
+      // V50: el proveedor puede declarar type:HLS aunque original_url sea
+      // DASH. La extensión real tiene prioridad para evitar MIME incorrecto.
       final lowerUrl = originalUrl.toLowerCase();
-      if (RegExp(r'\.m3u8(?:$|[?#])').hasMatch(lowerUrl)) {
-        mime = 'application/x-mpegURL';
-      } else if (RegExp(r'\.mpd(?:$|[?#])').hasMatch(lowerUrl)) {
+      final isM3u8 = RegExp(r'\\.m3u8(?:$|[?#])').hasMatch(lowerUrl);
+      final isMpd = RegExp(r'\\.mpd(?:$|[?#])').hasMatch(lowerUrl);
+      if (isMpd) {
         mime = 'application/dash+xml';
+      } else if (isM3u8) {
+        mime = 'application/x-mpegURL';
       }
     }
 
