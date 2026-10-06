@@ -31,8 +31,6 @@ class IptvProvider extends ChangeNotifier {
       'asset://assets/playlists/lista_clasica.m3u';
   static const _provider2PlaylistId = 'tvf_builtin_provider_2';
   static const _provider2PlaylistName = 'TV Full · Proveedor 2';
-  static const _provider2Url =
-      'https://ia800901.us.archive.org/7/items/prueba9_202607/prueba.9/prueba9.json';
   static const _provider2Asset = 'assets/playlists/tvfull_proveedor_2.json';
 
   List<Playlist> _playlists = const [];
@@ -149,12 +147,9 @@ class IptvProvider extends ChangeNotifier {
     const id = _provider2PlaylistId;
     final index = _playlists.indexWhere((item) => item.id == id);
     try {
-      // V50: el catálogo del proveedor se importa desde el asset preparado
-      // para esta rama. No tocar las listas M3U/Xtream existentes.
-      final content = await rootBundle.loadString(_provider2Asset);
-      final imported = await LocalProviderJsonStore.instance.importContent(
+      final imported = await LocalProviderJsonStore.instance.importUrl(
         id,
-        content,
+        _provider2LiveUrl,
       );
       final playlist = Playlist(
         id: id,
@@ -176,7 +171,7 @@ class IptvProvider extends ChangeNotifier {
       _playlists = next;
       await _localStore.saveServices(_playlists);
     } catch (_) {
-      // Si el asset no está disponible, conservar el estado anterior.
+      // Conserva la copia local anterior si el proveedor está temporalmente caído.
     }
   }
 
