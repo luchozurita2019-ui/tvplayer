@@ -2,7 +2,7 @@ name: Build Provider 2 from V50
 
 on:
   push:
-    branches: [fix/provider2-from-v50]
+    branches: [integrar-proveedor2-json-local]
   workflow_dispatch:
 
 jobs:
