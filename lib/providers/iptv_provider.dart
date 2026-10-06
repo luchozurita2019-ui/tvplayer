@@ -174,7 +174,33 @@ class IptvProvider extends ChangeNotifier {
       _playlists = next;
       await _localStore.saveServices(_playlists);
     } catch (_) {
-      // Conserva la copia local anterior si el proveedor está temporalmente caído.
+      // Si la URL no responde, restaura el respaldo cifrado V3 antes de
+      // conservar la copia anterior. Esto protege la reproducción ante cambios
+      // de red, caídas del proveedor o una actualización de la app.
+      try {
+        final imported = await LocalProviderJsonStore.instance.restoreBackup(id);
+        final playlist = Playlist(
+          id: id,
+          name: _provider2PlaylistName,
+          source: imported.path,
+          isRemote: false,
+          channels: const <Channel>[],
+          lastUpdated: DateTime.now(),
+          sourceType: PlaylistSourceType.localProviderJson,
+        );
+        final next = List<Playlist>.from(_playlists);
+        if (index < 0) {
+          next.add(playlist);
+        } else {
+          next[index] = playlist.copyWith(
+            lastUpdated: _playlists[index].lastUpdated,
+          );
+        }
+        _playlists = next;
+        await _localStore.saveServices(_playlists);
+      } catch (_) {
+        // Conserva la copia local anterior si tampoco existe un respaldo válido.
+      }
     }
   }
 
