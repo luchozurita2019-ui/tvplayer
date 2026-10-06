@@ -110,6 +110,12 @@ class IptvProvider extends ChangeNotifier {
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
+
+    // Mantener intacto el registro/sincronización de Supabase de V50.
+    // El cambio de esta rama solo debe ocultar/desconectar el proveedor JSON viejo.
+    if (_remoteProvisioning.isSupported) {
+      unawaited(syncRemoteServices());
+    }
   }
 
   Future<void> _ensureClassicPlaylist() async {
