@@ -31,6 +31,8 @@ class IptvProvider extends ChangeNotifier {
       'asset://assets/playlists/lista_clasica.m3u';
   static const _provider2PlaylistId = 'tvf_builtin_provider_2';
   static const _provider2PlaylistName = 'TV Full · Proveedor 2';
+  static const _provider2Url =
+      'https://ia800901.us.archive.org/7/items/prueba9_202607/prueba.9/prueba9.json';
   static const _provider2Asset = 'assets/playlists/tvfull_proveedor_2.json';
 
   List<Playlist> _playlists = const [];
@@ -147,9 +149,22 @@ class IptvProvider extends ChangeNotifier {
     const id = _provider2PlaylistId;
     final index = _playlists.indexWhere((item) => item.id == id);
     try {
-      final content = await rootBundle.loadString(_provider2Asset);
-      final imported =
-          await LocalProviderJsonStore.instance.importContent(id, content);
+      // V50: primero usamos el JSON vivo del proveedor. Si temporalmente no
+      // responde, conservamos el asset histórico como respaldo.
+      ImportedProviderJson? imported;
+      try {
+        imported = await LocalProviderJsonStore.instance.importUrl(
+          id,
+          _provider2Url,
+        );
+      } catch (_) {
+        final content = await rootBundle.loadString(_provider2Asset);
+        imported = await LocalProviderJsonStore.instance.importContent(
+          id,
+          content,
+        );
+      }
+
       final playlist = Playlist(
         id: id,
         name: _provider2PlaylistName,
@@ -164,13 +179,14 @@ class IptvProvider extends ChangeNotifier {
       if (index < 0) {
         next.add(playlist);
       } else {
-        next[index] = playlist.copyWith(lastUpdated: _playlists[index].lastUpdated);
+        next[index] = playlist.copyWith(
+          lastUpdated: _playlists[index].lastUpdated,
+        );
       }
       _playlists = next;
       await _localStore.saveServices(_playlists);
     } catch (_) {
-      // La lista original y el resto de servicios siguen intactos si el
-      // asset de proveedor 2 no está disponible en una instalación anterior.
+      // No tocar las listas existentes si proveedor y asset fallan.
     }
   }
 
