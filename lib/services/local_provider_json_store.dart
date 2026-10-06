@@ -75,7 +75,7 @@ class LocalProviderJsonStore {
         );
       }
       final content = await response.transform(SystemEncoding().decoder).join();
-      return importContent(serviceId, content);
+      return await importContent(serviceId, content);
     } finally {
       client.close(force: true);
     }
