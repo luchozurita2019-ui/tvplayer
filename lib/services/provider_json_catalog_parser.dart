@@ -88,6 +88,15 @@ class ProviderJsonCatalogParser {
       final group = rawName is String && rawName.trim().isNotEmpty
           ? rawName.trim()
           : 'Sin categoría';
+
+      // Ocultar únicamente la categoría WorldTV2 del catálogo integrado del
+      // Proveedor 2. No se modifica el JSON remoto ni el resto de proveedores.
+      // Sus canales no se agregan al catálogo visible.
+      if (playbackProfile == 'tvf_builtin_provider_2' &&
+          group.toLowerCase().contains('worldtv2')) {
+        continue;
+      }
+
       if (group == 'Sin categoría' && rawName != group) {
         warnings.add('$path.name: se usó Sin categoría.');
       }
