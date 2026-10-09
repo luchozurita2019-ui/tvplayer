@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - feature/tvfull-proveedor-2-json
+      - auto-update-json-test
   workflow_dispatch:
 
 permissions:
