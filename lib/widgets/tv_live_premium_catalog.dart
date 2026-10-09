@@ -130,9 +130,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
 
   @override
   Widget build(BuildContext context) {
-    final fallbackHero =
-        widget.channels.isNotEmpty ? widget.channels.first : null;
-
     return Row(
       children: [
         SizedBox(
@@ -172,22 +169,6 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _toolbar(),
-                ValueListenableBuilder<_LiveHeroViewState>(
-                  valueListenable: _heroState,
-                  builder: (context, state, child) {
-                    final hero = state.channel ?? fallbackHero;
-                    if (hero == null) return const SizedBox.shrink();
-                    return Padding(
-                      padding: const EdgeInsets.only(top: 8),
-                      child: _hero(
-                        hero,
-                        guide: state.guide,
-                        guideLoading: state.loading,
-                      ),
-                    );
-                  },
-                ),
-                const SizedBox(height: 10),
                 _SectionTitle(
                   title: widget.selectedCategory ?? 'Todos los canales',
                   subtitle: '${widget.channels.length} canales disponibles',
@@ -210,7 +191,7 @@ class _TvLivePremiumCatalogState extends State<TvLivePremiumCatalog> {
                           gridDelegate:
                               const SliverGridDelegateWithMaxCrossAxisExtent(
                             maxCrossAxisExtent: 310,
-                            mainAxisExtent: 66,
+                            mainAxisExtent: 82,
                             crossAxisSpacing: 8,
                             mainAxisSpacing: 8,
                           ),
@@ -647,16 +628,16 @@ class _LiveChannelCardState extends State<_LiveChannelCard> {
             child: Row(
               children: [
                 SizedBox(
-                  width: 40,
-                  height: 40,
+                  width: 56,
+                  height: 56,
                   child: ChannelLogoImage(
                     channel: widget.channel,
                     fit: BoxFit.contain,
-                    cacheWidth: 80,
-                    cacheHeight: 80,
+                    cacheWidth: 112,
+                    cacheHeight: 112,
                     priority: _focused ? 220 : 120,
                     prefetchExtent: 0,
-                    fallback: const Icon(Icons.live_tv_rounded, size: 21),
+                    fallback: const Icon(Icons.live_tv_rounded, size: 30),
                   ),
                 ),
                 const SizedBox(width: 9),
@@ -670,7 +651,7 @@ class _LiveChannelCardState extends State<_LiveChannelCard> {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                         style: TextStyle(
-                          fontSize: 12.5,
+                          fontSize: 14,
                           fontWeight:
                               _focused ? FontWeight.w900 : FontWeight.w700,
                         ),
