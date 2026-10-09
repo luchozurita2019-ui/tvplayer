@@ -384,10 +384,51 @@ class _SourceContentScreenState extends State<SourceContentScreen>
   }
 
   Future<void> _openUpdate() async {
+    final update = _updates.availableUpdate;
+
+    // Nuevo flujo: descarga directa, verificación SHA-256 y solicitud de
+    // instalación Android. El flujo de Downloader queda como compatibilidad.
+    if (update?.apkUrl != null && update?.sha256 != null) {
+      final result = await _updates.downloadAndInstall();
+      if (!mounted) return;
+      final message = switch (result) {
+        'installer_opened' =>
+          'APK verificada. Android abrió el instalador para confirmar la actualización.',
+        'permission_required' =>
+          'Permití a TV FULL PRO instalar aplicaciones desconocidas y volvé a tocar Actualizar.',
+        'hash_mismatch' =>
+          'La verificación de seguridad falló. Se rechazó el archivo descargado.',
+        'download_http_error' =>
+          'No se pudo descargar la actualización desde el servidor.',
+        'file_too_large' =>
+          'El archivo supera el tamaño permitido y se rechazó.',
+        'timeout' =>
+          'La descarga tardó demasiado. Revisá la conexión e intentá de nuevo.',
+        'already_downloading' =>
+          'La actualización ya se está descargando.',
+        'android_only' =>
+          'La instalación automática está disponible únicamente en Android.',
+        'invalid_url' =>
+          'El enlace de actualización no es válido o no está autorizado.',
+        'no_direct_update' =>
+          'Esta actualización no tiene un enlace directo válido.',
+        _ => 'No se pudo completar la actualización. Código: $result',
+      };
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            duration: const Duration(seconds: 5),
+            content: Text(message),
+          ),
+        );
+      return;
+    }
+
+    // Compatibilidad con la instalación anterior mediante TV FULL Installer.
     final openedInstaller = await _updates.openInstaller();
     if (openedInstaller) return;
 
-    final update = _updates.availableUpdate;
     final code = update?.downloaderCode ?? '';
     if (code.isEmpty) {
       if (!mounted) return;
