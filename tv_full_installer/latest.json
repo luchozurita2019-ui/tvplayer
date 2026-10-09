@@ -1,16 +1,19 @@
 {
-  "versionName": "1.4.18",
-  "versionCode": 3050,
+  "versionName": "1.4.20",
+  "versionCode": 3052,
   "packageName": "com.tvfull.pro.tv.v10safe",
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v50-provider-json-34892594473-1/TV-FULL-PRO-V50-ARM32.apk",
-    "sha256": "9685052c6921bf56f2ec531d0e4e203d397564c19066e0fb0e3f11889267cbf8",
-    "size": 35246483
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v52-lista-clasica-3052-1/TV-FULL-PRO-V52-ARM32.apk",
+    "sha256": "ae908576d80bfe28e1cdad883b7cba3018519ef6fd6a91092f33a67903f57142",
+    "size": 35323875
   },
   "arm64": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v50-provider-json-34892594473-1/TV-FULL-PRO-V50-ARM64.apk",
-    "sha256": "63e3ecea9dcc6f61b9674e22b4b8543b4f56289cd7db980e20010981cd0e8f95",
-    "size": 38920637
-  }
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v52-lista-clasica-3052-1/TV-FULL-PRO-V52-ARM64.apk",
+    "sha256": "3f931ee56009e832b8d2c2f11b6706f6b9ea30552ab39776fc8ad48b2b03fb44",
+    "size": 38965261
+  },
+  "enabled": false,
+  "downloaderUrl": "https://aftv.news/9044759"
 }
+

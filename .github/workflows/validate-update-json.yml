@@ -1,0 +1,41 @@
+name: Validar actualizaciones JSON
+
+on:
+  pull_request:
+    paths:
+      - 'tv_full_installer/latest.json'
+      - 'supabase/functions/tvf-update/**'
+      - 'supabase/functions/tests/tvf-update.test.mjs'
+      - 'scripts/validate_update_manifest.mjs'
+      - '.github/workflows/validate-update-json.yml'
+  push:
+    branches: [android-tv-full-pro-clean-source]
+    paths:
+      - 'tv_full_installer/latest.json'
+      - 'supabase/functions/tvf-update/**'
+      - 'supabase/functions/tests/tvf-update.test.mjs'
+      - 'scripts/validate_update_manifest.mjs'
+      - '.github/workflows/validate-update-json.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24'
+      - name: Probar contrato y errores
+        run: node --test supabase/functions/tests/tvf-update.test.mjs
+      - name: Comprobar sintaxis del puente
+        run: node --check supabase/functions/tvf-update/index.ts
+      - name: Verificar JSON contra las APK publicadas
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: node scripts/validate_update_manifest.mjs --online
+
