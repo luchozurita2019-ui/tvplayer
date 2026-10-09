@@ -618,7 +618,7 @@ class _UpdateBanner extends StatelessWidget {
                 ),
                 const SizedBox(height: 2),
                 Text(
-                  'Nueva versión $versionName · Presioná para abrir TV FULL Installer.',
+                  'Nueva versión $versionName · Presioná para iniciar la actualización.',
                   style: const TextStyle(color: Colors.white60, fontSize: 12),
                 ),
               ],
