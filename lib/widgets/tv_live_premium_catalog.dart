@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 
 import '../models/channel.dart';
 import '../services/device_performance_service.dart';
+import '../services/live_epg_service.dart';
 import 'channel_logo_image.dart';
 import 'tv_catalog_category_row.dart';
 import 'tv_full_premium_ui.dart';
