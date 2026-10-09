@@ -116,48 +116,15 @@ class AppUpdateService extends ChangeNotifier {
         );
         _lastUpdateError = null;
       } else {
-        // Compatibilidad segura: sólo se admite el flujo anterior si el JSON
-        // antiguo viene explícitamente desde la función autenticada existente.
-        _availableUpdate = await _checkLegacyUpdate(installed.versionCode);
+        // Actualizador exclusivamente por update.json: sin fallback a Supabase.
+        _availableUpdate = null;
+        _lastUpdateError = null;
       }
     } catch (_) {
       // Una caída de red no bloquea la reproducción ni el panel de clientes.
     } finally {
       _checking = false;
       notifyListeners();
-    }
-  }
-
-  Future<AppUpdateInfo?> _checkLegacyUpdate(int installedVersionCode) async {
-    final legacyEndpoint = Uri.parse(
-      'https://ghsoudpjlnjmhiragkrm.supabase.co/functions/v1/tvf-update',
-    );
-    try {
-      final response = await http.get(legacyEndpoint).timeout(
-            const Duration(seconds: 4),
-          );
-      if (response.statusCode != 200) return null;
-      final decoded = jsonDecode(response.body);
-      if (decoded is! Map<String, dynamic> || decoded['ok'] != true) {
-        return null;
-      }
-      final enabled = decoded['update_available'] == true;
-      final versionCode = _toInt(decoded['version_code']);
-      final versionName = '${decoded['version_name'] ?? ''}'.trim();
-      final downloaderUrl = '${decoded['downloader_url'] ?? ''}'.trim();
-      if (!enabled ||
-          versionCode <= installedVersionCode ||
-          versionName.isEmpty ||
-          !_isLegacyDownloader(downloaderUrl)) {
-        return null;
-      }
-      return AppUpdateInfo(
-        versionCode: versionCode,
-        versionName: versionName,
-        downloaderUrl: downloaderUrl,
-      );
-    } catch (_) {
-      return null;
     }
   }
 
