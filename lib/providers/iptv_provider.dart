@@ -27,7 +27,7 @@ class IptvProvider extends ChangeNotifier {
   static const _classicPlaylistId = 'tvf_builtin_classic';
   static const _classicPlaylistName = 'Lista clásica';
   static const _classicPlaylistSource =
-      'asset://assets/playlists/lista_clasica.m3u';
+      'https://raw.githubusercontent.com/luchozurita2019-ui/mi-lista-iptv-4k/main/lista_clasica.m3u';
   static const _provider2PlaylistId = 'tvf_builtin_provider_2';
   static const _provider2PlaylistName = 'TV Full · Proveedor 2';
   static const _provider2LiveUrl =
@@ -125,7 +125,7 @@ class IptvProvider extends ChangeNotifier {
       id: _classicPlaylistId,
       name: _classicPlaylistName,
       source: _classicPlaylistSource,
-      isRemote: false,
+      isRemote: true,
       channels: const <Channel>[],
       lastUpdated: DateTime.now(),
       sourceType: PlaylistSourceType.m3u,
