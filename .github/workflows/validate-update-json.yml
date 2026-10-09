@@ -33,7 +33,7 @@ jobs:
       - name: Probar contrato y errores
         run: node --test supabase/functions/tests/tvf-update.test.mjs
       - name: Comprobar sintaxis del puente
-        run: node --check supabase/functions/tvf-update/index.ts
+        run: node --experimental-strip-types --check supabase/functions/tvf-update/index.ts
       - name: Verificar JSON contra las APK publicadas
         env:
           GITHUB_TOKEN: ${{ github.token }}
