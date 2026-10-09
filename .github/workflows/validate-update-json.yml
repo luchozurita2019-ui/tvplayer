@@ -7,6 +7,7 @@ on:
       - 'supabase/functions/tvf-update/**'
       - 'supabase/functions/tests/tvf-update.test.mjs'
       - 'scripts/validate_update_manifest.mjs'
+      - 'scripts/check_update_server_syntax.mjs'
       - '.github/workflows/validate-update-json.yml'
   push:
     branches: [android-tv-full-pro-clean-source]
@@ -15,6 +16,7 @@ on:
       - 'supabase/functions/tvf-update/**'
       - 'supabase/functions/tests/tvf-update.test.mjs'
       - 'scripts/validate_update_manifest.mjs'
+      - 'scripts/check_update_server_syntax.mjs'
       - '.github/workflows/validate-update-json.yml'
   workflow_dispatch:
 
@@ -33,7 +35,7 @@ jobs:
       - name: Probar contrato y errores
         run: node --test supabase/functions/tests/tvf-update.test.mjs
       - name: Comprobar sintaxis del puente
-        run: node --experimental-strip-types --check supabase/functions/tvf-update/index.ts
+        run: node scripts/check_update_server_syntax.mjs
       - name: Verificar JSON contra las APK publicadas
         env:
           GITHUB_TOKEN: ${{ github.token }}

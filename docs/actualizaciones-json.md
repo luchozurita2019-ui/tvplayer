@@ -70,6 +70,7 @@ campos de versión ya no controlan el GET público: la publicación está en el 
 Con Node.js 24:
 
     node --test supabase/functions/tests/tvf-update.test.mjs
+    node scripts/check_update_server_syntax.mjs
     node scripts/validate_update_manifest.mjs
     node scripts/validate_update_manifest.mjs --online
 
