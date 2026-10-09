@@ -1,9 +1,9 @@
-name: TV FULL PRO V51 Provider 2 signed
+name: TV FULL PRO V52 Lista clásica remota
 
 on:
   push:
     branches:
-      - release/v51-provider2
+      - v52-lista-clasica-remota
   workflow_dispatch:
 
 permissions:
@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - name: Checkout V50 provider fix
+      - name: Checkout V51 stable base
         uses: actions/checkout@v4
 
       - name: Install Java 17
@@ -32,7 +32,7 @@ jobs:
       - name: Resolve dependencies
         run: flutter pub get
 
-      - name: Verify V50 source
+      - name: Verify V51 source with remote classic M3U
         run: |
           set -euo pipefail
           flutter analyze --no-fatal-infos
@@ -59,10 +59,10 @@ jobs:
           keyPassword=$TV_FULL_KEY_PASSWORD
           EOF
 
-      - name: Build signed V51 APK
+      - name: Build signed V52 APK
         run: flutter build apk --release --split-per-abi --dart-define=TV_FULL_ANDROID_TV=true
 
-      - name: Verify historical certificate on built V51 APKs
+      - name: Verify historical certificate on built V52 APKs
         shell: bash
         run: |
           set -euo pipefail
@@ -73,19 +73,19 @@ jobs:
           grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm32-build.txt
           grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm64-build.txt
 
-      - name: Prepare V51 release assets
+      - name: Prepare V52 release assets
         shell: bash
         run: |
           set -euo pipefail
           mkdir -p release
-          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release/TV-FULL-PRO-V51-ARM32.apk
-          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/TV-FULL-PRO-V51-ARM64.apk
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release/TV-FULL-PRO-V52-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/TV-FULL-PRO-V52-ARM64.apk
           sha256sum release/TV-FULL-PRO-V51-ARM32.apk | awk '{print $1}' > release/ARM32.sha256
           sha256sum release/TV-FULL-PRO-V51-ARM64.apk | awk '{print $1}' > release/ARM64.sha256
           stat -c '%s' release/TV-FULL-PRO-V51-ARM32.apk > release/ARM32.size
           stat -c '%s' release/TV-FULL-PRO-V51-ARM64.apk > release/ARM64.size
 
-      - name: Verify historical certificate on V51 assets
+      - name: Verify historical certificate on V52 assets
         shell: bash
         run: |
           set -euo pipefail
@@ -102,8 +102,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          TAG="tv-full-pro-v51-provider2-3051-1"
-          gh release create "$TAG" release/TV-FULL-PRO-V51-ARM32.apk release/TV-FULL-PRO-V51-ARM64.apk             --repo "$GITHUB_REPOSITORY"             --title "TV FULL PRO 1.4.19+3051 - V51 Provider 2"             --notes "V51 estable: M3U/Xtream mantienen el reproductor LIVE de V50 y Provider 2 conserva Media3/ClearKey-HLS. Firma histórica preservada."
+          TAG="tv-full-pro-v52-lista-clasica-3052-1"
+          gh release create "$TAG" release/TV-FULL-PRO-V51-ARM32.apk release/TV-FULL-PRO-V51-ARM64.apk             --repo "$GITHUB_REPOSITORY"             --title "TV FULL PRO 1.4.20+3052 - V52 Lista clásica remota"             --notes "V52 basada en V51 estable: Lista clásica usa M3U remota actualizable desde GitHub; Provider 2 conserva Media3/ClearKey-HLS. Firma histórica preservada."
 
           ARM32_SHA="$(cat release/ARM32.sha256)"
           ARM64_SHA="$(cat release/ARM64.sha256)"
@@ -111,8 +111,8 @@ jobs:
           ARM64_SIZE="$(cat release/ARM64.size)"
           cat > latest.json <<EOF
           {
-            "versionName": "1.4.19",
-            "versionCode": 3051,
+            "versionName": "1.4.20",
+            "versionCode": 3052,
             "packageName": "com.tvfull.pro.tv.v10safe",
             "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
             "arm32": {
@@ -133,10 +133,10 @@ jobs:
           jq -n --arg message "Update installer to TV FULL PRO V51" --arg content "$CONTENT_B64" --arg sha "$FILE_SHA" --arg branch "main"             '{message:$message,content:$content,sha:$sha,branch:$branch}' > update.json
           gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/tv_full_installer/latest.json" --input update.json > /dev/null
 
-      - name: Upload V51 build artifacts
+      - name: Upload V52 build artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: TV-FULL-PRO-V51-provider2-signed
+          name: TV-FULL-PRO-V52-lista-clasica-signed
           path: |
             release/*
             signature-arm32.txt
