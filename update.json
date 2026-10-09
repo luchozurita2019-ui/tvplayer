@@ -1,9 +1,9 @@
 {
-  "version_code": 3051,
-  "version_name": "1.4.19",
-  "update_available": false,
-  "apk_url": "",
-  "sha256": "",
-  "release_notes": "",
+  "version_code": 3053,
+  "version_name": "1.4.21",
+  "update_available": true,
+  "apk_url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v53-remota-json-3053-test/TV-FULL-PRO-V53-REMOTA-JSON.apk",
+  "sha256": "61eccc34f38eb11eb697fad05c47f7f09153f150814374dfef372ed4e4c0f33f",
+  "release_notes": "Prueba de actualización por JSON. Conserva la M3U remota, interfaz, logos y reproducción de la última V52 corregida.",
   "force_update": false
 }
