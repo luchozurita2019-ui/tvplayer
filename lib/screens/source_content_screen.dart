@@ -13,6 +13,7 @@ import '../services/manual_playlist_refresh_service.dart';
 import '../services/parental_control_service.dart';
 import '../services/xtream_fast_catalog_service.dart';
 import '../widgets/app_version_badge.dart';
+import '../widgets/app_update_banner.dart';
 import '../widgets/parental_lock_button.dart';
 import '../widgets/parental_unlock_dialog.dart';
 import '../widgets/tv_full_premium_ui.dart';
@@ -45,16 +46,16 @@ class _SourceContentScreenState extends State<SourceContentScreen>
     _parental.addListener(_refresh);
     _updates.addListener(_refresh);
     unawaited(_parental.init());
-    unawaited(_updates.checkOnce(force: true));
+    unawaited(_checkAndResumeUpdate());
     _updatePollTimer = Timer.periodic(const Duration(minutes: 5), (_) {
-      unawaited(_updates.checkOnce(force: true));
+      unawaited(_checkAndResumeUpdate());
     });
   }
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
-      unawaited(_updates.checkOnce(force: true));
+      unawaited(_checkAndResumeUpdate());
     }
   }
 
@@ -69,6 +70,13 @@ class _SourceContentScreenState extends State<SourceContentScreen>
 
   void _refresh() {
     if (mounted) setState(() {});
+  }
+
+  Future<void> _checkAndResumeUpdate() async {
+    await _updates.checkOnce(force: true);
+    if (!mounted) return;
+    final result = await _updates.resumePendingInstallation();
+    if (result != null && mounted) _showUpdateResult(result);
   }
 
   @override
@@ -175,8 +183,13 @@ class _SourceContentScreenState extends State<SourceContentScreen>
                   ),
                   if (update != null) ...[
                     const SizedBox(height: 14),
-                    _UpdateBanner(
+                    AppUpdateBanner(
                       versionName: update.versionName,
+                      phase: _updates.phase,
+                      busy: _updates.downloading,
+                      progress: _updates.downloadProgress,
+                      downloadedBytes: _updates.downloadedBytes,
+                      totalBytes: _updates.totalBytes,
                       onUpdate: () => unawaited(_openUpdate()),
                     ),
                   ],
@@ -391,40 +404,50 @@ class _SourceContentScreenState extends State<SourceContentScreen>
     if (update?.apkUrl != null && update?.sha256 != null) {
       final result = await _updates.downloadAndInstall();
       if (!mounted) return;
-      final message = switch (result) {
-        'installer_opened' =>
-          'APK verificada. Android abrió el instalador para confirmar la actualización.',
-        'permission_required' =>
-          'Permití a TV FULL PRO instalar aplicaciones desconocidas y volvé a tocar Actualizar.',
-        'hash_mismatch' =>
-          'La verificación de seguridad falló. Se rechazó el archivo descargado.',
-        'download_http_error' =>
-          'No se pudo descargar la actualización desde el servidor.',
-        'file_too_large' =>
-          'El archivo supera el tamaño permitido y se rechazó.',
-        'timeout' =>
-          'La descarga tardó demasiado. Revisá la conexión e intentá de nuevo.',
-        'already_downloading' =>
-          'La actualización ya se está descargando.',
-        'android_only' =>
-          'La instalación automática está disponible únicamente en Android.',
-        'invalid_url' =>
-          'El enlace de actualización no es válido o no está autorizado.',
-        'no_direct_update' =>
-          'Esta actualización no tiene un enlace directo válido.',
-        _ => 'No se pudo completar la actualización. Código: $result',
-      };
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 5),
-            content: Text(message),
-          ),
-        );
+      _showUpdateResult(result);
       return;
     }
 
+    await _openLegacyUpdate(update);
+  }
+
+  void _showUpdateResult(String result) {
+    final message = switch (result) {
+      'installer_opened' =>
+        'APK verificada. Android abrió el instalador para confirmar la actualización.',
+      'permission_required' =>
+        'APK guardada. Permití a TV FULL PRO instalar aplicaciones y volvé: la instalación continuará sin descargar de nuevo.',
+      'hash_mismatch' =>
+        'La verificación de seguridad falló. Se rechazó el archivo descargado.',
+      'download_http_error' =>
+        'No se pudo descargar la actualización desde el servidor.',
+      'file_too_large' =>
+        'El archivo supera el tamaño permitido y se rechazó.',
+      'timeout' =>
+        'La descarga tardó demasiado. Revisá la conexión e intentá de nuevo.',
+      'download_incomplete' =>
+        'La descarga quedó incompleta. Revisá la conexión e intentá de nuevo.',
+      'already_downloading' =>
+        'La actualización ya se está descargando.',
+      'android_only' =>
+        'La instalación automática está disponible únicamente en Android.',
+      'invalid_url' =>
+        'El enlace de actualización no es válido o no está autorizado.',
+      'no_direct_update' =>
+        'Esta actualización no tiene un enlace directo válido.',
+      _ => 'No se pudo completar la actualización. Código: $result',
+    };
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          duration: const Duration(seconds: 5),
+          content: Text(message),
+        ),
+      );
+  }
+
+  Future<void> _openLegacyUpdate(AppUpdateInfo? update) async {
     // Compatibilidad con la instalación anterior mediante TV FULL Installer.
     final openedInstaller = await _updates.openInstaller();
     if (openedInstaller) return;
@@ -581,67 +604,6 @@ class _SourceContentScreenState extends State<SourceContentScreen>
   }
 }
 
-class _UpdateBanner extends StatelessWidget {
-  final String versionName;
-  final VoidCallback onUpdate;
-
-  const _UpdateBanner({required this.versionName, required this.onUpdate});
-
-  @override
-  Widget build(BuildContext context) {
-    const red = Color(0xFFFF626B);
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 11),
-      decoration: BoxDecoration(
-        color: red.withValues(alpha: .075),
-        border: Border.all(color: red.withValues(alpha: .38)),
-        borderRadius: BorderRadius.circular(13),
-      ),
-      child: Row(
-        children: [
-          const Icon(Icons.system_update_alt_rounded, color: red, size: 22),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                const Text(
-                  'ACTUALIZACIÓN DISPONIBLE',
-                  style: TextStyle(
-                    color: red,
-                    fontSize: 13,
-                    fontWeight: FontWeight.w900,
-                    letterSpacing: .45,
-                  ),
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  'Nueva versión $versionName · Presioná para iniciar la actualización.',
-                  style: const TextStyle(color: Colors.white60, fontSize: 12),
-                ),
-              ],
-            ),
-          ),
-          OutlinedButton(
-            onPressed: onUpdate,
-            style: OutlinedButton.styleFrom(
-              foregroundColor: red,
-              side: const BorderSide(color: red),
-              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-            ),
-            child: const Text(
-              'INSTALAR ACTUALIZACIÓN',
-              style: TextStyle(fontWeight: FontWeight.w900),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
 class _SectionButton extends StatefulWidget {
   final String eyebrow;
   final String title;
@@ -766,3 +728,4 @@ class _SectionButtonState extends State<_SectionButton> {
     );
   }
 }
+

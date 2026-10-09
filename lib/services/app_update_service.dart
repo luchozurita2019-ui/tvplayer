@@ -38,8 +38,24 @@ class AppUpdateInfo {
   }
 }
 
+enum AppUpdatePhase { idle, downloading, verifying, installing, permission, ready, error }
+
 class AppUpdateService extends ChangeNotifier {
-  AppUpdateService._();
+  AppUpdateService._()
+      : _temporaryDirectory = getTemporaryDirectory,
+        _clientFactory = http.Client.new;
+
+  @visibleForTesting
+  AppUpdateService.forTesting({
+    required AppUpdateInfo update,
+    required Future<Directory> Function() temporaryDirectory,
+    required http.Client Function() clientFactory,
+  })  : _availableUpdate = update,
+        _temporaryDirectory = temporaryDirectory,
+        _clientFactory = clientFactory;
+
+  final Future<Directory> Function() _temporaryDirectory;
+  final http.Client Function() _clientFactory;
 
   static final AppUpdateService instance = AppUpdateService._();
 
@@ -60,6 +76,9 @@ class AppUpdateService extends ChangeNotifier {
   bool _checking = false;
   bool _downloading = false;
   double _downloadProgress = 0;
+  int _downloadedBytes = 0;
+  int? _totalBytes;
+  AppUpdatePhase _phase = AppUpdatePhase.idle;
   String? _lastUpdateError;
   DateTime? _nextAllowedCheckAt;
   AppUpdateInfo? _availableUpdate;
@@ -68,12 +87,15 @@ class AppUpdateService extends ChangeNotifier {
   bool get checking => _checking;
   bool get downloading => _downloading;
   double get downloadProgress => _downloadProgress;
+  int get downloadedBytes => _downloadedBytes;
+  int? get totalBytes => _totalBytes;
+  AppUpdatePhase get phase => _phase;
   String? get lastUpdateError => _lastUpdateError;
   AppUpdateInfo? get availableUpdate => _availableUpdate;
   bool get hasUpdate => _availableUpdate != null;
 
   Future<void> checkOnce({bool force = false}) async {
-    if (_checking) return;
+    if (_checking || _downloading) return;
     final now = DateTime.now();
     final next = _nextAllowedCheckAt;
     if (!force && next != null && now.isBefore(next)) return;
@@ -105,6 +127,8 @@ class AppUpdateService extends ChangeNotifier {
           versionName.isNotEmpty &&
           validApkUrl &&
           validHash) {
+        final changed = _availableUpdate?.versionCode != versionCode ||
+            _availableUpdate?.sha256 != sha;
         _availableUpdate = AppUpdateInfo(
           versionCode: versionCode,
           versionName: versionName,
@@ -114,7 +138,13 @@ class AppUpdateService extends ChangeNotifier {
           releaseNotes: '${decoded['release_notes'] ?? ''}'.trim(),
           forceUpdate: decoded['force_update'] == true,
         );
-        _lastUpdateError = null;
+        if (changed) {
+          _phase = AppUpdatePhase.idle;
+          _lastUpdateError = null;
+          _downloadProgress = 0;
+          _downloadedBytes = 0;
+          _totalBytes = null;
+        }
       } else {
         // Actualizador exclusivamente por update.json: sin fallback a Supabase.
         _availableUpdate = null;
@@ -143,69 +173,175 @@ class AppUpdateService extends ChangeNotifier {
 
     _downloading = true;
     _downloadProgress = 0;
+    _downloadedBytes = 0;
+    _totalBytes = null;
+    _phase = AppUpdatePhase.verifying;
     _lastUpdateError = null;
     notifyListeners();
 
-    File? apkFile;
+    File? partialFile;
     try {
-      final temp = await getTemporaryDirectory();
-      apkFile = File('${temp.path}/tvfull-pro-update-${update.versionCode}.apk');
-      if (await apkFile.exists()) await apkFile.delete();
-
-      final client = http.Client();
-      try {
-        final request = http.Request('GET', uri);
-        final response = await client.send(request).timeout(_requestTimeout);
-        if (response.statusCode != 200) return 'download_http_error';
-        final length = response.contentLength ?? 0;
-        if (length > _maxApkBytes) return 'file_too_large';
-
-        final sink = apkFile.openWrite();
-        var received = 0;
+      final temp = await _temporaryDirectory();
+      final apkFile = _apkFile(temp, update);
+      if (!await _isVerifiedApk(apkFile, update)) {
+        if (await apkFile.exists()) await apkFile.delete();
+        partialFile = File('${apkFile.path}.part');
+        _phase = AppUpdatePhase.downloading;
+        notifyListeners();
+        final client = _clientFactory();
         try {
-          await for (final chunk in response.stream) {
-            received += chunk.length;
-            if (received > _maxApkBytes) {
-              throw const _UpdateException('file_too_large');
+          final request = http.Request('GET', uri);
+          final response = await client.send(request).timeout(_requestTimeout);
+          if (response.statusCode != 200) {
+            throw const _UpdateException('download_http_error');
+          }
+          final length = response.contentLength;
+          if (length != null && length > _maxApkBytes) {
+            throw const _UpdateException('file_too_large');
+          }
+          _totalBytes = length != null && length > 0 ? length : null;
+          final sink = partialFile.openWrite();
+          var lastPercent = -1;
+          var lastNotice = DateTime.now();
+          try {
+            await for (final chunk in response.stream.timeout(const Duration(seconds: 30))) {
+              _downloadedBytes += chunk.length;
+              if (_downloadedBytes > _maxApkBytes) {
+                throw const _UpdateException('file_too_large');
+              }
+              sink.add(chunk);
+              if (_totalBytes != null) {
+                _downloadProgress = (_downloadedBytes / _totalBytes!).clamp(0.0, 1.0).toDouble();
+              }
+              final percent = (_downloadProgress * 100).floor();
+              final now = DateTime.now();
+              if (percent != lastPercent || now.difference(lastNotice).inMilliseconds >= 250) {
+                lastPercent = percent;
+                lastNotice = now;
+                notifyListeners();
+              }
             }
-            sink.add(chunk);
-            if (length > 0) _downloadProgress = received / length;
-            notifyListeners();
+          } finally {
+            await sink.close();
+          }
+          if (_downloadedBytes == 0 ||
+              (_totalBytes != null && _downloadedBytes != _totalBytes)) {
+            throw const _UpdateException('download_incomplete');
           }
         } finally {
-          await sink.close();
+          client.close();
         }
-      } finally {
-        client.close();
+        _phase = AppUpdatePhase.verifying;
+        notifyListeners();
+        if (!await _isVerifiedApk(partialFile, update)) {
+          throw const _UpdateException('hash_mismatch');
+        }
+        await partialFile.rename(apkFile.path);
       }
 
-      final digest = await sha256.bind(apkFile.openRead()).first;
-      if (digest.toString().toLowerCase() != update.sha256!.toLowerCase()) {
-        await apkFile.delete().catchError((_) => apkFile!);
-        return 'hash_mismatch';
-      }
-
+      _downloadedBytes = await apkFile.length();
+      _totalBytes = _downloadedBytes;
+      _downloadProgress = 1;
+      // Se guarda antes de salir a Ajustes: Android puede cerrar el proceso.
+      await _pendingFile(temp).writeAsString(jsonEncode({
+        'version_code': update.versionCode,
+        'sha256': update.sha256!.toLowerCase(),
+      }), flush: true);
+      _phase = AppUpdatePhase.installing;
+      notifyListeners();
       final installResult = await _deviceChannel.invokeMethod<String>(
         'installTvFullApk',
         <String, Object>{'path': apkFile.path},
       );
-      return installResult ?? 'install_failed';
+      if (installResult == 'permission_required') {
+        _phase = AppUpdatePhase.permission;
+        return 'permission_required';
+      }
+      if (installResult != 'installer_opened') {
+        throw const _UpdateException('install_failed');
+      }
+      _phase = AppUpdatePhase.ready;
+      await _deleteIfPresent(_pendingFile(temp));
+      return 'installer_opened';
     } on _UpdateException catch (error) {
+      _phase = AppUpdatePhase.error;
       _lastUpdateError = error.message;
       return error.message;
     } on TimeoutException {
+      _phase = AppUpdatePhase.error;
+      _lastUpdateError = 'timeout';
       return 'timeout';
     } on PlatformException catch (error) {
       _lastUpdateError = error.message ?? error.code;
-      return error.code == 'INSTALL_PERMISSION_REQUIRED'
-          ? 'permission_required'
-          : 'install_failed';
+      if (error.code == 'INSTALL_PERMISSION_REQUIRED') {
+        _phase = AppUpdatePhase.permission;
+        return 'permission_required';
+      }
+      _phase = AppUpdatePhase.error;
+      return 'install_failed';
     } catch (error) {
+      _phase = AppUpdatePhase.error;
       _lastUpdateError = error.toString();
       return 'update_failed';
     } finally {
+      if (partialFile != null) await _deleteIfPresent(partialFile);
       _downloading = false;
       notifyListeners();
+    }
+  }
+
+  Future<String?> resumePendingInstallation() async {
+    final update = _availableUpdate;
+    if (_downloading || update == null || defaultTargetPlatform != TargetPlatform.android) {
+      return null;
+    }
+    try {
+      final temp = await _temporaryDirectory();
+      final pending = _pendingFile(temp);
+      if (!await pending.exists()) return null;
+      final metadata = jsonDecode(await pending.readAsString());
+      if (metadata is! Map<String, dynamic> ||
+          metadata['version_code'] != update.versionCode ||
+          metadata['sha256'] != update.sha256?.toLowerCase()) {
+        await _deleteIfPresent(pending);
+        return null;
+      }
+      if (!await _apkFile(temp, update).exists()) {
+        await _deleteIfPresent(pending);
+        return null;
+      }
+      final permitted = await _deviceChannel.invokeMethod<bool>('canInstallTvFullApk') ?? false;
+      if (!permitted) {
+        _phase = AppUpdatePhase.permission;
+        notifyListeners();
+        return null;
+      }
+      // downloadAndInstall vuelve a validar el SHA-256 antes de reutilizarla.
+      return await downloadAndInstall();
+    } catch (_) {
+      return null;
+    }
+  }
+
+  static File _apkFile(Directory temp, AppUpdateInfo update) =>
+      File('${temp.path}/tvfull-pro-update-${update.versionCode}.apk');
+
+  static File _pendingFile(Directory temp) =>
+      File('${temp.path}/tvfull-pro-update-pending.json');
+
+  static Future<bool> _isVerifiedApk(File file, AppUpdateInfo update) async {
+    if (!await file.exists()) return false;
+    final length = await file.length();
+    if (length <= 0 || length > _maxApkBytes) return false;
+    final digest = await sha256.bind(file.openRead()).first;
+    return digest.toString() == update.sha256?.toLowerCase();
+  }
+
+  static Future<void> _deleteIfPresent(File file) async {
+    try {
+      if (await file.exists()) await file.delete();
+    } catch (_) {
+      // Un fallo de limpieza no invalida una APK verificada ni bloquea la UI.
     }
   }
 
@@ -259,3 +395,4 @@ class _UpdateException implements Exception {
   final String message;
   const _UpdateException(this.message);
 }
+

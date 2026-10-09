@@ -180,6 +180,12 @@ class MainActivity : FlutterActivity() {
                             result.success(true)
                         }
                     }
+                    "canInstallTvFullApk" -> {
+                        result.success(
+                            Build.VERSION.SDK_INT < Build.VERSION_CODES.O ||
+                                packageManager.canRequestPackageInstalls(),
+                        )
+                    }
                     "installTvFullApk" -> {
                         val path = call.argument<String>("path")
                         if (path.isNullOrBlank()) {
