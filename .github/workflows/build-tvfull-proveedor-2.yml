@@ -5,6 +5,7 @@ on:
     branches:
       - feature/tvfull-proveedor-2-json
       - auto-update-json-test
+      - v52-lista-remota-correcta
   workflow_dispatch:
 
 permissions:
