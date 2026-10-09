@@ -24,7 +24,7 @@ class IptvProvider extends ChangeNotifier {
   static const _classicPlaylistId = 'tvf_builtin_classic';
   static const _classicPlaylistName = 'Lista clásica';
   static const _classicPlaylistSource =
-      'asset://assets/playlists/lista_clasica.m3u';
+      'https://raw.githubusercontent.com/luchozurita2019-ui/mi-lista-iptv-4k/main/lista_clasica.m3u';
 
   List<Playlist> _playlists = const [];
   List<Channel> _favorites = const [];
@@ -93,6 +93,9 @@ class IptvProvider extends ChangeNotifier {
     }
 
     await _ensureClassicPlaylist();
+    // Mantener la lista clásica remota como lista activa predeterminada.
+    _selectedPlaylistId = _classicPlaylistId;
+    await _localStore.saveSelectedServiceId(_selectedPlaylistId);
     _normalizeSelection();
     _initialized = true;
     notifyListeners();
@@ -109,7 +112,7 @@ class IptvProvider extends ChangeNotifier {
       id: _classicPlaylistId,
       name: _classicPlaylistName,
       source: _classicPlaylistSource,
-      isRemote: false,
+      isRemote: true,
       channels: const <Channel>[],
       lastUpdated: DateTime.now(),
       sourceType: PlaylistSourceType.m3u,
