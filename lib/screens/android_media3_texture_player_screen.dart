@@ -724,124 +724,43 @@ class _AndroidMedia3TexturePlayerScreenState
     );
   }
 
+  // HUD reducido: se elimina el banner de canal/categoría que no contiene
+  // una guía EPG funcional. Se conservan controles esenciales de audio y canales.
   Widget _liveHud() => SafeArea(
     child: Align(
-      alignment: Alignment.bottomCenter,
-      child: Container(
-        height: 108,
-        padding: const EdgeInsets.fromLTRB(22, 30, 22, 12),
-        decoration: const BoxDecoration(
-          gradient: LinearGradient(
-            begin: Alignment.topCenter,
-            end: Alignment.bottomCenter,
-            colors: [Color(0x00000000), Color(0x3502080F), Color(0xA802060B)],
-            stops: [0, .42, 1],
+      alignment: Alignment.bottomRight,
+      child: Padding(
+        padding: const EdgeInsets.only(right: 18, bottom: 18),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            color: const Color(0xD90A1119),
+            borderRadius: BorderRadius.circular(18),
+            border: Border.all(color: Colors.white.withValues(alpha: .12)),
+            boxShadow: const [
+              BoxShadow(color: Colors.black45, blurRadius: 18, spreadRadius: 1),
+            ],
           ),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.end,
-          children: [
-            Container(
-              width: 62,
-              height: 62,
-              padding: const EdgeInsets.all(6),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: .24),
-                borderRadius: BorderRadius.circular(14),
-                border: Border.all(color: tvFullCyan.withValues(alpha: .40)),
-                boxShadow: [
-                  BoxShadow(
-                    color: tvFullCyan.withValues(alpha: .10),
-                    blurRadius: 12,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (_hasMultipleAudioTracks) ...[
+                  _LiveHudAction(
+                    icon: Icons.language_rounded,
+                    label: 'Audio',
+                    onTap: () => unawaited(_showAudioPicker()),
                   ),
+                  const SizedBox(width: 8),
                 ],
-              ),
-              child: ChannelLogoImage(
-                channel: _channel,
-                fit: BoxFit.contain,
-                cacheWidth: 124,
-                cacheHeight: 124,
-                priority: 120,
-                prefetchExtent: 0,
-                fallback: const Icon(
-                  Icons.live_tv_rounded,
-                  size: 31,
-                  color: Colors.white70,
+                _LiveHudAction(
+                  icon: Icons.grid_view_rounded,
+                  label: 'Canales',
+                  onTap: _openChannelList,
                 ),
-              ),
+              ],
             ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Padding(
-                padding: const EdgeInsets.only(bottom: 4),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Row(
-                      children: [
-                        Flexible(
-                          child: Text(
-                            _channel.name,
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.w900,
-                              shadows: [
-                                Shadow(color: Colors.black87, blurRadius: 8),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        const TvFullLiveBadge(),
-                      ],
-                    ),
-                    const SizedBox(height: 5),
-                    Text(
-                      (_channel.group ?? '').trim().isEmpty
-                          ? 'TV en vivo'
-                          : _channel.group!.trim(),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: const TextStyle(
-                        color: Colors.white60,
-                        fontSize: 11,
-                        fontWeight: FontWeight.w600,
-                        shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            if (_hasMultipleAudioTracks)
-              _LiveHudAction(
-                icon: Icons.language_rounded,
-                label: 'Audio',
-                onTap: () => unawaited(_showAudioPicker()),
-              ),
-            if (_hasMultipleAudioTracks) const SizedBox(width: 8),
-            _LiveHudAction(
-              icon: Icons.grid_view_rounded,
-              label: 'Canales',
-              onTap: _openChannelList,
-            ),
-            const SizedBox(width: 12),
-            const Padding(
-              padding: EdgeInsets.only(bottom: 8),
-              child: Text(
-                '← → cambiar   ·   ↓ canales',
-                style: TextStyle(
-                  color: Colors.white38,
-                  fontSize: 10,
-                  fontWeight: FontWeight.w600,
-                  shadows: [Shadow(color: Colors.black87, blurRadius: 6)],
-                ),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     ),
@@ -854,7 +773,7 @@ class _AndroidMedia3TexturePlayerScreenState
       elevation: 16,
       child: SafeArea(
         child: SizedBox(
-          width: 350,
+          width: 390,
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
@@ -896,20 +815,20 @@ class _AndroidMedia3TexturePlayerScreenState
                           focusNode: selected ? _channelListFocus : null,
                           autofocus: selected,
                           selected: selected,
-                          minTileHeight: 54,
+                          minTileHeight: 62,
                           selectedTileColor: const Color(0xFF1677FF)
                               .withValues(alpha: .18),
                           shape: RoundedRectangleBorder(
                             borderRadius: BorderRadius.circular(9),
                           ),
                           leading: SizedBox(
-                            width: 36,
-                            height: 36,
+                            width: 44,
+                            height: 44,
                             child: ChannelLogoImage(
                               channel: item,
                               fit: BoxFit.contain,
-                              cacheWidth: 72,
-                              cacheHeight: 72,
+                              cacheWidth: 88,
+                              cacheHeight: 88,
                               prefetchExtent: 0,
                               fallback: const Icon(
                                 Icons.live_tv_rounded,
@@ -922,7 +841,7 @@ class _AndroidMedia3TexturePlayerScreenState
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
-                              fontSize: 14,
+                              fontSize: 15,
                               fontWeight: selected
                                   ? FontWeight.w800
                                   : FontWeight.w600,
