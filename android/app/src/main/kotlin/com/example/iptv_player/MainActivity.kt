@@ -11,6 +11,7 @@ import android.os.Looper
 import android.provider.Settings
 import android.view.Surface
 import android.view.WindowManager
+import androidx.core.content.FileProvider
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
 import androidx.media3.common.MediaItem
@@ -36,6 +37,7 @@ import io.flutter.plugin.common.MethodCall
 import io.flutter.plugin.common.MethodChannel
 import io.flutter.view.TextureRegistry
 import io.github.anilbeesetti.nextlib.media3ext.ffdecoder.NextRenderersFactory
+import java.io.File
 import java.net.InetAddress
 import java.net.SocketTimeoutException
 import java.net.UnknownHostException
@@ -176,6 +178,53 @@ class MainActivity : FlutterActivity() {
                             launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
                             startActivity(launchIntent)
                             result.success(true)
+                        }
+                    }
+                    "installTvFullApk" -> {
+                        val path = call.argument<String>("path")
+                        if (path.isNullOrBlank()) {
+                            result.error("INVALID_APK_PATH", "No se recibió el archivo APK", null)
+                            return@setMethodCallHandler
+                        }
+                        val apkFile = File(path)
+                        if (!apkFile.isFile || !apkFile.canRead() || apkFile.length() <= 0L) {
+                            result.error("INVALID_APK_FILE", "El archivo APK no existe o está vacío", null)
+                            return@setMethodCallHandler
+                        }
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
+                            !packageManager.canRequestPackageInstalls()
+                        ) {
+                            val settingsIntent = Intent(
+                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                                Uri.parse("package:$packageName"),
+                            )
+                            settingsIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                            startActivity(settingsIntent)
+                            result.success("permission_required")
+                        } else {
+                            try {
+                                val apkUri = FileProvider.getUriForFile(
+                                    this,
+                                    "$packageName.fileprovider",
+                                    apkFile,
+                                )
+                                val installIntent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(
+                                        apkUri,
+                                        "application/vnd.android.package-archive",
+                                    )
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(installIntent)
+                                result.success("installer_opened")
+                            } catch (error: Exception) {
+                                result.error(
+                                    "INSTALL_FAILED",
+                                    error.message ?: "No se pudo abrir el instalador de Android",
+                                    null,
+                                )
+                            }
                         }
                     }
                     "getDeviceProfile" -> {
