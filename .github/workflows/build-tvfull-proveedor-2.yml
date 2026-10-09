@@ -12,7 +12,7 @@ permissions:
 
 concurrency:
   group: tvfull-proveedor-2-${{ github.ref }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   build:
