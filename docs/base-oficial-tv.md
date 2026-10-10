@@ -1,13 +1,19 @@
 # Base oficial de TV FULL PRO
 
 `main` es la base para continuar el desarrollo y abrir las próximas pull requests.
-Su punto de partida es la V54 publicada: **1.4.22+3054**, código
+La versión actual del código es **V55, 1.4.23+3055**. Su punto de partida es la V54 publicada: **1.4.22+3054**, código
 `0dd09bb7f81e577646ad2ae536cea98376198ab1`.
 
-La integración conserva exactamente `lib/`, `android/`, `assets/`, `test/`,
+La integración inicial conservó exactamente `lib/`, `android/`, `assets/`, `test/`,
 `pubspec.yaml` y `pubspec.lock` de esa V54. También conserva la historia previa
 de `main` y la historia de la rama que produjo la APK. Los cambios adicionales
-son metadatos de distribución, documentación y controles de compilación.
+fueron metadatos de distribución, documentación y controles de compilación.
+
+La V55 agrega respaldo por canal al modelo, parser M3U y pantalla Media3 de
+Android TV, con sus pruebas. No cambia el código Android, los proveedores,
+assets, dependencias ni el actualizador. Detalles: [respaldo-canales-v55.md](respaldo-canales-v55.md).
+Su APK de prueba se compiló desde `f7626b6efed56fccfad2d9ddc1e691f8437071de`,
+después de pasar análisis y 90 pruebas, y se verificó con la firma histórica.
 
 ## Referencias verificadas
 
@@ -25,17 +31,30 @@ no cambia ese endpoint ni envía una actualización a las TVs.
 compatible con ARM32 y ARM64. Los endpoints de instaladores anteriores
 permanecen en sus ramas existentes.
 
+## V55 preparada para pruebas
+
+- Instalador: [TV-FULL-PRO-V55-RESPALDOS.apk](https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v55-channel-backups-3055/TV-FULL-PRO-V55-RESPALDOS.apk).
+- SHA-256: `585221ee2d02aa3a3217b764b28adc24f71b3d4a0e9d908cb0207e7b0b61a3b6`.
+- Versión: `1.4.23+3055`; paquete y certificado iguales a V54.
+
+La release V55 es de prueba. El JSON activo y los manifiestos de producción
+siguen en V54 hasta habilitar la lista con respaldos y enviar esa actualización.
+Publicar el instalador no cambia por sí solo la versión instalada en los TV.
+
 ## Validación y próximas versiones
 
 El workflow **TV FULL PRO - base oficial** valida metadatos, dependencias
 bloqueadas, análisis Dart y los tests. Las pull requests internas y las
 ejecuciones manuales además compilan una APK universal, comprueban paquete,
-versión, firma histórica y presencia de M3U/JSON en ARM32 y ARM64. Sólo guarda
-las comprobaciones; no crea releases ni modifica el JSON activo.
+versión, firma histórica y presencia de M3U/JSON en ARM32 y ARM64. Para V55,
+un push de código de ejecución a main también compila y publica la release
+de prueba, después de validar. Los cambios sólo de documentación/manifiestos
+no generan otra APK. El workflow no modifica el JSON activo.
 
 Mientras la versión siga siendo 3054, CI exige que el código de la app coincida
 con la V54 publicada. Para modificar la app, hay que aumentar el versionCode
-desde 3054 en una rama creada a partir de `main` y abrir una pull request.
+por encima de la versión actual en una rama creada a partir de `main` y abrir
+una pull request. La siguiente versión debe superar 3055.
 El versionCode debe superar también el de cualquier APK instalada en las TVs
 que reciban esa actualización; los experimentos en otras ramas tienen su
 propia numeración y no definen la base oficial.
