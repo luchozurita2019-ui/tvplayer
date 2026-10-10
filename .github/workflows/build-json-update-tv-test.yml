@@ -1,0 +1,146 @@
+name: V54 progreso y reanudacion de actualizacion TV
+
+on:
+  push:
+    branches:
+      - codex/update-progress-v54-20261009
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: tv-json-update-v54
+  cancel-in-progress: false
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/codex/update-progress-v54-20261009'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout de la ultima V53 corregida
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Conservar M3U remota, reproductor, logos y dependencias
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import subprocess
+          allowed = {
+              'lib/services/app_update_service.dart',
+              'lib/screens/source_content_screen.dart',
+              'lib/widgets/app_update_banner.dart',
+              'android/app/src/main/kotlin/com/example/iptv_player/MainActivity.kt',
+              'pubspec.yaml',
+              'test/app_update_service_test.dart',
+              'test/app_update_banner_test.dart',
+              '.github/workflows/build-json-update-tv-test.yml',
+              'docs/correccion-actualizador-tv-v54.md',
+          }
+          changed = set(subprocess.check_output([
+              'git', 'diff', '--name-only', '2506240741eca0a9b581043ab77add11fc3e0271', 'HEAD',
+          ], text=True).splitlines())
+          assert changed <= allowed, f'Cambios ajenos al actualizador: {changed - allowed}'
+          PY
+          grep -q '^version: 1.4.22+3054$' pubspec.yaml
+
+      - name: Java 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter 3.47.2 de la compilacion anterior
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Dependencias bloqueadas
+        run: |
+          flutter pub get
+          git diff --exit-code -- pubspec.lock
+
+      - name: Analizar y probar la app y el actualizador
+        run: |
+          dart analyze lib test
+          flutter test --no-pub --reporter expanded
+
+      - name: Firma historica
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          test -n "$TV_FULL_KEYSTORE_PASSWORD"
+          test -n "$TV_FULL_KEY_ALIAS"
+          test -n "$TV_FULL_KEY_PASSWORD"
+          umask 077
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > android/tvfull-release.jks
+          cat > android/key.properties <<EOF
+          storeFile=tvfull-release.jks
+          storePassword=$TV_FULL_KEYSTORE_PASSWORD
+          keyAlias=$TV_FULL_KEY_ALIAS
+          keyPassword=$TV_FULL_KEY_PASSWORD
+          EOF
+
+      - name: Compilar V54 universal
+        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Comprobar version, paquete, firma historica y URL de M3U y JSON
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          APK=release/TV-FULL-PRO-V54-REMOTA-JSON.apk
+          cp build/app/outputs/flutter-apk/app-release.apk "$APK"
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          test -x "$AAPT"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" > release/SIGNATURE-V54.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' release/SIGNATURE-V54.txt
+          "$AAPT" dump badging "$APK" > release/BADGING-V54.txt
+          grep -q "name='com.tvfull.pro.tv.v10safe'" release/BADGING-V54.txt
+          grep -q "versionCode='3054' versionName='1.4.22'" release/BADGING-V54.txt
+          python scripts/verify_tv_update_apk.py "$APK"
+          sha256sum "$APK" > release/SHA256-V54.txt
+          printf '%s\n' "$GITHUB_SHA" > release/COMMIT-V54.txt
+
+      - name: Publicar V54 para la prueba autorizada en TV
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=tv-full-pro-v54-update-progress-3054-test
+          APK=release/TV-FULL-PRO-V54-REMOTA-JSON.apk
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            mkdir -p published-v54
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern TV-FULL-PRO-V54-REMOTA-JSON.apk --dir published-v54
+            cmp "$APK" published-v54/TV-FULL-PRO-V54-REMOTA-JSON.apk
+          else
+            gh release create "$TAG" "$APK" release/SHA256-V54.txt release/SIGNATURE-V54.txt release/COMMIT-V54.txt \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "TV FULL PRO V54 - progreso de descarga y continuidad de instalacion" \
+              --notes-file docs/correccion-actualizador-tv-v54.md
+          fi
+
+      - name: Eliminar material de firma
+        if: always()
+        run: rm -f android/key.properties android/tvfull-release.jks
+
+      - name: Guardar comprobaciones de V54
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: TV-FULL-PRO-V54-json-tv-test
+          path: release/*
+          if-no-files-found: error
+          retention-days: 30
+

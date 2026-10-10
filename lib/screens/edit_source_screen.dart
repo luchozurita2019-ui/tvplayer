@@ -155,6 +155,10 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
 
   Widget _sourceFields(Playlist playlist) {
     switch (playlist.sourceType) {
+      case PlaylistSourceType.localProviderJson:
+        return const Text(
+          'El catálogo está guardado en este dispositivo. Podés cambiar el nombre. Para cargar otro JSON, usá Agregar servicio → provider.json local.',
+        );
       case PlaylistSourceType.m3u:
         if (!playlist.isRemote) {
           return const Text(
@@ -235,6 +239,8 @@ class _EditSourceScreenState extends State<EditSourceScreen> {
     FocusScope.of(context).unfocus();
 
     switch (playlist.sourceType) {
+      case PlaylistSourceType.localProviderJson:
+        await provider.renamePlaylist(playlist.id, _nameController.text.trim());
       case PlaylistSourceType.m3u:
         if (playlist.isRemote) {
           final url = _m3uUrlController.text.trim();

@@ -65,21 +65,25 @@ class _PlayerScreenState extends State<PlayerScreen> {
     final androidTv = _androidTvBuild &&
         !kIsWeb &&
         defaultTargetPlatform == TargetPlatform.android;
+    final provider2 = widget.channel.playbackProfile == 'tvf_builtin_provider_2';
+    final androidDrm = !kIsWeb &&
+        defaultTargetPlatform == TargetPlatform.android &&
+        (widget.channel.hasDrmConfiguration || provider2);
 
-    if (androidTv) {
+    if (androidTv || androidDrm) {
       if (widget.isLiveContent) {
         return AndroidMedia3TexturePlayerScreen(
           playlist: widget.playlist,
           initialIndex: widget.initialIndex,
+          allowProvider2ClearKeyHls: provider2,
         );
       }
-      // Android TV usa Media3 también para VOD: evita el cierre nativo observado
-      // con MediaKit y mantiene selector de audio/subtítulos.
       return AndroidMedia3VodPlayerScreen(
         playlist: widget.playlist,
         initialIndex: widget.initialIndex,
       );
     }
+
 
     return TvFullVodPlayerScreen(
       channel: widget.channel,

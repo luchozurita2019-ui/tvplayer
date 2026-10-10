@@ -1,11 +1,23 @@
-/// Representa un único canal/entrada dentro de una lista M3U.
+import 'dart:convert';
+import 'dart:typed_data';
+
+/// Representa un canal de cualquiera de las fuentes soportadas.
 class Channel {
   final String name;
   final String url;
   final String? logoUrl;
+  final Uint8List? logoBytes;
+  final String? drmKeyId;
+  final String? drmKey;
+  final String? streamMimeType;
+  final String? playbackProfile;
   final String? group; // categoría (ej: "Deportes", "Noticias")
   final String? tvgId; // id XMLTV/EPG del proveedor
   final String? xtreamStreamId; // stream_id real para APIs Xtream (EPG, etc.)
+  final String? dynamicStreamId; // identidad estable usada por el resolvedor
+  final String? dynamicStreamPath; // ruta original de provider.json
+  final String?
+  providerGlobalIndex; // índice del catálogo si el proveedor lo usa
 
   // Compatibilidad histórica: seguimos exponiendo User-Agent y Referer de
   // forma explícita porque ya existen listas guardadas con estos campos.
@@ -21,13 +33,27 @@ class Channel {
     required this.name,
     required this.url,
     this.logoUrl,
+    this.logoBytes,
+    this.drmKeyId,
+    this.drmKey,
+    this.streamMimeType,
+    this.playbackProfile,
     this.group,
     this.tvgId,
     this.xtreamStreamId,
+    this.dynamicStreamId,
+    this.dynamicStreamPath,
+    this.providerGlobalIndex,
     this.httpUserAgent,
     this.httpReferrer,
     this.httpHeaders,
   });
+
+  bool get hasClearKey => drmKeyId != null && drmKey != null;
+
+  // También reconoce configuraciones incompletas para que fallen con un mensaje
+  // claro en Media3, en lugar de enviarlas a un reproductor sin DRM.
+  bool get hasDrmConfiguration => drmKeyId != null || drmKey != null;
 
   Map<String, String> resolvedHttpHeaders(
     String defaultUserAgent, {
@@ -87,18 +113,48 @@ class Channel {
   }
 
   Map<String, dynamic> toJson() => {
-        'name': name,
-        'url': url,
-        'logoUrl': logoUrl,
-        'group': group,
-        'tvgId': tvgId,
-        'xtreamStreamId': xtreamStreamId,
-        'httpUserAgent': httpUserAgent,
-        'httpReferrer': httpReferrer,
-        if (httpHeaders != null) 'httpHeaders': httpHeaders,
-      };
+    'name': name,
+    'url': url,
+    'logoUrl': logoUrl,
+    'group': group,
+    'tvgId': tvgId,
+    'xtreamStreamId': xtreamStreamId,
+    if (dynamicStreamId != null) 'dynamicStreamId': dynamicStreamId,
+    if (dynamicStreamPath != null) 'dynamicStreamPath': dynamicStreamPath,
+    if (providerGlobalIndex != null) 'providerGlobalIndex': providerGlobalIndex,
+    'httpUserAgent': httpUserAgent,
+    'httpReferrer': httpReferrer,
+    if (httpHeaders != null) 'httpHeaders': httpHeaders,
+    if (logoBytes != null) 'logoBase64': base64Encode(logoBytes!),
+    if (drmKeyId != null) 'drmKeyId': drmKeyId,
+    if (drmKey != null) 'drmKey': drmKey,
+    if (streamMimeType != null) 'streamMimeType': streamMimeType,
+    if (playbackProfile != null) 'playbackProfile': playbackProfile,
+  };
 
   factory Channel.fromJson(Map<String, dynamic> json) {
+    Uint8List? logoBytes;
+    final rawLogo = json['logoBase64'];
+    if (rawLogo is String) {
+      try {
+        logoBytes = base64Decode(rawLogo);
+      } on FormatException {
+        // Una imagen dañada no impide recuperar el canal.
+      }
+    }
+    final keyId = json['drmKeyId'];
+    final key = json['drmKey'];
+    if (keyId != null || key != null) {
+      final hex = RegExp(r'^[0-9a-fA-F]{32}$');
+      if (keyId is! String ||
+          key is! String ||
+          !hex.hasMatch(keyId) ||
+          !hex.hasMatch(key)) {
+        throw const FormatException(
+          'Configuración ClearKey guardada inválida.',
+        );
+      }
+    }
     final rawHeaders = json['httpHeaders'];
     Map<String, String>? headers;
     if (rawHeaders is Map) {
@@ -115,9 +171,21 @@ class Channel {
       name: json['name'] as String,
       url: json['url'] as String,
       logoUrl: json['logoUrl'] as String?,
+      logoBytes: logoBytes,
+      drmKeyId: keyId as String?,
+      drmKey: key as String?,
+      streamMimeType: json['streamMimeType'] is String
+          ? json['streamMimeType'] as String
+          : null,
+      playbackProfile: json['playbackProfile'] is String
+          ? json['playbackProfile'] as String
+          : null,
       group: json['group'] as String?,
       tvgId: json['tvgId'] as String?,
       xtreamStreamId: json['xtreamStreamId'] as String?,
+      dynamicStreamId: json['dynamicStreamId'] as String?,
+      dynamicStreamPath: json['dynamicStreamPath'] as String?,
+      providerGlobalIndex: json['providerGlobalIndex'] as String?,
       httpUserAgent: json['httpUserAgent'] as String?,
       httpReferrer: json['httpReferrer'] as String?,
       httpHeaders: headers,
@@ -125,7 +193,12 @@ class Channel {
   }
 
   /// Clave estable para identificar el canal (usada en favoritos).
-  String get uniqueKey => '$name|$url';
+  String get uniqueKey {
+    final dynamicId = dynamicStreamId?.trim();
+    return dynamicId == null || dynamicId.isEmpty
+        ? '$name|$url'
+        : '$name|dynamic:$dynamicId';
+  }
 
   @override
   bool operator ==(Object other) =>

@@ -1,0 +1,150 @@
+name: TV FULL PRO V51 Provider 2 signed
+
+on:
+  push:
+    branches:
+      - release/v51-provider2
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/release/v51-provider2'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout V50 provider fix
+        uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Resolve dependencies
+        run: flutter pub get
+
+      - name: Verify V50 source
+        run: |
+          set -euo pipefail
+          flutter analyze --no-fatal-infos
+          flutter test
+
+      - name: Configure historical release signing
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          test -n "$TV_FULL_KEYSTORE_PASSWORD"
+          test -n "$TV_FULL_KEY_ALIAS"
+          test -n "$TV_FULL_KEY_PASSWORD"
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > android/tvfull-release.jks
+          cat > android/key.properties <<EOF
+          storeFile=tvfull-release.jks
+          storePassword=$TV_FULL_KEYSTORE_PASSWORD
+          keyAlias=$TV_FULL_KEY_ALIAS
+          keyPassword=$TV_FULL_KEY_PASSWORD
+          EOF
+
+      - name: Build signed V51 APK
+        run: flutter build apk --release --split-per-abi --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Verify historical certificate on built V51 APKs
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk > signature-arm32-build.txt
+          "$APKSIGNER" verify --verbose --print-certs build/app/outputs/flutter-apk/app-arm64-v8a-release.apk > signature-arm64-build.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm32-build.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm64-build.txt
+
+      - name: Prepare V51 release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp build/app/outputs/flutter-apk/app-armeabi-v7a-release.apk release/TV-FULL-PRO-V51-ARM32.apk
+          cp build/app/outputs/flutter-apk/app-arm64-v8a-release.apk release/TV-FULL-PRO-V51-ARM64.apk
+          sha256sum release/TV-FULL-PRO-V51-ARM32.apk | awk '{print $1}' > release/ARM32.sha256
+          sha256sum release/TV-FULL-PRO-V51-ARM64.apk | awk '{print $1}' > release/ARM64.sha256
+          stat -c '%s' release/TV-FULL-PRO-V51-ARM32.apk > release/ARM32.size
+          stat -c '%s' release/TV-FULL-PRO-V51-ARM64.apk > release/ARM64.size
+
+      - name: Verify historical certificate on V51 assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          test -x "$APKSIGNER"
+          "$APKSIGNER" verify --verbose --print-certs release/TV-FULL-PRO-V51-ARM32.apk > signature-arm32.txt
+          "$APKSIGNER" verify --verbose --print-certs release/TV-FULL-PRO-V51-ARM64.apk > signature-arm64.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm32.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' signature-arm64.txt
+
+      - name: Publish V51 release and update installer
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="tv-full-pro-v51-provider2-3051-1"
+          gh release create "$TAG" release/TV-FULL-PRO-V51-ARM32.apk release/TV-FULL-PRO-V51-ARM64.apk             --repo "$GITHUB_REPOSITORY"             --title "TV FULL PRO 1.4.19+3051 - V51 Provider 2"             --notes "V51 estable: M3U/Xtream mantienen el reproductor LIVE de V50 y Provider 2 conserva Media3/ClearKey-HLS. Firma histórica preservada."
+
+          ARM32_SHA="$(cat release/ARM32.sha256)"
+          ARM64_SHA="$(cat release/ARM64.sha256)"
+          ARM32_SIZE="$(cat release/ARM32.size)"
+          ARM64_SIZE="$(cat release/ARM64.size)"
+          cat > latest.json <<EOF
+          {
+            "versionName": "1.4.19",
+            "versionCode": 3051,
+            "packageName": "com.tvfull.pro.tv.v10safe",
+            "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
+            "arm32": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/$TAG/TV-FULL-PRO-V51-ARM32.apk",
+              "sha256": "$ARM32_SHA",
+              "size": $ARM32_SIZE
+            },
+            "arm64": {
+              "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/$TAG/TV-FULL-PRO-V51-ARM64.apk",
+              "sha256": "$ARM64_SHA",
+              "size": $ARM64_SIZE
+            }
+          }
+          EOF
+          FILE_JSON="$(gh api "repos/$GITHUB_REPOSITORY/contents/tv_full_installer/latest.json?ref=main")"
+          FILE_SHA="$(printf '%s' "$FILE_JSON" | jq -r '.sha')"
+          CONTENT_B64="$(base64 -w 0 latest.json)"
+          jq -n --arg message "Update installer to TV FULL PRO V51" --arg content "$CONTENT_B64" --arg sha "$FILE_SHA" --arg branch "main"             '{message:$message,content:$content,sha:$sha,branch:$branch}' > update.json
+          gh api --method PUT "repos/$GITHUB_REPOSITORY/contents/tv_full_installer/latest.json" --input update.json > /dev/null
+
+      - name: Upload V51 build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: TV-FULL-PRO-V51-provider2-signed
+          path: |
+            release/*
+            signature-arm32.txt
+            signature-arm64.txt
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Remove signing material
+        if: always()
+        run: rm -f android/key.properties android/tvfull-release.jks

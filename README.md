@@ -1,4 +1,19 @@
-# IPTV Player
+# TV FULL PRO
+
+La base oficial es `main`, alineada con la APK **V54, 1.4.22+3054**.
+Las próximas versiones deben partir de esta rama y conservar el paquete,
+la firma histórica, la M3U remota y el JSON activo de actualizaciones.
+
+Ver [base oficial, APK publicada y proceso de validación](docs/base-oficial-tv.md).
+El workflow **TV FULL PRO - base oficial** comprueba la app y compila las pull
+requests internas con la firma histórica. Ejecutarlo manualmente desde `main`
+permite comprobar una compilación sin publicar una actualización.
+
+En Android TV, la compilación oficial usa el reproductor nativo Media3 y el
+parámetro `--dart-define=TV_FULL_ANDROID_TV=true`. Una compilación release
+requiere el keystore histórico configurado en `android/key.properties`.
+
+## Proyecto multiplataforma
 
 Reproductor de listas M3U/M3U8 gratuito, de código abierto y multiplataforma
 (macOS, Windows, Android, iOS, Linux), construido con Flutter.
@@ -57,6 +72,34 @@ que envuelve **libmpv/FFmpeg nativo**:
 
 ## Cómo correrlo
 
+### Importar un catálogo provider.json local
+
+En una compilación que incluya esta función:
+
+1. En Inicio, pulsá **Cargar JSON**.
+2. Elegí **Cargar provider.json local**, o pulsá **Pegar JSON** y pegá el objeto
+   completo de tu proveedor en **JSON del proveedor**.
+3. Escribí un nombre y pulsá **Importar catálogo**. La app selecciona la nueva
+   lista; entrá en **TV EN VIVO** para ver sus categorías y canales.
+
+El formato es categories[].samples[], con name, original_url, type,
+icono, headers y el campo opcional drm_license_uri (kid:HEX,k:HEX).
+El catálogo se copia al almacenamiento privado del dispositivo (máximo 16 MB).
+No necesita agregarse a archivos Dart ni a los assets de la APK. Para cambiar
+el contenido, importá el nuevo JSON.
+
+Los logos data:image/...;base64,... se muestran desde memoria. Las claves
+ClearKey se resuelven localmente en Android, sin servidor de licencias, para
+streams DASH/CENC compatibles. Media3 no admite ClearKey en HLS; esos canales
+se importan con aviso y muestran un mensaje claro al intentar reproducirlos.
+Ver [compatibilidad DRM de Media3](https://developer.android.com/media/media3/exoplayer/drm).
+
+provider.json, *.private.json y *.secrets.json están excluidos de Git.
+Los tests usan datos sintéticos. La importación local conserva los controles
+de acceso y la validación del dispositivo que ya tiene la aplicación.
+
+### Ejecutar la app
+
 ```bash
 flutter pub get
 flutter run -d macos     # o windows / chrome / android / ios
@@ -67,7 +110,7 @@ flutter run -d macos     # o windows / chrome / android / ios
 ```bash
 flutter build macos --release
 flutter build windows --release
-flutter build apk --release
+flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
 flutter build ios --release
 ```
 

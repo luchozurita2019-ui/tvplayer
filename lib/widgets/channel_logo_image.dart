@@ -43,7 +43,7 @@ class _ChannelLogoImageState extends State<ChannelLogoImage> {
   @override
   void initState() {
     super.initState();
-    if (_providerLogo.isEmpty) _scheduleFallback();
+    if (widget.channel.logoBytes == null && _providerLogo.isEmpty) _scheduleFallback();
   }
 
   @override
@@ -51,12 +51,13 @@ class _ChannelLogoImageState extends State<ChannelLogoImage> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.channel.uniqueKey != widget.channel.uniqueKey ||
         oldWidget.channel.logoUrl != widget.channel.logoUrl ||
+        oldWidget.channel.logoBytes != widget.channel.logoBytes ||
         oldWidget.allowNetwork != widget.allowNetwork) {
       _generation++;
       _providerFailed = false;
       _resolvingFallback = false;
       _fallbackUrl = null;
-      if (_providerLogo.isEmpty) _scheduleFallback();
+      if (widget.channel.logoBytes == null && _providerLogo.isEmpty) _scheduleFallback();
     }
   }
 
@@ -90,6 +91,17 @@ class _ChannelLogoImageState extends State<ChannelLogoImage> {
 
   @override
   Widget build(BuildContext context) {
+    final bytes = widget.channel.logoBytes;
+    if (bytes != null) {
+      return Image.memory(
+        bytes,
+        fit: widget.fit,
+        cacheWidth: widget.cacheWidth,
+        cacheHeight: widget.cacheHeight,
+        gaplessPlayback: true,
+        errorBuilder: (_, __, ___) => widget.fallback,
+      );
+    }
     final provider = _providerLogo;
     if (provider.isNotEmpty && !_providerFailed) {
       return CachedArtworkImage(

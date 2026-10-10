@@ -23,12 +23,16 @@ class _HomeScreenState extends State<HomeScreen> {
     super.initState();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       final provider = context.read<IptvProvider>();
-      // La validación del dispositivo y la carga de servicios remotos se hacen
-      // una sola vez por arranque de la APK. Después de autorizar, la app
-      // trabaja con el contenido/caché local sin consultar el panel en bucle.
-      unawaited(provider.init());
+      // La UI ya está visible mientras se prepara el catálogo integrado. El
+      // provider se restaura después, de modo que conserva el orden anterior:
+      // provider.json primero, IptvProvider después, sin congelar el arranque.
+      unawaited(_initializeProvider(provider));
       unawaited(AppUpdateService.instance.checkOnce());
     });
+  }
+
+  Future<void> _initializeProvider(IptvProvider provider) async {
+    await provider.init();
   }
 
   @override
