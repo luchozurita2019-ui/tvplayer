@@ -1,0 +1,60 @@
+name: Port provider resolver into provider JSON
+
+on:
+  push:
+    branches:
+      - feature/local-provider-json-clearkey
+    paths:
+      - '.github/scripts/port_provider_resolver_v4.py'
+
+permissions:
+  contents: write
+
+jobs:
+  port-and-verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout provider JSON branch
+        uses: actions/checkout@v4
+        with:
+          ref: feature/local-provider-json-clearkey
+          fetch-depth: 0
+
+      - name: Recover generic resolver source
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin feature/dynamic-stream-resolver-v40-protocol-final
+          git show origin/feature/dynamic-stream-resolver-v40-protocol-final:lib/services/dynamic_stream_service.dart > lib/services/dynamic_stream_service.dart
+
+      - name: Apply provider JSON resolver port
+        run: python3 .github/scripts/port_provider_resolver_v4.py
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Validate port
+        shell: bash
+        run: |
+          set -euo pipefail
+          dart format lib/models/channel.dart lib/services/dynamic_stream_service.dart lib/services/provider_json_catalog_parser.dart lib/services/remote_provider_json_service.dart lib/services/section_catalog_service.dart lib/screens/android_media3_texture_player_screen.dart test/remote_provider_json_service_test.dart test/provider_json_dynamic_resolver_test.dart test/provider_json_relative_url_test.dart
+          flutter pub get
+          git diff --exit-code -- pubspec.lock
+          dart analyze lib test
+          flutter test --no-pub --reporter expanded
+          git diff --check
+
+      - name: Commit verified resolver code
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add lib/models/channel.dart lib/services/dynamic_stream_service.dart lib/services/provider_json_catalog_parser.dart lib/services/remote_provider_json_service.dart lib/services/section_catalog_service.dart lib/screens/android_media3_texture_player_screen.dart test/remote_provider_json_service_test.dart test/provider_json_dynamic_resolver_test.dart test/provider_json_relative_url_test.dart
+          git commit -m 'Restore provider resolver for provider JSON playback'
+          git push origin HEAD:feature/local-provider-json-clearkey

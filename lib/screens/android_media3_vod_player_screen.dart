@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../models/channel.dart';
+import '../services/clearkey_drm_config.dart';
 
 const String _vodUserAgent = 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) '
     'AppleWebKit/537.36 (KHTML, like Gecko) '
@@ -295,9 +296,22 @@ class _AndroidMedia3VodPlayerScreenState
         'userAgent': userAgent ?? _vodUserAgent,
         'isLive': false,
         'position': positionMs,
+        if (_channel.streamMimeType != null) 'mimeType': _channel.streamMimeType,
+        if (_channel.hasDrmConfiguration)
+          'clearKeyJwk': ClearKeyDrmConfig.fromHex(
+            _channel.drmKeyId ?? '', _channel.drmKey ?? '',
+          ).toJwkSet(),
       });
       if (!mounted || generation != _openGeneration) return;
       _showOverlay();
+    } on FormatException catch (error) {
+      if (!mounted || generation != _openGeneration) return;
+      setState(() {
+        _buffering = false;
+        _ready = false;
+        _error = error.message;
+        _overlayVisible = true;
+      });
     } on PlatformException catch (e) {
       if (!mounted || generation != _openGeneration) return;
       setState(() {

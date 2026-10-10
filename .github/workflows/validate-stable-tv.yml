@@ -1,0 +1,142 @@
+name: TV FULL PRO - base oficial
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: stable-tv-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  validate:
+    name: Metadatos, analisis y pruebas
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout de la base oficial
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          fetch-depth: 0
+
+      - name: Verificar metadatos y procedencia de V54
+        run: |
+          set -euo pipefail
+          python scripts/verify_stable_base.py
+          if grep -q '^version: 1.4.22+3054$' pubspec.yaml; then
+            git diff --exit-code 0dd09bb7f81e577646ad2ae536cea98376198ab1 HEAD -- \
+              lib android assets test pubspec.yaml pubspec.lock
+          fi
+          git diff --check
+
+      - name: Flutter de la V54 publicada
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Dependencias bloqueadas, analisis y pruebas
+        run: |
+          set -euo pipefail
+          flutter pub get
+          git diff --exit-code -- pubspec.lock
+          dart analyze lib test
+          flutter test --no-pub --reporter expanded
+
+  build:
+    name: Compilacion y firma historica
+    needs: validate
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'pull_request' &&
+       github.event.pull_request.head.repo.full_name == github.repository)
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout del codigo validado
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: Java 17
+        uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Flutter de la V54 publicada
+        uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2
+        with:
+          flutter-version: '3.47.2'
+          channel: stable
+          cache: true
+
+      - name: Dependencias bloqueadas
+        run: |
+          set -euo pipefail
+          flutter pub get
+          git diff --exit-code -- pubspec.lock
+
+      - name: Configurar firma historica
+        shell: bash
+        env:
+          TV_FULL_KEYSTORE_BASE64: ${{ secrets.TV_FULL_KEYSTORE_BASE64 }}
+          TV_FULL_KEYSTORE_PASSWORD: ${{ secrets.TV_FULL_KEYSTORE_PASSWORD }}
+          TV_FULL_KEY_ALIAS: ${{ secrets.TV_FULL_KEY_ALIAS }}
+          TV_FULL_KEY_PASSWORD: ${{ secrets.TV_FULL_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          test -n "$TV_FULL_KEYSTORE_BASE64"
+          test -n "$TV_FULL_KEYSTORE_PASSWORD"
+          test -n "$TV_FULL_KEY_ALIAS"
+          test -n "$TV_FULL_KEY_PASSWORD"
+          umask 077
+          printf '%s' "$TV_FULL_KEYSTORE_BASE64" | base64 --decode > android/tvfull-release.jks
+          cat > android/key.properties <<EOF
+          storeFile=tvfull-release.jks
+          storePassword=$TV_FULL_KEYSTORE_PASSWORD
+          keyAlias=$TV_FULL_KEY_ALIAS
+          keyPassword=$TV_FULL_KEY_PASSWORD
+          EOF
+
+      - name: Compilar la base oficial para Android TV
+        run: flutter build apk --release --dart-define=TV_FULL_ANDROID_TV=true
+
+      - name: Verificar APK compilada
+        run: |
+          set -euo pipefail
+          mkdir -p validation
+          APK=build/app/outputs/flutter-apk/app-release.apk
+          APKSIGNER="$(find "$ANDROID_HOME/build-tools" -type f -name apksigner | sort -V | tail -n 1)"
+          AAPT="$(find "$ANDROID_HOME/build-tools" -type f -name aapt | sort -V | tail -n 1)"
+          "$APKSIGNER" verify --verbose --print-certs "$APK" > validation/SIGNATURE.txt
+          grep -qi '40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a' validation/SIGNATURE.txt
+          "$AAPT" dump badging "$APK" > validation/BADGING.txt
+          python - <<'PY'
+          import re
+          from pathlib import Path
+          version = re.search(r'^version:\s*(\d+\.\d+\.\d+)\+(\d+)\s*$', Path('pubspec.yaml').read_text(), re.MULTILINE)
+          badging = Path('validation/BADGING.txt').read_text()
+          assert "name='com.tvfull.pro.tv.v10safe'" in badging, 'Package distinto'
+          assert f"versionCode='{version.group(2)}' versionName='{version.group(1)}'" in badging, 'Version distinta'
+          PY
+          python scripts/verify_tv_update_apk.py "$APK"
+          sha256sum "$APK" > validation/SHA256.txt
+          printf '%s\n' "$GITHUB_SHA" > validation/COMMIT.txt
+
+      - name: Eliminar material de firma
+        if: always()
+        run: rm -f android/key.properties android/tvfull-release.jks
+
+      - name: Guardar comprobaciones
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: base-oficial-validada-${{ github.run_id }}
+          path: validation/*
+          if-no-files-found: error
+          retention-days: 30

@@ -2,8 +2,36 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:iptv_player/services/live_playback_error_policy.dart';
 
 void main() {
-  test('401 403 404 410 are terminal and mark channel dead', () {
-    for (final status in <int>[401, 403, 404, 410]) {
+  test('401 y 403 permiten renovación acotada antes de marcar dead', () {
+    for (final status in <int>[401, 403]) {
+      for (var retryCount = 0; retryCount < 3; retryCount++) {
+        final decision = LivePlaybackErrorPolicy.decide(
+          code: 'ERROR_CODE_IO_BAD_HTTP_STATUS',
+          detail: 'HTTP $status',
+          retryCount: retryCount,
+          httpStatus: status,
+          nativeRetryable: false,
+          category: 'http_auth',
+        );
+        expect(decision.shouldRetry, isTrue);
+        expect(decision.markDead, isFalse);
+      }
+
+      final exhausted = LivePlaybackErrorPolicy.decide(
+        code: 'ERROR_CODE_IO_BAD_HTTP_STATUS',
+        detail: 'HTTP $status',
+        retryCount: 3,
+        httpStatus: status,
+        nativeRetryable: false,
+        category: 'http_auth',
+      );
+      expect(exhausted.shouldRetry, isFalse);
+      expect(exhausted.markDead, isTrue);
+    }
+  });
+
+  test('404 y 410 siguen siendo terminales inmediatos', () {
+    for (final status in <int>[404, 410]) {
       final decision = LivePlaybackErrorPolicy.decide(
         code: 'ERROR_CODE_IO_BAD_HTTP_STATUS',
         detail: 'HTTP $status',

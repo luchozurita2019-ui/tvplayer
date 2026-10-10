@@ -19,6 +19,8 @@ class ChannelLogoResolverService {
 
   static const String _indexAsset =
       'assets/playlists/lista_clasica_logo_index.json';
+  static const String _providerIndexAsset =
+      'assets/playlists/provider_logo_index.json';
 
   static const Set<String> _technicalTokens = <String>{
     'hd',
@@ -160,6 +162,23 @@ class ChannelLogoResolverService {
           final value = entry.value?.toString().trim() ?? '';
           if (key.isNotEmpty && value.isNotEmpty) _values[key] = value;
         }
+      }
+      // Provider logo catalog is a second-level fallback: never overrides
+      // a match already present in the existing local index.
+      try {
+        final providerRaw = await rootBundle.loadString(_providerIndexAsset);
+        final providerDecoded = jsonDecode(providerRaw);
+        if (providerDecoded is Map) {
+          for (final entry in providerDecoded.entries) {
+            final key = entry.key.toString().trim();
+            final value = entry.value?.toString().trim() ?? '';
+            if (key.isNotEmpty && value.isNotEmpty) {
+              _values.putIfAbsent(key, () => value);
+            }
+          }
+        }
+      } catch (_) {
+        // Provider catalog is optional; existing logo fallback stays usable.
       }
     } catch (_) {
       // El fallback visual es opcional y nunca debe trabar TV FULL PRO.

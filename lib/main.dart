@@ -16,6 +16,10 @@ Future<void> main() async {
     ParentalControlService.instance.init(),
     DevicePerformanceService.instance.init(),
   ]);
+
+  // La UI arranca primero. HomeScreen prepara provider.json mostrando la vista
+  // de inicio y recién después restaura IptvProvider, evitando una pantalla
+  // congelada mientras se consulta la fuente remota.
   runApp(const TvFullProApp());
 }
 
