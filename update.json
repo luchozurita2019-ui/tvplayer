@@ -1,9 +1,9 @@
 {
-  "version_code": 3054,
-  "version_name": "1.4.22",
+  "version_code": 3055,
+  "version_name": "1.4.23",
   "update_available": true,
-  "apk_url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v54-update-progress-3054-test/TV-FULL-PRO-V54-REMOTA-JSON.apk",
-  "sha256": "08e394aba3dcedf8fe7a8baa58f5779b810c326b1b5f108af421275f7b447d90",
-  "release_notes": "V54: porcentaje y MB de descarga, APK verificada conservada y continuidad al volver de permisos. Mantiene la M3U remota, los logos y la reproducción de la última versión.",
+  "apk_url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v55-channel-backups-3055/TV-FULL-PRO-V55-RESPALDOS.apk",
+  "sha256": "585221ee2d02aa3a3217b764b28adc24f71b3d4a0e9d908cb0207e7b0b61a3b6",
+  "release_notes": "V55: respaldo automático por canal cuando haya señales alternativas en la lista. Conserva reproducción, favoritos, logos, lista remota y actualizador V54 con progreso y reanudación de instalación.",
   "force_update": false
 }

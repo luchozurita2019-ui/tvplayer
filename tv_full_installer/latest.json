@@ -1,16 +1,16 @@
 {
-  "versionName": "1.4.3",
-  "versionCode": 35,
+  "versionName": "1.4.23",
+  "versionCode": 3055,
   "packageName": "com.tvfull.pro.tv.v10safe",
   "certificateSha256": "40de9b14a83adb7b070e316a241e7f5a7f5b1705fdc43b5f495b0e1e3fcab02a",
   "arm32": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM32.apk",
-    "sha256": "bc80d03bdcb4745c48ae172ea41dbad30396724640958e40727f33cd85d8a03a",
-    "size": 34925837
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v55-channel-backups-3055/TV-FULL-PRO-V55-RESPALDOS.apk",
+    "sha256": "585221ee2d02aa3a3217b764b28adc24f71b3d4a0e9d908cb0207e7b0b61a3b6",
+    "size": 115132815
   },
   "arm64": {
-    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-latest/TV-FULL-PRO-ARM64.apk",
-    "sha256": "26e4c223ff804b54c77f9ff2bf4472f5143bb0dc20d192765b42e51f54ed4e00",
-    "size": 38649143
+    "url": "https://github.com/luchozurita2019-ui/tvplayer/releases/download/tv-full-pro-v55-channel-backups-3055/TV-FULL-PRO-V55-RESPALDOS.apk",
+    "sha256": "585221ee2d02aa3a3217b764b28adc24f71b3d4a0e9d908cb0207e7b0b61a3b6",
+    "size": 115132815
   }
 }
