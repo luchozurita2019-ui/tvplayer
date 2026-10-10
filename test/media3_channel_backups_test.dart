@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:sqflite/sqflite.dart';
 
 import 'package:iptv_player/models/channel.dart';
 import 'package:iptv_player/models/channel_backup.dart';
@@ -15,6 +16,10 @@ void main() {
   const sqlite = MethodChannel('com.tekartik.sqflite');
   final prepares = <Map<String, dynamic>>[];
 
+  setUpAll(() {
+    databaseFactory = databaseFactorySqflitePlugin;
+  });
+
   setUp(() {
     prepares.clear();
     SharedPreferences.setMockInitialValues({});
@@ -24,7 +29,9 @@ void main() {
       'openDatabase' => {'id': 1},
       'query' => <Map<String, Object?>>[],
       'batch' => <Object?>[],
-      _ => 0,
+      'insert' => 1,
+      'update' || 'delete' => 0,
+      _ => null,
     });
     messenger.setMockMethodCallHandler(events, (_) async => null);
     messenger.setMockMethodCallHandler(player, (call) async {

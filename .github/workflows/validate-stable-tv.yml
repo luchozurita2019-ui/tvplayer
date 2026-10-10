@@ -21,6 +21,7 @@ jobs:
     timeout-minutes: 15
     outputs:
       version_code: ${{ steps.metadata.outputs.version_code }}
+      runtime_changed: ${{ steps.metadata.outputs.runtime_changed }}
     steps:
       - name: Checkout de la base oficial
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -39,6 +40,11 @@ jobs:
           with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
               output.write(f'version_code={code}\n')
           PY
+          if git diff --quiet HEAD^ HEAD -- lib android assets pubspec.yaml pubspec.lock; then
+            echo 'runtime_changed=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'runtime_changed=true' >> "$GITHUB_OUTPUT"
+          fi
           if grep -q '^version: 1.4.22+3054$' pubspec.yaml; then
             git diff --exit-code 0dd09bb7f81e577646ad2ae536cea98376198ab1 HEAD -- \
               lib android assets test pubspec.yaml pubspec.lock
@@ -66,7 +72,8 @@ jobs:
     if: >-
       github.event_name == 'workflow_dispatch' ||
       (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
-       needs.validate.outputs.version_code == '3055') ||
+       needs.validate.outputs.version_code == '3055' &&
+       needs.validate.outputs.runtime_changed == 'true') ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
