@@ -1,6 +1,8 @@
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'channel_backup.dart';
+
 /// Representa un canal de cualquiera de las fuentes soportadas.
 class Channel {
   final String name;
@@ -28,6 +30,7 @@ class Channel {
   // stream (Origin, Cookie, Authorization, Accept, etc.). Nunca se inventan:
   // sólo se conservan cuando vienen declarados por la lista M3U/URL.
   final Map<String, String>? httpHeaders;
+  final List<ChannelBackup> backups;
 
   const Channel({
     required this.name,
@@ -47,6 +50,7 @@ class Channel {
     this.httpUserAgent,
     this.httpReferrer,
     this.httpHeaders,
+    this.backups = const [],
   });
 
   bool get hasClearKey => drmKeyId != null && drmKey != null;
@@ -54,6 +58,21 @@ class Channel {
   // También reconoce configuraciones incompletas para que fallen con un mensaje
   // claro en Media3, en lugar de enviarlas a un reproductor sin DRM.
   bool get hasDrmConfiguration => drmKeyId != null || drmKey != null;
+
+  List<ChannelBackup> get validBackups {
+    final primary = ChannelBackup.tryFromJson({
+      'url': url,
+      'headers': resolvedHttpHeaders('', includeDefaultUserAgent: false),
+    });
+    final seen = <String>{if (primary != null) primary.transportKey};
+    final result = <ChannelBackup>[];
+    for (final raw in backups) {
+      final backup = ChannelBackup.tryFromJson(raw.toJson());
+      if (backup != null && seen.add(backup.transportKey)) result.add(backup);
+      if (result.length == 2) break;
+    }
+    return List.unmodifiable(result);
+  }
 
   Map<String, String> resolvedHttpHeaders(
     String defaultUserAgent, {
@@ -125,6 +144,8 @@ class Channel {
     'httpUserAgent': httpUserAgent,
     'httpReferrer': httpReferrer,
     if (httpHeaders != null) 'httpHeaders': httpHeaders,
+    if (validBackups.isNotEmpty)
+      'backups': validBackups.map((source) => source.toJson()).toList(),
     if (logoBytes != null) 'logoBase64': base64Encode(logoBytes!),
     if (drmKeyId != null) 'drmKeyId': drmKeyId,
     if (drmKey != null) 'drmKey': drmKey,
@@ -189,6 +210,13 @@ class Channel {
       httpUserAgent: json['httpUserAgent'] as String?,
       httpReferrer: json['httpReferrer'] as String?,
       httpHeaders: headers,
+      backups: json['backups'] is List
+          ? (json['backups'] as List)
+                .map(ChannelBackup.tryFromJson)
+                .whereType<ChannelBackup>()
+                .take(2)
+                .toList(growable: false)
+          : const [],
     );
   }
 

@@ -65,14 +65,17 @@ class _AndroidMedia3TexturePlayerScreenState
   String? _friendlyError;
   int _openGeneration = 0;
   int _autoRetryCount = 0;
+  int _sourceIndex = 0;
   int _healthRecordedGeneration = -1;
   int _firstFrameGeneration = -1;
   DateTime? _prepareStartedAt;
   List<_LiveAudioTrack> _audioTracks = const <_LiveAudioTrack>[];
 
   Channel get _channel => widget.playlist[_index];
-  Map<String, String> get _headers =>
-      _channel.resolvedHttpHeaders(_media3DefaultUserAgent);
+  bool get _hasBackupSources =>
+      !_channel.hasDrmConfiguration &&
+      (_channel.dynamicStreamId?.trim().isEmpty ?? true) &&
+      _channel.validBackups.isNotEmpty;
 
   List<_LiveAudioTrack> get _selectableAudioTracks =>
       _audioTracks.where((track) => track.supported).toList(growable: false);
@@ -148,10 +151,12 @@ class _AndroidMedia3TexturePlayerScreenState
   Future<void> _prepareCurrent({
     bool preserveRetry = false,
     bool keepChannelListOpen = false,
+    bool preserveSource = false,
   }) async {
     if (widget.playlist.isEmpty || _textureId == null) return;
     final generation = ++_openGeneration;
     _retryTimer?.cancel();
+    if (!preserveSource) _sourceIndex = 0;
     if (!preserveRetry) {
       _autoRetryCount = 0;
       _prepareStartedAt = DateTime.now();
@@ -169,13 +174,20 @@ class _AndroidMedia3TexturePlayerScreenState
       });
     }
 
-    var playbackUrl = _channel.url;
-    final headers = Map<String, String>.from(_headers);
+    final channel = _channel;
+    final backup = _hasBackupSources && _sourceIndex > 0
+        ? channel.validBackups[_sourceIndex - 1]
+        : null;
+    var playbackUrl = backup?.url ?? channel.url;
+    // Nunca trasladar Cookie/Authorization de una señal a otro proveedor.
+    final headers = backup == null
+        ? channel.resolvedHttpHeaders(_media3DefaultUserAgent)
+        : Map<String, String>.from(backup.headers);
 
     try {
-      final dynamicId = _channel.dynamicStreamId?.trim();
+      final dynamicId = channel.dynamicStreamId?.trim();
       if (dynamicId != null && dynamicId.isNotEmpty) {
-        final resolved = await DynamicStreamService.instance.resolve(_channel);
+        final resolved = await DynamicStreamService.instance.resolve(channel);
         if (!mounted || generation != _openGeneration) return;
         playbackUrl = resolved.url;
         headers.addAll(resolved.headers);
@@ -196,12 +208,12 @@ class _AndroidMedia3TexturePlayerScreenState
         'userAgent': userAgent ?? _media3DefaultUserAgent,
         'isLive': true,
         'allowClearKeyHls': widget.allowProvider2ClearKeyHls,
-        if (_channel.streamMimeType != null)
-          'mimeType': _channel.streamMimeType,
-        if (_channel.hasDrmConfiguration)
+        if (channel.streamMimeType != null && backup == null)
+          'mimeType': channel.streamMimeType,
+        if (channel.hasDrmConfiguration)
           'clearKeyJwk': ClearKeyDrmConfig.fromHex(
-            _channel.drmKeyId ?? '',
-            _channel.drmKey ?? '',
+            channel.drmKeyId ?? '',
+            channel.drmKey ?? '',
           ).toJwkSet(),
       });
     } on DynamicStreamException catch (error) {
@@ -307,6 +319,7 @@ class _AndroidMedia3TexturePlayerScreenState
       case 'completed':
         // Media3 nativo ya hizo sus recuperaciones LIVE estilo Hot Player.
         // No repetimos otra cascada desde Dart.
+        if (_tryNextBackup()) break;
         _health.markDead(_channel, reason: 'stream_ended');
         _finishWithError(
           'Canal no disponible',
@@ -352,6 +365,16 @@ class _AndroidMedia3TexturePlayerScreenState
       category: category,
     );
 
+    if (_tryNextBackup()) return;
+    if (_hasBackupSources) {
+      // Cada fuente se intenta una vez después de las recuperaciones nativas.
+      // No volver al principal caído ni marcar el canal muerto antes de agotar
+      // sus señales. El botón Reintentar inicia un recorrido nuevo.
+      _health.markDead(_channel, reason: code);
+      _finishWithError('No hay señales disponibles para este canal', code);
+      return;
+    }
+
     if (decision.shouldRetry) {
       _autoRetryCount++;
       if (mounted) {
@@ -360,12 +383,15 @@ class _AndroidMedia3TexturePlayerScreenState
           _friendlyError = null;
         });
       }
+      final generation = _openGeneration;
+      _retryTimer?.cancel();
       _retryTimer = Timer(decision.retryDelay, () {
-        if (mounted) {
+        if (mounted && generation == _openGeneration) {
           unawaited(
             _prepareCurrent(
               preserveRetry: true,
               keepChannelListOpen: _channelListVisible,
+              preserveSource: true,
             ),
           );
         }
@@ -377,6 +403,19 @@ class _AndroidMedia3TexturePlayerScreenState
       _health.markDead(_channel, reason: code);
     }
     _finishWithError(decision.friendlyMessage, '$code · $detail');
+  }
+
+  bool _tryNextBackup() {
+    if (!mounted || !_hasBackupSources ||
+        _sourceIndex >= _channel.validBackups.length) {
+      return false;
+    }
+    _sourceIndex++;
+    unawaited(_prepareCurrent(
+      preserveSource: true,
+      keepChannelListOpen: _channelListVisible,
+    ));
+    return true;
   }
 
   void _finishWithError(String friendly, String technical) {
@@ -707,11 +746,20 @@ class _AndroidMedia3TexturePlayerScreenState
                 ),
               ),
               if (_buffering && _friendlyError == null)
-                const Center(
-                  child: SizedBox(
-                    width: 38,
-                    height: 38,
-                    child: CircularProgressIndicator(strokeWidth: 3),
+                Center(
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      const SizedBox(
+                        width: 38,
+                        height: 38,
+                        child: CircularProgressIndicator(strokeWidth: 3),
+                      ),
+                      if (_sourceIndex > 0) ...[
+                        const SizedBox(height: 14),
+                        Text('Probando respaldo $_sourceIndex…'),
+                      ],
+                    ],
                   ),
                 ),
               if (_friendlyError != null) _errorCard(),

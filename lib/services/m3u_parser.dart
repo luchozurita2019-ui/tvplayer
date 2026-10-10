@@ -1,6 +1,7 @@
 import 'dart:convert';
 
 import '../models/channel.dart';
+import '../models/channel_backup.dart';
 
 /// Parsea el contenido M3U y devuelve la lista de canales.
 ///
@@ -117,13 +118,34 @@ class M3uLineParser {
   String? pendingUserAgent;
   String? pendingReferrer;
   final Map<String, String> pendingHeaders = <String, String>{};
+  final List<ChannelBackup> pendingBackups = <ChannelBackup>[];
+
+  void _reset() {
+    pendingName = null;
+    pendingLogo = null;
+    pendingGroup = null;
+    pendingTvgId = null;
+    pendingUserAgent = null;
+    pendingReferrer = null;
+    pendingHeaders.clear();
+    pendingBackups.clear();
+  }
 
   Channel? addLine(String rawLine) {
     final line = rawLine.trim();
     if (line.isEmpty) return null;
 
     if (line.startsWith('#EXTINF')) {
-      final commaIndex = line.indexOf(',');
+      _reset();
+      var quoted = false;
+      var commaIndex = -1;
+      for (var i = 0; i < line.length; i++) {
+        if (line[i] == '"') quoted = !quoted;
+        if (line[i] == ',' && !quoted) {
+          commaIndex = i;
+          break;
+        }
+      }
       pendingName = commaIndex != -1
           ? line.substring(commaIndex + 1).trim()
           : 'Canal sin nombre';
@@ -131,6 +153,20 @@ class M3uLineParser {
       pendingLogo = M3uParser._extractAttr(line, 'tvg-logo');
       pendingGroup = M3uParser._extractAttr(line, 'group-title');
       pendingTvgId = M3uParser._extractAttr(line, 'tvg-id');
+    } else if (line.startsWith('#EXT-X-TVFULL-BACKUP:')) {
+      if (pendingName != null && pendingBackups.length < 2) {
+        try {
+          final backup = ChannelBackup.tryFromJson(
+            jsonDecode(line.substring('#EXT-X-TVFULL-BACKUP:'.length)),
+          );
+          if (backup != null &&
+              !pendingBackups.any((b) => b.transportKey == backup.transportKey)) {
+            pendingBackups.add(backup);
+          }
+        } on FormatException {
+          // Un respaldo mal formado no invalida la señal principal.
+        }
+      }
     } else if (line.startsWith('#EXTVLCOPT:')) {
       final rawOption = line.substring('#EXTVLCOPT:'.length).trim();
       final equals = rawOption.indexOf('=');
@@ -190,6 +226,7 @@ class M3uLineParser {
               logoUrl: pendingLogo,
               group: pendingGroup,
               tvgId: pendingTvgId,
+              backups: List<ChannelBackup>.from(pendingBackups),
               httpUserAgent: pendingUserAgent,
               httpReferrer: pendingReferrer,
               httpHeaders: pendingHeaders.isEmpty
@@ -206,13 +243,7 @@ class M3uLineParser {
                   : Map<String, String>.from(pendingHeaders),
             );
 
-      pendingName = null;
-      pendingLogo = null;
-      pendingGroup = null;
-      pendingTvgId = null;
-      pendingUserAgent = null;
-      pendingReferrer = null;
-      pendingHeaders.clear();
+      _reset();
       return channel;
     }
     return null;

@@ -19,6 +19,8 @@ jobs:
     name: Metadatos, analisis y pruebas
     runs-on: ubuntu-latest
     timeout-minutes: 15
+    outputs:
+      version_code: ${{ steps.metadata.outputs.version_code }}
     steps:
       - name: Checkout de la base oficial
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -26,9 +28,17 @@ jobs:
           fetch-depth: 0
 
       - name: Verificar metadatos y procedencia de V54
+        id: metadata
         run: |
           set -euo pipefail
           python scripts/verify_stable_base.py
+          python - <<'PY'
+          import os, re
+          from pathlib import Path
+          code = re.search(r'^version:.*\+(\d+)\s*$', Path('pubspec.yaml').read_text(), re.MULTILINE).group(1)
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write(f'version_code={code}\n')
+          PY
           if grep -q '^version: 1.4.22+3054$' pubspec.yaml; then
             git diff --exit-code 0dd09bb7f81e577646ad2ae536cea98376198ab1 HEAD -- \
               lib android assets test pubspec.yaml pubspec.lock
@@ -55,10 +65,14 @@ jobs:
     needs: validate
     if: >-
       github.event_name == 'workflow_dispatch' ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main' &&
+       needs.validate.outputs.version_code == '3055') ||
       (github.event_name == 'pull_request' &&
        github.event.pull_request.head.repo.full_name == github.repository)
     runs-on: ubuntu-latest
     timeout-minutes: 45
+    permissions:
+      contents: write
     steps:
       - name: Checkout del codigo validado
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
@@ -128,6 +142,26 @@ jobs:
           python scripts/verify_tv_update_apk.py "$APK"
           sha256sum "$APK" > validation/SHA256.txt
           printf '%s\n' "$GITHUB_SHA" > validation/COMMIT.txt
+
+      - name: Publicar V55 comprobada para probar respaldos en TV
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.validate.outputs.version_code == '3055'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG=tv-full-pro-v55-channel-backups-3055
+          APK=validation/TV-FULL-PRO-V55-RESPALDOS.apk
+          cp build/app/outputs/flutter-apk/app-release.apk "$APK"
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            mkdir -p published-v55
+            gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --pattern TV-FULL-PRO-V55-RESPALDOS.apk --dir published-v55
+            cmp "$APK" published-v55/TV-FULL-PRO-V55-RESPALDOS.apk
+          else
+            gh release create "$TAG" "$APK" validation/SHA256.txt validation/SIGNATURE.txt validation/COMMIT.txt \
+              --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --prerelease --latest=false \
+              --title "TV FULL PRO V55 - respaldo automatico por canal" \
+              --notes-file docs/respaldo-canales-v55.md
+          fi
 
       - name: Eliminar material de firma
         if: always()
